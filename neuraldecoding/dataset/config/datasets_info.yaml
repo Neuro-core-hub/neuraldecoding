@@ -1,0 +1,18 @@
+lab: 'Chestek Lab'
+institution: 'University of Michigan'
+
+devices:
+  BrainUtah:
+    name: 'Utah Array'
+    description: '96 channel Utah Array'
+    manufacturer: 'Blackrock Neurotech'
+    group_name: 'BMI electrodes'
+    group_description: 'Electrodes on brain for finger movement'
+    group_location: 'Primary Motor Cortex'
+  MusclesEMG:
+    name: 'Intramuscular EMG'
+    description: '16/32 channel EMG electrodes'
+    manufacturer: 'Synapse Biomedical'
+    group_name: 'BMI electrodes'
+    group_description: 'Electrodes on muscles for finger movement'
+    group_location: 'Forearm'
