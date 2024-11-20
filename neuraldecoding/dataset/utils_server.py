@@ -73,7 +73,6 @@ def get_server_notes_details(data_path):
 def load_z_script(direc):
     try:
         # load in and read z translator
-        print(direc)
         f = open(r'{}'.format(os.path.join(direc, "zScript.txt")), "r")
         if f.mode == 'r':
             contents = f.read()
@@ -83,10 +82,10 @@ def load_z_script(direc):
     except:
         raise Exception("zScript.txt file not found. Make sure you're passing the right folder path.")
 
+# TODO: optimize this function - it's very slow right now
 def read_xpc_data(contents, direc, num_channels, verbose=False):
-    # supported data types and their byte sizes
+    # supported data types and their byte sizes #START REMOVE
     cls = {'uint8': 1, 'int8': 1, 'uint16': 2, 'int16': 2, 'uint32': 4, 'int32': 4, 'single': 4, 'double': 8}
-
     # data types and their python equivalent
     data_con = {'uint8': np.ubyte, 'int8': np.byte, 'uint16': np.ushort, 'int16': np.short, 'uint32': np.uintc,
                 'int32': np.intc, 'single': np.single, 'double': np.double}
@@ -117,10 +116,12 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     for i in range(len(names)):
         for j in range(len(names[i])):
             if names[i][j] == 'SpikeChans':
-                spike_format = True
+                spikeformat = True
             else:
-                spike_format = False
+                spikeformat = False
 
+
+# def find_fields():
     #Recover number of fields in each file type:
     fnum = []
     for i in range(len(names)):
@@ -147,14 +148,34 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     for i in range(len(bsizes)):
         bytes.append(int(np.sum(bsizes[i]) + 2)) #plus 2 for each trial count
 
+# def find_num_trials():
     # Get number of trials in this run:
+    ###################
     trial_list = glob.glob(os.path.join(direc, 'tParams*'))
-    n_trials, trials = __find_num_trials(trial_list)
+    ntrials = len(trial_list)
+    trials = []
+    for i in range(ntrials):
+        trials.append(int(re.findall('\d+', trial_list[i])[-1]))
+    trials = np.sort(trials)
+    if trials[-1] != ntrials:
+        warnings.warn("There is at least 1 dropped trial")
 
+# def set_field_names():
     # initalize the dictionary with correct field names
-    dict_data = __set_field_names(fnames, trials, num_channels, spike_format)
+    dict_data = []
+    for j in range(trials[-1]):  # this creates a dictionary for each trial
+        all_data = {}
+        for i in range(0, len(fnames), 2):
+            all_data[fnames[i]] = None
+        all_data['TrialNumber'] = None
+        if spikeformat: # this is so its a nested dictionary and can match other formats
+            all_data['NeuralData'] = None
+            all_data['Channel'] = []
+            for k in range(num_channels):
+                all_data['Channel'].append({'SpikeTimes': []})
+        dict_data.append(all_data)
 
-    ########################## Parse Data Strings Into Dictionary: ##########################
+############################## Parse Data Strings Into Dictionary: ######################################
     data = [[], [], [], []] #initilize data
     dropped_list = []
     for i in range(trials[-1]):
@@ -176,7 +197,7 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
             continue # this skips to the next trial
 
         # Iterate through file types 1-3 and add data to Z:
-        for j in range(4 - spike_format):
+        for j in range(4 - spikeformat):
 
             # Calculate # of timesteps in this file:
             nstep = int(len(data[j]) / bytes[j])
@@ -207,7 +228,7 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
                         dict_data[i][names[j][k]] = dict_data[i][names[j][k]][0][0]
 
         # Extract Neural data packets (split around TrialCount and End Packet byte):
-        if spike_format:
+        if spikeformat:
             new_string = int_to_string(data[3]) # convert to one continuous string
             try:
                 # If it is one of these special characters python doesnt like it and understand that its not special
@@ -217,7 +238,9 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
                 # so the second if statement is removing that character from each match the first time it appears
                 # and that works but I have no idea why this is such a problem
                 if chr((i+1)%256) in ['.', '*', '^', '$', '+', '?', '{', '}', '[', ']', '|', '(', ')' ,'\\']:
-                    ndata = re.findall('\\' + int_to_string(np.asarray([np.ushort(i + 1)]).view(np.ubyte)) + '[^ÿ]*ÿ', new_string)
+                    ndata = re.findall(
+                        '\\' + int_to_string(np.asarray([np.ushort(i + 1)]).view(np.ubyte)) + '[^ÿ]*ÿ',
+                        new_string)
                 else:
                     ndata = re.findall(int_to_string(np.asarray([np.ushort(i+1)]).view(np.ubyte)) + '[^ÿ]*ÿ', new_string)
 
@@ -241,43 +264,44 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     # Format Specific Fields
     ############################################################################
     # Change neural data field into spike times per channel:
-    if spike_format:
+    if spikeformat:
         for i in range(trials[-1]):
             if i in dropped_list: # if i equals the value of a dropped trial then skip it
                 continue
 
-            spike_nums = np.zeros((num_channels, len(dict_data[i]['NeuralData'])))
+            spikenums = np.zeros((num_channels, len(dict_data[i]['NeuralData'])))
             for t in range(len(dict_data[i]['NeuralData'])):
                 for j in range(len(dict_data[i]['NeuralData'][t])):
                     if dict_data[i]['NeuralData'][t][j] != 0:
-                        spike_nums[dict_data[i]['NeuralData'][t][j] - 1, t] += 1
+                        spikenums[dict_data[i]['NeuralData'][t][j] - 1, t] += 1
 
             for c in range(num_channels):
-                if np.any(spike_nums[c, :]):
-                    times = dict_data[i]['ExperimentTime'][spike_nums[c, :] == 1]
-                    spike_num_si = spike_nums[c, (spike_nums[c, :] == 1)]
-                    idx = np.cumsum(spike_num_si)
+                if np.any(spikenums[c, :]):
+                    times = dict_data[i]['ExperimentTime'][spikenums[c, :] == 1]
+                    spikenumsi = spikenums[c, (spikenums[c, :] == 1)]
+                    idx = np.cumsum(spikenumsi)
                     j = np.ones((1, int(idx[-1])), dtype=int)
 
                     dict_data[i]['Channel'][c]['SpikeTimes'] = times[np.cumsum(j) - 1].T
 
                 if len(dict_data[i]['Channel'][c]['SpikeTimes']) == 1:
                     if len(dict_data[i]['Channel'][c]['SpikeTimes'][0]) != 1:
-                        dict_data[i]['Channel'][c]['SpikeTimes'] = dict_data[i]['Channel'][c]['SpikeTimes'][0].astype(int)
+                        dict_data[i]['Channel'][c]['SpikeTimes'] = dict_data[i]['Channel'][c]['SpikeTimes'][0].astype(
+                            int)
                     else:
-                        dict_data[i]['Channel'][c]['SpikeTimes'] = dict_data[i]['Channel'][c]['SpikeTimes'][0][0].astype(int)
+                        dict_data[i]['Channel'][c]['SpikeTimes'] = dict_data[i]['Channel'][c]['SpikeTimes'][0][
+                            0].astype(int)
 
             #Removes these two fields
             dict_data[i].pop('SpikeChans', None)
             dict_data[i].pop('NeuralData', None)
 
-
     # this next one removes the skipped trials
     # must use a generator because of indexing issues if you don't
-    if trials[-1] != n_trials: # only run if there is a trial that is dropped to save time
+    if trials[-1] != ntrials: # only run if there is a trial that is dropped to save time
         dict_data = [trial for trial in dict_data if trial['TrialNumber'] != None]
     
-    return dict_data
+    return pd.DataFrame(dict_data)
 
 def __find_num_trials(trial_list):    
     """

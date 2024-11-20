@@ -1,5 +1,6 @@
 import os
 import sys
+import numpy as np
 
 def int_to_string(in_array):
     """
@@ -40,3 +41,9 @@ def get_creation_path_time(path):
             earliest_time = curr_time
     
     return earliest_time
+
+def is_collection(obj):
+    """
+    Check if the object is a collection (list, tuple, or numpy array)
+    """
+    return isinstance(obj, (list, tuple, np.ndarray))
