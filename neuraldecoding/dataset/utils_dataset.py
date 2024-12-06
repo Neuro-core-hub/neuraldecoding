@@ -56,10 +56,10 @@ def get_device_and_electrode_group(data_type):
         manufacturer = device_info['manufacturer'])
     
     electrode_group = ElectrodeGroup(
-        name=device_info['group_name'],
-        description=device_info['group_description'],
-        device=device,
-        location=device_info['group_location'])
+        name = device_info['group_name'],
+        description = device_info['group_description'],
+        device = device,
+        location = device_info['group_location'])
 
     return device, electrode_group
 
