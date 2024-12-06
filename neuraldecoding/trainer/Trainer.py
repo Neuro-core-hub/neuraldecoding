@@ -1,28 +1,24 @@
 from abc import ABC, abstractmethod
-from typing import List, Union
-import numpy as np
-import torch
-
+from omegaconf import DictConfig
+from torch.utils.data import DataLoader
 from neuraldecoding.model.Model import Model
 
 class Trainer(ABC):
     @abstractmethod
     def train_model(self, 
-                    train_data: Union[np.ndarray, torch.Tensor],
-                    valid_data: Union[np.ndarray, torch.Tensor],
-                    test_data: Union[np.ndarray, torch.Tensor],
+                    train_data: DataLoader,
+                    valid_data: DataLoader,
                     model: Model,
-                    params: List) -> Model:
+                    config: DictConfig) -> Model:
         """
         Trains the model using the provided training, validation, and test data.
         
         Parameters:
-            train_data: Training dataset in the form of numpy or torch tensors.
-            valid_data: Validation dataset in the form of numpy or torch tensors.
-            test_data: Test dataset in the form of numpy or torch tensors.
+            train_data: Training dataset in the form of numpy DataLoader
+            valid_data: Validation dataset in the form of numpy DataLoader
             model: An instance of Model to be trained.
-            params: A list of parameters for training.
-        
+            config: Hydra configuration file containing all required parameters
+            
         Returns:
             A trained Model instance.
         """

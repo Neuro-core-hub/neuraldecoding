@@ -1,6 +1,5 @@
 import hydra
 from omegaconf import DictConfig
-from typing import List, Union
 import numpy as np
 import torch
 from torch.optim import Optimizer
@@ -45,8 +44,8 @@ class TrainerImplementation(Trainer):
         Implements the training loop with the specified model and parameters.
         
         Parameters:
-            train_data: Training data, should be numpy array
-            valid_data: Validation data, should be numpy array
+            train_data: Training data, should be numpy DataLoader
+            valid_data: Validation data, should be numpy DataLoader
             config: Hydra configuration file containing all required parameters:
                 - model
                 - optimizer
