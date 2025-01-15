@@ -10,12 +10,11 @@ def test_factor_analysis():
     lib = FactorAnalysis(n_components=ndims)
     lib_transformed = lib.fit_transform(ds)
     
-    package = dim_red.FactorAnalysis()
-    package.setup(ndims)
-    lm = package.get_lm(ds)
+    package = dim_red.FactorAnalysis(ndims)
+    lm = package.calc_lm(ds)
     package_transformed = package.reduce(ds, lm)
     
-    assert lib_transformed == package_transformed
+    assert np.allclose(lib_transformed == package_transformed)
     
 def test_pca():
     ## TODO: change ds to actual dataset
@@ -25,12 +24,11 @@ def test_pca():
     lib = PCA(n_components=ndims)
     lib_transformed = lib.fit_transform(ds)
     
-    package = dim_red.PCA()
-    package.setup(ndims)
-    lm = package.get_lm(ds)
+    package = dim_red.PCA(ndims)
+    lm = package.calc_lm(ds)
     package_transformed = package.reduce(ds, lm)
     
-    assert lib_transformed == package_transformed
+    assert np.allclose(lib_transformed == package_transformed)
     
 def test_proSVD():
     ## TODO
@@ -39,16 +37,11 @@ def test_proSVD():
     
 def test_no_dim_red():
     ds = np.random([20, 96])
-    
-    ndims = 30
-    lib = PCA(n_components=ndims)
-    lib_transformed = lib.fit_transform(ds)
-    
+
     package = dim_red.NoDimRed()
-    package.setup(ndims)
-    lm = package.get_lm(ds)
+    lm = package.calc_lm(ds)
     package_transformed = package.reduce(ds, lm)
     
-    assert ds == package_transformed    
+    assert np.allclose(ds == package_transformed)
     
     
