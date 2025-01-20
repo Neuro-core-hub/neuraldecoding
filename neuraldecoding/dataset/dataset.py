@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import itertools
 from pynwb import NWBFile
 from hdmf.backends.hdf5.h5_utils import H5DataIO
 from neuroconv.tools.hdmf import SliceableDataChunkIterator
@@ -13,11 +14,10 @@ from ..utils import *
 
 '''
     To discuss:
-        - is ok to set the data_type in the constructor of the Dataset? Or should it be set in the load_data method?
-           (the question regards if the data_type is fixed for all the dataset or we leave the option of loading differe data types in the same dataset)
+        - is the storing/saving of each run NWB file automatic or should it be done only if requested?
 '''
 class Dataset:
-    def __init__(self, is_monkey=True, data_type='utah', verbose=False):
+    def __init__(self, is_monkey=True, data_type='utah', verbose=True):
         """
         Inputs:
             is_monkey: bool - Default: True
@@ -80,10 +80,16 @@ class Dataset:
         # setting the dataset details (data_path and subject object)
         self.__set_dataset_details(subject_name, date, data_path)
 
+        if self.verbose:
+            print(f"Loading data for {self.subject.description} from {self.data_path}")
+
         # TODO: add the check if the dataset was already created: in that case just load it
         # loading each run
         for run in runs:   
             if run not in self.runs:
+                if self.verbose:
+                    print(f" + Loading run {run}")
+
                 self.runs.append(run)
 
                 # initialize the NWB file
@@ -158,6 +164,9 @@ class Dataset:
         contents = load_z_script(run_path)
 
         # reading the xpc data
+        if self.verbose:
+            print(f"   - Reading server data")
+
         data_frame = read_xpc_data(contents, run_path, num_channels=self.num_channels, verbose=self.verbose)
 
         # TODO: consider to change this part to handle the data columns initializaition predefined and indipendent of the data content
@@ -191,6 +200,9 @@ class Dataset:
             devices = [self.device],
             electrode_groups = [self.electrode_group])
         
+        for _ in range(self.num_channels):
+            nwb_file.add_electrode(group=self.electrode_group, location=self.electrode_group.location)
+
         return nwb_file
     
     def __initialize_nwb_columns(self, run, data_frame):
@@ -209,11 +221,12 @@ class Dataset:
         """
         # Dynamically create trial column and create the time_series dictionary
         time_series_dict = dict()
-
+        num_times = len(data_frame['ExperimentTime'].iloc[-1]) # num of times for last trial - used to understand if a varialb is a time-series
+        
         for key in data_frame.keys():
             if key == 'Channel' or key == 'ExperimentTime':
                 continue  # Channel (spike times) and ExperimentTime are handled as special cases
-            elif not is_collection(data_frame[key][0]) or len(data_frame[key].iloc[-1]) <= 5:            
+            elif not is_collection(data_frame[key][0]) or len(data_frame[key].iloc[-1]) != num_times:            
                 self.nwb_files[run].add_trial_column(name=key, description=key)
             else:
                 time_series_dict[key] = []
@@ -221,6 +234,17 @@ class Dataset:
         return time_series_dict
 
     def __add_run_data(self, run, data_frame, time_series_dict):
+        """
+        Add the data from the server data frame to the NWB file
+        Inputs:
+            run: int
+            data_frame: pandas.DataFrame
+            time_series_dict: dict
+        """
+
+        if self.verbose:
+            print(f"   - Converting data to NWB file")
+
         spike_times = [[[] for i in range(self.num_channels)] for j in range(1)]
         obs_intervals = []
         experiment_time = []
@@ -231,9 +255,19 @@ class Dataset:
             # Dynamically create data in trial columns
             nwb_trial_dict = dict()
 
-            for key in data_frame.keys():
-                if key == 'Channel':
-                    obs_intervals.append([data_frame['ExperimentTime'][idx][0][0], data_frame['ExperimentTime'][idx][-1][0]])\
+            # storing experiments times before
+            nwb_trial_dict['start_time'] = data_frame['ExperimentTime'][idx][0][0]
+            nwb_trial_dict['stop_time'] = data_frame['ExperimentTime'][idx][-1][0]
+            
+            # flattening the experiment time list and concatenating it to the experiment_time list
+            experiment_time.extend(list(itertools.chain.from_iterable(data_frame['ExperimentTime'][idx])))
+
+            # looping through the data frame keys
+            for key in data_frame.keys():       
+                if key == 'ExperimentTime':
+                    pass # ExperimentTime is handled as a special case        
+                elif key == 'Channel':
+                    obs_intervals.append([data_frame['ExperimentTime'][idx][0][0], data_frame['ExperimentTime'][idx][-1][0]])
                     
                     for ch_id in range(self.num_channels):
                         val_to_add = data_frame['Channel'][idx][ch_id]['SpikeTimes']
@@ -244,19 +278,12 @@ class Dataset:
                         elif isinstance(val_to_add, list):
                             continue
                         else:
-                            raise Warning(f"Couldn't find type: {type(val_to_add)}")
-                elif key == 'ExperimentTime':
-                    nwb_trial_dict['start_time'] = data_frame['ExperimentTime'][idx][0][0]
-                    nwb_trial_dict['stop_time'] = data_frame['ExperimentTime'][idx][-1][0]
-
-                    experiment_time.extend(x for xs in data_frame['ExperimentTime'][idx].tolist() for x in xs)
+                            raise Warning(f"Couldn't find type: {type(val_to_add)}")                    
                 #TODO Use zScript.txt to determine timeseries and trial data as opposed to length of data
-                elif not is_collection(data_frame[key][0]) or len(data_frame[key].iloc[-1]) <= 5:
-                    # create trial dictionary for later use
-                    nwb_trial_dict[key] = data_frame[key][idx]                
+                elif key in time_series_dict.keys():        
+                    time_series_dict[key].extend(data_frame[key][idx].tolist()) 
                 else:
-                    # create timeseries dictionary for later user
-                    time_series_dict[key].extend(data_frame[key][idx].tolist())
+                    nwb_trial_dict[key] = data_frame[key][idx]  
 
             self.nwb_files[run].add_trial(**nwb_trial_dict)
 
@@ -303,7 +330,7 @@ class Dataset:
                 obs_intervals=obs_intervals)
             
         if self.verbose:
-            print(f"Run {run} loaded successfully")
+            print(f" + run {run} loaded successfully")
 
     # TODO
     def __str__(self):

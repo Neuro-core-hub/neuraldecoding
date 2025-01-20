@@ -62,7 +62,6 @@ class NoAlignment(Alignment):
         return lm 
     
     def align(self, lm):
-        raise ValueError("Warning: align called for NoAlignment, this fxn should be unreachable")
-        pass
+        return lm
     
     
