@@ -11,10 +11,6 @@ class Decoder(ABC):
         """
         self.model = model
         self.stabilization = stabilization
-        
-        # self.data_manager = DataManager(self.get_basepath)
-        # self.stabilization.set_data_manager(self.data_manager)
-        # self.model.set_data_manager(self.data_manager)
 
     def save(self):
         raise NotImplementedError

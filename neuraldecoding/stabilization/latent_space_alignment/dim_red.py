@@ -54,7 +54,7 @@ class PCA(LoadingMatrixDimRed):
         
         return lm
     
-    def reduce(self, data, lm, model):
+    def reduce(self, data, lm):
         data_means = np.mean(data.neural, axis = 0)
         ls = (data.neural - data_means) @ lm
         ls_ds = data.make_latent_ds(ls)
