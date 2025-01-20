@@ -8,6 +8,39 @@ from torch.utils.data import Dataset, DataLoader
 from neuraldecoding.model.Model import Model
 from Trainer import Trainer
 
+
+
+@hydra.main(version_base="1.3", config_path="./configs", config_name="train.yaml")
+def main(train_data, valid_data, config: DictConfig):
+    """
+    Trains a Neural Network. First loads data into dataloader, then uses TrainerImplementation class to train model.
+
+    Parameters:
+        train_data: training data (dict with chans, states), assumed numpy
+        valid_data: validation data (dict with chans, states), assumed numpy
+        config:  Hydra configuration file containing all required parameters (see train model function)
+    
+    Returns:
+        model, results (tuple containing results information, see train model function)
+    """
+    trainer = TrainerImplementation()
+
+    train_dataset = torch.utils.data.TensorDataset(
+        torch.tensor(train_data['chans'], dtype=torch.float32), 
+        torch.tensor(train_data['states'], dtype=torch.float32)
+    )
+    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+    valid_dataset = torch.utils.data.TensorDataset(
+        torch.tensor(valid_data['chans'], dtype=torch.float32), 
+        torch.tensor(valid_data['states'], dtype=torch.float32)
+    )
+    valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=True)
+    
+    model, results = trainer.train_model(train_dataloader, valid_dataloader, config)
+    return model, results
+
+
 class TrainerImplementation(Trainer):
 
 
@@ -34,7 +67,6 @@ class TrainerImplementation(Trainer):
         return corr
 
 
-    @hydra.main(version_base="1.3", config_path="./configs", config_name="train.yaml")
     def train_model(self,
                     train_data: DataLoader,
                     valid_data: DataLoader,
@@ -44,14 +76,14 @@ class TrainerImplementation(Trainer):
         Implements the training loop with the specified model and parameters.
         
         Parameters:
-            train_data: Training data, should be numpy DataLoader
-            valid_data: Validation data, should be numpy DataLoader
+            train_data: Training data, should be torch DataLoader
+            valid_data: Validation data, should be torch DataLoader
             config: Hydra configuration file containing all required parameters:
                 - model
                 - optimizer
                 - scheduler
                 - loss_function
-                - num_epochs
+                - training (dict containing: num_epochs, device, print_results (optional), print_every (optional))
 
         
         Returns:
@@ -63,10 +95,10 @@ class TrainerImplementation(Trainer):
         valid_data = self.load_data(config.valid_data.path)
         
         # Main Training params
-        model = self.initialize_model(config.model)
-        optimizer = self.initialize_optimizer(config.optimizer, model.parameters())
-        scheduler = self.initialize_scheduler(config.scheduler, optimizer)
-        loss_func = self.initialize_loss_func(config.loss_func)
+        model = config.model
+        optimizer = self.create_optimizer(config.optimizer, model.parameters())
+        scheduler = self.create_scheduler(config.scheduler, optimizer)
+        loss_func = self.create_loss_function(config.loss_func)
 
         # secondary training parameters
         num_epochs = config.training.num_epochs
@@ -117,9 +149,6 @@ class TrainerImplementation(Trainer):
             x = batch['chans'].to(device)
             y = batch['states'].to(device)
 
-            x = torch.tensor(x, dtype=torch.float32).to(device)
-            y = torch.tensor(y, dtype=torch.float32).to(device)
-
             optimizer.zero_grad()
             yhat = model(x)
 
@@ -148,9 +177,6 @@ class TrainerImplementation(Trainer):
             for val_batch in valid_data:
                 x_val = val_batch['chans'].to(device)
                 y_val = val_batch['states'].to(device)
-
-                x = torch.tensor(x_val, dtype=torch.float32).to(device)
-                y = torch.tensor(y_val, dtype=torch.float32).to(device)
 
                 yhat_val = model(x_val)
                 if isinstance(yhat_val, tuple):
