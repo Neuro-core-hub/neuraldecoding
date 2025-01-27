@@ -205,15 +205,15 @@ def normalize_scaler(X,
 # --- Util Functions ---
 # ----------------------
 
-def add_time_history(X,
-                     Y,
-                     num_bins = 0,
-                     padding = None,
-                     reshape = False
-                     ):
+def add_time_history_2D(X,
+                        Y,
+                        num_bins = 0,
+                        padding = None
+                        ):
     """
         Takes in neural data X and behavior Y and returns two "adjusted" neural data and behavior matrices
         based on the optional params. The number of historical bins of neural data can be set.
+        Returns the adjusted matrices in 2D form, it has the history appended as extra columns [1, neu*hist+1].
 
         Args:
             X (ndarray): The neural data, which should be [t, neu] in size, where t is the numebr of smaples and neu is the number
@@ -224,9 +224,6 @@ def add_time_history(X,
                     padding (string): Default None, disabled. This fills previous neural data with values before the experiment began. A single
                     scalar wil fill all previous neural data with that value. Otherwise, a [1,neu] ndarray equal to the first
                     dimension of X (# of neurons) should represent the value to fill for each channel.
-            reshape (bool, optional): Default False. If history is added, will return the adjusted matrices either in 2d or 3d form (2d has the history appended
-                    as extra columns, 3d has history as a third dimension. For example, reshape true returns a sample as:
-                    [1, neu*hist+1] whereas reshape false returns: [1, neu, hist+1]. 
 
         Returns:
             adjX (ndarray): The adjusted neural data.
@@ -249,10 +246,50 @@ def add_time_history(X,
         adjX[:,:,h] = X[h:X.shape[0]-num_bins+h,:]
     adjY = Y[num_bins:,:]
 
-    if reshape:
-        #NOTE: History will be succesive to each column (ie with history 5, columns 0-5 will be channel 1, 6-10
-        # channel 2, etc..
-        adjX = adjX.reshape(adjX.shape[0],-1)
+    adjX = adjX.reshape(adjX.shape[0],-1)
+
+    return adjX, adjY
+
+def add_time_history_3D(X,
+                        Y,
+                        num_bins = 0,
+                        padding = None
+                        ):
+    """
+        Takes in neural data X and behavior Y and returns two "adjusted" neural data and behavior matrices
+        based on the optional params. The number of historical bins of neural data can be set.
+        Returns the adjusted matrices in 3D form, it has history as a third dimension [1, neu, hist+1].
+
+        Args:
+            X (ndarray): The neural data, which should be [t, neu] in size, where t is the numebr of smaples and neu is the number
+                    of neurons.
+            Y (ndarray): The behavioral data, which should be [t, dim] in size, where t is the number of samples and dim is the
+                    number of states.
+            num_bins (int, optional): Default 0. The number of bins to append to each sample of neural data from the previous 'hist' bins.
+                    padding (string): Default None, disabled. This fills previous neural data with values before the experiment began. A single
+                    scalar wil fill all previous neural data with that value. Otherwise, a [1,neu] ndarray equal to the first
+                    dimension of X (# of neurons) should represent the value to fill for each channel.
+
+        Returns:
+            adjX (ndarray): The adjusted neural data.
+            adjY (ndarray): The adjusted behavioral data.
+    """
+    nNeu = X.shape[1]
+    if padding is not None:
+        if isinstance(padding, np.ndarray):
+            Xadd = np.tile(padding, num_bins)
+            Yadd = np.zeros((num_bins, Y.shape[1]))
+        else:
+            Xadd = np.ones((num_bins, nNeu))*padding
+            Yadd = np.zeros((num_bins, Y.shape[1]))
+        X = np.concatenate((Xadd, X))
+        Y = np.concatenate((Yadd, Y))
+
+    #reshape data to include historical bins
+    adjX = np.zeros((X.shape[0]-num_bins, nNeu, num_bins+1))
+    for h in range(num_bins+1):
+        adjX[:,:,h] = X[h:X.shape[0]-num_bins+h,:]
+    adjY = Y[num_bins:,:]
 
     return adjX, adjY
 
