@@ -20,7 +20,7 @@ import numpy as np
 ##################
 
 class Decoder(ABC):
-    def __init__(self, model, stabilization):
+    def __init__(self, model, data_transformation):# DONE: keep stabilization only / change that to generic 'data_transformation' 
         """
         Decoder Class
 
@@ -28,10 +28,12 @@ class Decoder(ABC):
             model: model defined in neuraldecoding/model/
             stabilization: stabilization method #TODO
         """
+        # TODO by default decoder should load the model params
         self.model = model
-        self.stabilization = stabilization
+        self.data_transformation = data_transformation
 
     def load_decoder(self, fpath): #TODO how is path defined? like the one in adaptive alignment or ?
+        # change name to load_model.
         """
         Load decoder's model parameters from a specified location
 
@@ -70,11 +72,10 @@ class Decoder(ABC):
         pass
     
 class OfflineDecoder(Decoder):
-    def __init__(self, model_type, model_params, kin_align = "none", dim_red_method = "none", alignment_method = "none", ndims= "none", **kwargs):
-        model_switch = {"KF": KalmanFilter(model_params),
-                        #"SVM": models.SteadyStateKalmanFilter(), #TODO uncomment when it is implemented 
-                        #"CNN": models.PybmiKalmanFilter(), #TODO uncomment when it is implemented 
-                        "LSTM": LSTM(model_params)}
+    def __init__(self, model_type, model_hyperparams, fpath, kin_align = "none", dim_red_method = "none", alignment_method = "none", ndims= "none", **kwargs):
+        # DONE: decoder should instantiate the model
+        #DONE: instantiate the model like this :
+        model = model_type(model_hyperparams)
 
         # kin_align_switch = {"refit": kinematic_alignment.ReFit,  # TODO: add back when stabilization is done
         #                     "none": kinematic_alignment.NoKinAlignment}
@@ -83,9 +84,10 @@ class OfflineDecoder(Decoder):
         
         # ls_extraction = latent_space_extraction.Custom(dim_red_method, alignment_method, ndims, **kwargs) # TODO: add back when stabilization is done
 
-        model = model_switch[model_type] 
-        
-        super().__init__(model, None)
+        # DONE by default decoder should load the model params
+        self.model.load_model(fpath)
+
+        super().__init__(model, None) # DONE: add stablization and dimensionality reduction when it is done
 
     def predict(self, neural_data):
         """
