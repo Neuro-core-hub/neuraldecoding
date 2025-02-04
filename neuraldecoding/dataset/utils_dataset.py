@@ -66,6 +66,14 @@ def get_device_and_electrode_group(data_type):
 def get_subject(subject_name):
     """
     Return the Subject NWB object for the given subject name
+
+    Inputs:
+        subject_name: str
+            Name of the subject
+
+    Outputs:
+        subject: pynwb.file.Subject
+            Subject object
     """
     # Load the subjects_ids YAML file
     with open(os.path.normpath(f'{DIR_PATH}/config/subjects_ids.yaml'), 'r') as file:
@@ -76,3 +84,25 @@ def get_subject(subject_name):
     subject = Subject(description=subject_name, subject_id=subject_ids[subject_name])
     
     return subject
+
+def get_dataset_variable_name(var_name):
+    """
+    Get the dataset variable name for the given variable name
+
+    Inputs:
+        var_name: str
+            Variable name
+
+    Outputs:
+        dataset_var_name: str
+            Dataset variable name
+    """
+
+    # Load the datasets_info YAML file
+    with open(os.path.normpath(f'{DIR_PATH}/config/datasets_variable_names.yaml'), 'r') as file:
+        dataset_variables = yaml.safe_load(file)
+
+    if var_name not in dataset_variables:
+        raise ValueError(f"Variable '{var_name}' not found in the dataset variable names config file")
+
+    return dataset_variables[var_name]
