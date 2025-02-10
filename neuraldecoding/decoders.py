@@ -5,7 +5,6 @@ import warnings
 from abc import ABC, abstractmethod
 
 from neuraldecoding.model.linear_models.KF import KalmanFilter
-
 from neuraldecoding.model.neural_network_models.LSTM import LSTM
 
 #TODO: add other models if implemented
@@ -15,22 +14,18 @@ import numpy as np
 
 #from utils.data_storing import DataManager
 
-##################
-# Legacy Classes #
-##################
-
 class Decoder(ABC):
-    def __init__(self, model, data_transformation):# DONE: keep stabilization only / change that to generic 'data_transformation' 
+    def __init__(self, model, cfg):# DONE: keep stabilization only / change that to generic 'data_transformation' 
         """
         Decoder Class
 
         Args:
             model: model defined in neuraldecoding/model/
-            stabilization: stabilization method #TODO
+            cfg: config #TODO
         """
         # TODO by default decoder should load the model params
         self.model = model
-        self.data_transformation = data_transformation
+        self.data_transformation = cfg.data_transformation #TODO: pseudocode here replace with actual cfg implementation
 
     def load_decoder(self, fpath): #TODO how is path defined? like the one in adaptive alignment or ?
         # change name to load_model.
@@ -72,10 +67,10 @@ class Decoder(ABC):
         pass
     
 class OfflineDecoder(Decoder):
-    def __init__(self, model_type, model_hyperparams, fpath, kin_align = "none", dim_red_method = "none", alignment_method = "none", ndims= "none", **kwargs):
+    def __init__(self, cfg, fpath, kin_align = "none", dim_red_method = "none", alignment_method = "none", ndims= "none", **kwargs):
         # DONE: decoder should instantiate the model
         #DONE: instantiate the model like this :
-        model = model_type(model_hyperparams)
+        model = cfg.model_type(cfg.model_hyperparams) #TODO: pseudocode here replace with actual cfg implementation
 
         # kin_align_switch = {"refit": kinematic_alignment.ReFit,  # TODO: add back when stabilization is done
         #                     "none": kinematic_alignment.NoKinAlignment}
@@ -99,12 +94,12 @@ class OfflineDecoder(Decoder):
         Returns:
             prediction (torch.Tensor): Predicted output
         """
-        if(self.stabilization is not None):
-            stabilized_data = torch.tensor(self.stabilization.stabilize(neural_data)) #WARNING: Takes some time here to convert numpy to torch
+        if(self.data_transformation is not None):
+            transformed_data = torch.tensor(self.data_transformation.stabilize(neural_data)) #WARNING: Takes some time here to convert numpy to torch
         else:
-            stabilized_data = torch.tensor(neural_data)
+            transformed_data = torch.tensor(neural_data)
 
-        prediction = self.model.forward(stabilized_data)
+        prediction = self.model.forward(transformed_data)
         
         return prediction
 
