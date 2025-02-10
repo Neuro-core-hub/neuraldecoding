@@ -4,8 +4,90 @@ import pandas as pd
 from scipy.spatial import KDTree
 from sklearn.base import BaseEstimator
 import sys
+import warnings
 
 EPSILON = sys.float_info.epsilon
+
+# ---------------
+# --- Classes ---
+# ---------------
+
+class StandardScaler:
+    """A copy of the scikit learn StandardScaler, but works with PyTorch tensors and can export/load params."""
+    def __init__(self, forward_transform_normalizes=True):
+        self.forward_transform_normalizes = forward_transform_normalizes
+        # True: transform() does raw -> normalized      (like for neural input scaling)
+        # False: transform() does normalized -> raw     (like for output prediction scaling)
+
+        self.mean_ = None
+        self.std_ = None
+        self.mean_np_ = None
+        self.std_np_ = None
+
+    def fit(self, X):
+        """Compute the mean and std to be used for later scaling."""
+        if isinstance(X, torch.Tensor):
+            self.mean_ = torch.mean(X, dim=0, keepdim=True)
+            self.std_ = torch.std(X, dim=0, unbiased=False, keepdim=True) + 1e-8
+            self.mean_np_ = self.mean_.cpu().numpy()
+            self.std_np_ = self.std_.cpu().numpy()
+        elif isinstance(X, np.ndarray):
+            self.mean_np_ = np.mean(X, axis=0)
+            self.std_np_ = np.std(X, axis=0) + 1e-8
+            self.mean_ = torch.tensor(self.mean_np_)
+            self.std_ = torch.tensor(self.std_np_)
+        else:
+            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
+        return self
+
+    def _normalize(self, X):
+        if isinstance(X, torch.Tensor):
+            return (X - self.mean_) / self.std_
+        elif isinstance(X, np.ndarray):
+            return (X - self.mean_np_) / self.std_np_
+        else:
+            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
+
+    def _unnormalize(self, X):
+        if isinstance(X, torch.Tensor):
+            return X * self.std_ + self.mean_
+        elif isinstance(X, np.ndarray):
+            return X * self.std_np_ + self.mean_np_
+        else:
+            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
+
+    def transform(self, X):
+        if (self.mean_ is None) or (self.std_ is None):
+            warnings.warn("Using an untrained scaler... not scaling X")
+            return X
+
+        if self.forward_transform_normalizes:
+            return self._normalize(X)
+        else:
+            return self._unnormalize(X)
+
+    def inverse_transform(self, X):
+        if (self.mean_ is None) or (self.std_ is None):
+            warnings.warn("Using an untrained scaler... not scaling X")
+            return X
+
+        if self.forward_transform_normalizes:
+            return self._unnormalize(X)
+        else:
+            return self._normalize(X)
+
+    def export_params(self):
+        """Export the mean and std as a dictionary."""
+        return {'mean': self.mean_, 'std': self.std_}
+
+    def load_params(self, params):
+        """Load the mean and std from a dictionary."""
+        self.mean_ = params['mean']
+        self.std_ = params['std']
+        self.mean_np_ = self.mean_.cpu().numpy()
+        self.std_np_ = self.std_.cpu().numpy()
+        return self
+
 
 # ------------------------
 # --- Helper Functions ---
