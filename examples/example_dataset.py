@@ -2,7 +2,7 @@ from neuraldecoding.dataset import Dataset
 
 subject = 'Joker'
 date = '2024-08-23'
-runs = [1,2]
+runs = [1]
 
 dataset = Dataset()
 
@@ -16,4 +16,21 @@ dataset.load_data(subject_name=subject, date=date, runs=runs)
 # data_path = 'Z:\\Data\\Monkeys\\Joker\\2024-08-23'
 # dataset.load_data(data_path=data_path, runs=runs)
 
-print('Loading data')
+# extracting features
+features_fields = ['sbp','fingers_pos']
+
+features_params = {
+    'bin_size': 32,
+    'behav_lag': 0,
+    'overlap': 0,    
+    'remove_first_trial': False,
+    'trials_filter': {
+        'blank_trial': 0,
+        'trial_success': 1,
+        'decode_feature': 1
+    }
+}
+
+features = dataset.extract_features(fields=features_fields, params=features_params)
+
+print('Loading data completed')

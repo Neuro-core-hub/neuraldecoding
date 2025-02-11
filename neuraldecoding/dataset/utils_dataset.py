@@ -1,5 +1,6 @@
 import os
 import yaml
+import numpy as np
 from pynwb.file import Subject
 from pynwb.device import Device
 from pynwb.ecephys import ElectrodeGroup, TimeSeries
@@ -106,3 +107,32 @@ def get_dataset_variable_name(var_name):
         raise ValueError(f"Variable '{var_name}' not found in the dataset variable names config file")
 
     return dataset_variables[var_name]
+
+def calc_bins_sbp(sbp_data, sample_width, bins_start_digit, bins_stop_digit):
+    """
+    Calculate the bins Spiking Band Power (SBP) for binned SBP data
+
+    Inputs:
+        sbp_data: np.array (n_times, n_channels)
+            SBP data
+        sample_width: np.array (n_times, 1)
+            Sample width data
+        bins_start_digit: np.array
+            Bins start digitized
+        bins_stop_digit: np.array
+            Bins stop digitized
+
+    Outputs:
+        bins_sbp: np.array
+            Bins SBP data
+    """
+    bins_sbp = np.zeros((len(bins_start_digit), sbp_data.shape[1]))
+
+    for i in range(len(bins_start_digit)):
+        start = bins_start_digit[i]
+        stop = bins_stop_digit[i]
+
+        indices_i = np.linspace(start, stop, abs(stop - start) + 1, dtype=int)
+        bins_sbp[i] = np.sum(sbp_data[indices_i, :], axis=0) / np.sum(sample_width[indices_i])
+
+    return bins_sbp
