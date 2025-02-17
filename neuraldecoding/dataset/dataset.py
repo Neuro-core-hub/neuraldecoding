@@ -225,35 +225,13 @@ class Dataset:
   
                         run_features = calc_bins_sbp(sbp_run_data, sample_width_run, bins_start, bins_stop)
                         
-                    elif field == 'fingers_kinematics':
+                    elif field == 'fingers_kinematics': # Fingers kinematics (position, velocity, acceleration)
                         fingers_pos_run_data = fingers_pos_data[start_time_index:stop_time_index, :]
 
                         bins_start = bins_start_digit - bins_start_digit[0]
                         bins_stop = bins_stop_digit - bins_start_digit[0]
 
-                        num_samples = len(bins_start)
-                        run_features = np.zeros((num_samples, num_fingers))
-
-                        # For each index i, get the features between bins_start[i] and bins_stop[i], and take their mean
-                        for i in range(num_samples):
-                            run_features[i] = np.mean(fingers_pos_run_data[bins_start[i]:bins_stop[i]], axis=0)
-
-                        # computing velocity
-                        kinematics_first_diff = np.diff(run_features, n=1, axis=0)
-                        kinematics_second_diff = np.diff(run_features, n=2, axis=0)
-                        
-                        # Rows of zeros for padding
-                        one_row_zeros = np.zeros([1, num_fingers])
-                        two_row_zeros = np.zeros([2, num_fingers])
-
-                        # Construct first and second difference matrices
-                        first_diff_matrix = np.concatenate((kinematics_first_diff, one_row_zeros), axis=0)
-                        second_diff_matrix = np.concatenate((kinematics_second_diff, two_row_zeros), axis=0)
-
-                        diff_matrix = np.concatenate((first_diff_matrix, second_diff_matrix), axis=1)
-
-                        # Concatenate diffMatrix to the right side of run_features
-                        run_features = np.concatenate((run_features, diff_matrix), axis=1)
+                        run_features = calc_bins_fingers_kinematics(fingers_pos_run_data, bins_start, bins_stop, num_fingers)
 
                         # Remove samples based on lag_ms
                         if behav_lag:
