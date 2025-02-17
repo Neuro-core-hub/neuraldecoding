@@ -17,7 +17,7 @@ dataset.load_data(subject_name=subject, date=date, runs=runs)
 # dataset.load_data(data_path=data_path, runs=runs)
 
 # extracting features
-features_fields = ['sbp','fingers_pos']
+features_fields = ['sbp','fingers_kinematics']
 
 features_params = {
     'bin_size': 32,

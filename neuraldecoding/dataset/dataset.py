@@ -157,8 +157,9 @@ class Dataset:
                 sbp_data = self.nwb_files[run].processing['neural_data'].get_data_interface('sbp').data[:]
                 sample_width = self.nwb_files[run].acquisition['SampleWidth'].data[:] # TODO: change this when the normalization of the names will be done
 
-            if 'fingers_position' in fields:
+            if 'fingers_kinematics' in fields:
                 fingers_pos_data = self.nwb_files[run].processing["behavior"].get_data_interface('fingers_position').data[:]
+                num_fingers = fingers_pos_data.shape[1]
 
             # trials filtering
             if remove_first_trial:
@@ -219,13 +220,44 @@ class Dataset:
                         sbp_run_data = sbp_data[start_time_index:stop_time_index, :]
                         sample_width_run = sample_width[start_time_index:stop_time_index]
 
-                        if behav_lag:
-                            run_features = calc_bins_sbp(sbp_run_data, sample_width_run, bins_start_digit_lag, bins_stop_digit_lag)
-                        else:  
-                            run_features = calc_bins_sbp(sbp_run_data, sample_width_run, bins_start_digit, bins_stop_digit)
+                        bins_start = bins_start_digit_lag if behav_lag else bins_start_digit
+                        bins_stop = bins_stop_digit_lag if behav_lag else bins_stop_digit
+  
+                        run_features = calc_bins_sbp(sbp_run_data, sample_width_run, bins_start, bins_stop)
                         
-                    elif field == 'fingers_pos':
-                        pass
+                    elif field == 'fingers_kinematics':
+                        fingers_pos_run_data = fingers_pos_data[start_time_index:stop_time_index, :]
+
+                        bins_start = bins_start_digit - bins_start_digit[0]
+                        bins_stop = bins_stop_digit - bins_start_digit[0]
+
+                        num_samples = len(bins_start)
+                        run_features = np.zeros((num_samples, num_fingers))
+
+                        # For each index i, get the features between bins_start[i] and bins_stop[i], and take their mean
+                        for i in range(num_samples):
+                            run_features[i] = np.mean(fingers_pos_run_data[bins_start[i]:bins_stop[i]], axis=0)
+
+                        # computing velocity
+                        kinematics_first_diff = np.diff(run_features, n=1, axis=0)
+                        kinematics_second_diff = np.diff(run_features, n=2, axis=0)
+                        
+                        # Rows of zeros for padding
+                        one_row_zeros = np.zeros([1, num_fingers])
+                        two_row_zeros = np.zeros([2, num_fingers])
+
+                        # Construct first and second difference matrices
+                        first_diff_matrix = np.concatenate((kinematics_first_diff, one_row_zeros), axis=0)
+                        second_diff_matrix = np.concatenate((kinematics_second_diff, two_row_zeros), axis=0)
+
+                        diff_matrix = np.concatenate((first_diff_matrix, second_diff_matrix), axis=1)
+
+                        # Concatenate diffMatrix to the right side of run_features
+                        run_features = np.concatenate((run_features, diff_matrix), axis=1)
+
+                        # Remove samples based on lag_ms
+                        if behav_lag:
+                            run_features = run_features[behav_lag_samples:]
                     else:
                         raise ValueError(f"Field '{field}' not supported for feature extraction yet")
 
@@ -485,26 +517,6 @@ class Dataset:
         
         # base structure of each trial
         nwb_trial_dict = dict()
-
-        nwb_trial_dict['timeseries'] = [
-            fingers_position_ts,
-            sbp_data_ts
-        ]
-
-        for key in time_series_dict.keys():
-            nwb_trial_dict['timeseries'].append(TimeSeries(
-                name=key,
-                unit="",
-                data=H5DataIO(
-                    time_series_dict[key], 
-                    compression=self.nwb_compression['type'], 
-                    compression_opts=self.nwb_compression['options']
-                ),
-                timestamps=times,
-                description=f"{key} across time",
-                conversion=1.0,
-                comments=f"Raw {key} data"
-            ))
 
         # add the trials to the NWB file
         for trl_idx in range(num_trials):
