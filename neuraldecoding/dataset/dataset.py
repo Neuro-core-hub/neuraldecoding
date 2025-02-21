@@ -12,10 +12,6 @@ from .utils_dataset import *
 from .utils_server import *
 from ..utils import *
 
-'''
-    To discuss:
-        - is the storing/saving of each run NWB file automatic or should it be done only if requested?
-'''
 class Dataset:
     def __init__(self, is_monkey=True, data_type='utah', verbose=True):
         """
@@ -33,6 +29,7 @@ class Dataset:
         self.server_dir = get_server_data_path(is_monkey=is_monkey)
 
         self.runs = []
+        self.nwb_modules = {}
         self.nwb_files = {}
 
         # setting the default NWB compression options - if needed to changed they can be moved to a config file
@@ -110,7 +107,144 @@ class Dataset:
         pass
 
     def extract_features(self, fields, params=[]):
-        pass
+        """
+        Extract the features from the neural data
+        
+        Inputs:
+            fields: list of str
+                List of fields to extract the features from
+            params: list of dict
+                List of parameters for the feature extraction
+        Outputs:
+            features: dictionary containing the numpy matrix for each feature
+        """
+        # Inputs and params validation and initialization
+        assert len(fields) > 0, "At least one field must be specified for the feature extraction"
+        assert 'bin_size' in params, "Parameter 'bin_size' must be specified for the feature extraction"
+
+        bin_size = params['bin_size']
+        behav_lag = params['behav_lag'] if 'behav_lag' in params else None
+        overlap = params['overlap'] if 'overlap' in params else 0
+        remove_first_trial = params['remove_first_trial'] if 'remove_first_trial' in params else False
+
+        if not np.isscalar(bin_size) or not (type(bin_size) == int or type(bin_size) == float):
+            raise Exception('Parameter bin_size must be a numeric scalar!')
+
+        if behav_lag and (not np.isscalar(behav_lag) or not (type(behav_lag) == int or type(behav_lag) == float)):
+            raise Exception('Parameter behav_lag must be a numeric scalar!')
+
+        if overlap and (not (type(overlap) == int)):
+            raise Exception('Parameter overlap must be an integer number!')
+
+        try:
+            remove_first_trial = bool(remove_first_trial)
+        except:
+            raise Exception('Parameter remove_first_trial must be a boolean!')
+
+        # variables initialization
+        features = {field: None for field in fields}
+
+        if behav_lag:
+            behav_lag_samples = int((np.ceil(behav_lag) / bin_size))
+
+        # looping through the runs for extracting the features
+        for run in self.runs:
+            # retrieving trials info and data needed for the features extraction
+            trials = self.nwb_files[run].trials.to_dataframe()
+            timestamps = self.nwb_files[run].processing['neural_data'].get_data_interface('neural_features').timestamps[:] # TODO: there might be a better way of doing this
+
+            if 'sbp' in fields:
+                neural_data = self.nwb_files[run].processing['neural_data'].get_data_interface('neural_features').data[:]
+                sample_width = self.nwb_files[run].acquisition['SampleWidth'].data[:] # TODO: change this when the normalization of the names will be done
+
+            if 'fingers_kinematics' in fields:
+                fingers_pos_data = self.nwb_files[run].processing["behavior"].get_data_interface('fingers_position').data[:]
+                num_fingers = fingers_pos_data.shape[1]
+
+            # trials filtering
+            if remove_first_trial:
+                trials = trials.iloc[1:]
+
+            if 'trials_filter' in params:
+                filter_conditions = params['trials_filter']
+
+                # TODO: once the features naming will be normalized replace the 'if statements' with a forloop over the filter_conditions
+                if 'blank_trial' in filter_conditions:
+                    trials = trials[trials['BlankTrial'] == filter_conditions['blank_trial']]
+                if 'trial_success' in filter_conditions: 
+                    trials = trials[trials['TrialSuccess'] == filter_conditions['trial_success']]
+
+            num_trials = len(trials)
+            start_times = trials['start_time'].values
+            stop_times = trials['stop_time'].values
+            trial_numbers = trials['TrialNumber'].values   # TODO: standardize the name of TrialNumber to trial_number
+
+            # finding the non-consecutive runs of trials - used later for consecutive features extraction
+            trials_runs = np.where(np.diff(trial_numbers) != 1)[0] # non-consecutive run are delimited where the trial-num difference is not 1           
+            trials_runs = np.concatenate([[-1], trials_runs, [num_trials-1]]) # adding first and last trial index
+
+            for run_id in range(len(trials_runs) - 1):
+                start_trial = trials_runs[run_id] + 1
+                stop_trial = trials_runs[run_id + 1]
+
+                start_time = start_times[start_trial]
+                stop_time = stop_times[stop_trial]
+                start_time_index = np.argmax(timestamps >= start_time)
+                stop_time_index = np.argmax(timestamps >= stop_time) + 1
+                run_times = timestamps[start_time_index:stop_time_index]
+
+                # timing of bins computation
+                desidered_last_bin_time = stop_time - bin_size
+                num_bins = int(np.fix((desidered_last_bin_time - start_time) / bin_size))
+                last_bin_time = start_time + num_bins * bin_size
+
+                bins_start = np.linspace(start_time, last_bin_time, num_bins + 1)
+                bins_stop = bins_start + bin_size - 1
+
+                # digitize bins times values into bins defined by the midpoints
+                mean_offsets = (run_times[1:] + run_times[:-1]) / 2
+                bins_start_digit = np.digitize(bins_start, bins=mean_offsets) 
+                bins_stop_digit = np.digitize(bins_stop, bins=mean_offsets)
+
+                if behav_lag:  
+                    bins_start_digit_lag = bins_start_digit - behav_lag_samples
+                    bins_stop_digit_lag = bins_stop_digit - behav_lag_samples
+
+                    # Remove values that are less than 0 (and keep the rest that are greater than or equal to 0)
+                    bins_start_digit_lag = bins_start_digit_lag[bins_start_digit_lag >= 0]
+                    bins_stop_digit_lag = bins_stop_digit_lag[bins_stop_digit_lag >= 0]
+
+                # extracting the features for each field
+                for field in fields:
+                    if field == 'sbp' or field == 'mav': # Spiking Band Power or Mean Absolute Value - TODO: maybe change the name of these two fields                    
+                        sbp_run_data = neural_data[start_time_index:stop_time_index, :]
+                        sample_width_run = sample_width[start_time_index:stop_time_index]
+
+                        bins_start = bins_start_digit_lag if behav_lag else bins_start_digit
+                        bins_stop = bins_stop_digit_lag if behav_lag else bins_stop_digit
+  
+                        run_features = calc_bins_sbp(sbp_run_data, sample_width_run, bins_start, bins_stop)
+                        
+                    elif field == 'fingers_kinematics': # Fingers kinematics (position, velocity, acceleration)
+                        fingers_pos_run_data = fingers_pos_data[start_time_index:stop_time_index, :]
+
+                        bins_start = bins_start_digit - bins_start_digit[0]
+                        bins_stop = bins_stop_digit - bins_start_digit[0]
+
+                        run_features = calc_bins_fingers_kinematics(fingers_pos_run_data, bins_start, bins_stop, num_fingers)
+
+                        # Remove samples based on lag_ms
+                        if behav_lag:
+                            run_features = run_features[behav_lag_samples:]
+                    else:
+                        raise ValueError(f"Field '{field}' not supported for feature extraction yet")
+
+                    if features[field] is None:
+                        features[field] = run_features
+                    else:
+                        features[field] = np.concatenate((features[field], run_features), axis=0)                    
+               
+        return features
 
     def save_data(self, fields):
         pass
@@ -150,30 +284,6 @@ class Dataset:
         # setting the experimenter and notes content
         self.experimenter, self.notes_content = get_server_notes_details(self.data_path)
 
-    def __load_data_server(self, run):
-        """
-        Load the data from the server and populate the nwb_file
-        
-        Inputs:
-            run: int
-                Run number
-        """
-        run_path = os.path.join(self.data_path, f'Run-{run:03d}')
-
-        # loading the zScript file content
-        contents = load_z_script(run_path)
-
-        # reading the xpc data
-        if self.verbose:
-            print(f"   - Reading server data")
-
-        data_frame = read_xpc_data(contents, run_path, num_channels=self.num_channels, verbose=self.verbose)
-
-        # TODO: consider to change this part to handle the data columns initializaition predefined and indipendent of the data content
-        time_series_dict = self.__initialize_nwb_columns(run, data_frame)
-
-        self.__add_run_data(run, data_frame, time_series_dict)
-
     def __initialize_nwb_file(self, run):
         """
         Initialize the NWB file
@@ -204,10 +314,57 @@ class Dataset:
             nwb_file.add_electrode(group=self.electrode_group, location=self.electrode_group.location)
 
         return nwb_file
+
+    def __load_data_server(self, run):
+        """
+        Load the data from the server and populate the nwb_file
+        
+        Inputs:
+            run: int
+                Run number
+        """
+        run_path = os.path.join(self.data_path, f'Run-{run:03d}')
+
+        # loading the zScript file content
+        contents = load_z_script(run_path)
+
+        # reading the xpc data
+        if self.verbose:
+            print(f"   - Reading server data")
+
+        data_frame = read_xpc_data(contents, run_path, num_channels=self.num_channels, verbose=self.verbose)
+
+        # initializing the nwb modules and columns
+        self.__initialize_nwb_modules(run)
+        time_series_dict = self.__initialize_nwb_columns(run, data_frame) # TODO: consider to change this part to handle the data columns initializaition predefined and indipendent of the data content
+
+        # populate the nwb file with the run data
+        self.__add_run_data(run, data_frame, time_series_dict)
     
+    def __initialize_nwb_modules(self, run):
+        """
+        Initialize the NWB modules for the run NWB file
+
+        Inputs:
+            run: int
+                Run number
+        """
+        behavior_module = self.nwb_files[run].create_processing_module(
+            name="behavior", description="Raw behavioral data"
+        )
+
+        neural_data_module = self.nwb_files[run].create_processing_module(
+            name="neural_data", description="Neural data"
+        )
+
+        self.nwb_modules[run] = {
+            'behavior': behavior_module,
+            'neural_data': neural_data_module
+        }
+
     def __initialize_nwb_columns(self, run, data_frame):
         """
-        Initialize the columns of the NWB file based on the data frame. Returns the time_series dictionary
+        Initialize the columns of the NWB file based on the data frame keys. Returns the time_series key names dictionary
 
         Inputs:
             run: int
@@ -219,17 +376,27 @@ class Dataset:
             time_series_dict: dict
                 Dictionary of the time series data initialized
         """
+
+        # retrieve the behavior variable name from the config file
+        self.behavior_var_name = get_dataset_variable_name('behavior_data') 
+        self.neural_var_name = get_dataset_variable_name('neural_data')
+
         # Dynamically create trial column and create the time_series dictionary
         time_series_dict = dict()
-        num_times = len(data_frame['ExperimentTime'].iloc[-1]) # num of times for last trial - used to understand if a varialb is a time-series
+
+        num_trials = len(data_frame)
+        num_times = len(data_frame['ExperimentTime'].iloc[-1]) # num of times for last trial - used to understand if a variable is a time-series
+        num_total_times = sum(len(data_frame['ExperimentTime'][trl_idx]) for trl_idx in range(num_trials))
         
         for key in data_frame.keys():
-            if key == 'Channel' or key == 'ExperimentTime':
-                continue  # Channel (spike times) and ExperimentTime are handled as special cases
+            if key == 'ExperimentTime':
+                continue  # ExperimentTime are handled as special cases
+            elif key == self.behavior_var_name or key == self.neural_var_name:
+                continue # Behavior data and SBP are handled as special case (stored in the respective modules)                
             elif not is_collection(data_frame[key][0]) or len(data_frame[key].iloc[-1]) != num_times:            
                 self.nwb_files[run].add_trial_column(name=key, description=key)
             else:
-                time_series_dict[key] = []
+                time_series_dict[key] = np.empty((num_total_times, data_frame[key][0].shape[1]), dtype=data_frame[key][0].dtype)
 
         return time_series_dict
 
@@ -245,93 +412,135 @@ class Dataset:
         if self.verbose:
             print(f"   - Converting data to NWB file")
 
-        spike_times = [[[] for i in range(self.num_channels)] for j in range(1)]
-        obs_intervals = []
+        num_trials = len(data_frame)
+        num_behavior_vars = data_frame[self.behavior_var_name][0].shape[1]
         experiment_time = []
 
-        # adding general run data
-        # TODO for loop may be able to be simplified by changing ExperimentTime format in ReadData. Might be able to use [:] instead of going through each trial on next line
-        for idx in range(len(data_frame)):
-            # Dynamically create data in trial columns
-            nwb_trial_dict = dict()
+        total_times = sum(len(data_frame['ExperimentTime'][trl_idx]) for trl_idx in range(num_trials))
 
-            # storing experiments times before
-            nwb_trial_dict['start_time'] = data_frame['ExperimentTime'][idx][0][0]
-            nwb_trial_dict['stop_time'] = data_frame['ExperimentTime'][idx][-1][0]
+        # preallocate time-series data arrays
+        times = np.empty((total_times,), dtype=data_frame['ExperimentTime'][0].dtype)
+        neural_data = np.empty((total_times,self.num_channels), dtype=data_frame[self.neural_var_name][0].dtype)
+        behavior_data = np.empty((total_times,num_behavior_vars), dtype=data_frame[self.behavior_var_name][0].dtype)
+
+        # looping through the trials and populating the times-series data
+        start_idx = 0
+
+        for trl_idx in range(num_trials):
+            times_trial_data = np.squeeze(data_frame['ExperimentTime'][trl_idx])
+
+            end_idx = start_idx + len(times_trial_data)
+
+            times[start_idx:end_idx] = times_trial_data
+            neural_data[start_idx:end_idx] = data_frame[self.neural_var_name][trl_idx]
+            behavior_data[start_idx:end_idx] = data_frame[self.behavior_var_name][trl_idx]
+
+            # add all the other time-series data
+            for key in time_series_dict.keys():
+                time_series_dict[key][start_idx:end_idx] = data_frame[key][trl_idx] 
+
+            start_idx = end_idx
+
+        # adding behavior data
+        fingers_position_ts = TimeSeries(
+            name="fingers_position",
+            data=H5DataIO(
+                behavior_data,                
+                compression=self.nwb_compression['type'], 
+                compression_opts=self.nwb_compression['options']
+            ),
+            unit="flexion units",  # From 0 to 1
+            timestamps=times,
+            description="Fingers flexion position, from fully extended (0) to fully flexed (1)",
+            comments="Raw position data"
+        )
+
+        self.nwb_modules[run]['behavior'].add_data_interface(fingers_position_ts)
             
-            # flattening the experiment time list and concatenating it to the experiment_time list
-            experiment_time.extend(list(itertools.chain.from_iterable(data_frame['ExperimentTime'][idx])))
+        # adding neural data
+        neural_data_ts = TimeSeries(
+            name="neural_features",
+            data=H5DataIO(
+                neural_data,
+                compression=self.nwb_compression['type'], 
+                compression_opts=self.nwb_compression['options']
+            ),
+            unit="mV",
+            timestamps=times,
+            description="Neural data features across time",
+            conversion=1.0,
+            comments="Neural data features, for chesteklab it's the Spiking Band Power (SBP) - i.e. the Mean Absolute Value, for each 1ms bin"
+        )
 
-            # looping through the data frame keys
+        self.nwb_modules[run]['neural_data'].add_data_interface(neural_data_ts)
+
+        # adding all the other time-series data as acquisition data
+        for key in time_series_dict.keys():
+            self.nwb_files[run].add_acquisition(
+                TimeSeries(
+                    name=key,
+                    unit="",
+                    data=H5DataIO(
+                        time_series_dict[key], 
+                        compression=self.nwb_compression['type'], 
+                        compression_opts=self.nwb_compression['options']
+                    ),
+                    timestamps=times,
+                    description=f"{key}",
+                    conversion=1.0
+                )
+            )
+
+        # looping through the trials for adding the trials and all the other non-timeseries data to the NWB file
+        
+        # base structure of each trial
+        nwb_trial_dict = dict()
+
+        # add the trials to the NWB file
+        for trl_idx in range(num_trials):
+            # trial times
+            nwb_trial_dict['start_time'] = data_frame['ExperimentTime'][trl_idx][0][0]
+            nwb_trial_dict['stop_time'] = data_frame['ExperimentTime'][trl_idx][-1][0]
+
+            # looping through the data frame keys for dynamically adding them (TODO: the keys should be defined in a config file)
             for key in data_frame.keys():       
                 if key == 'ExperimentTime':
-                    pass # ExperimentTime is handled as a special case        
-                elif key == 'Channel':
-                    obs_intervals.append([data_frame['ExperimentTime'][idx][0][0], data_frame['ExperimentTime'][idx][-1][0]])
+                    pass # ExperimentTime is handled as a special case    
+                elif key == self.behavior_var_name or key == self.neural_var_name:
+                    pass
+                elif key in time_series_dict.keys():
+                    pass
+                else: # non-time series data
+                    if key == 'TrialNumber':
+                        data_frame.loc[trl_idx, key] -= 1  # subtract 1 since indexes in the matlab version start from 1
                     
-                    for ch_id in range(self.num_channels):
-                        val_to_add = data_frame['Channel'][idx][ch_id]['SpikeTimes']
-                        if isinstance(val_to_add, np.ndarray):
-                            spike_times[0][ch_id].append(val_to_add.tolist())
-                        elif isinstance(val_to_add, (np.int32, np.int64, np.float64)):
-                            spike_times[0][ch_id].append([val_to_add.item()])
-                        elif isinstance(val_to_add, list):
-                            continue
-                        else:
-                            raise Warning(f"Couldn't find type: {type(val_to_add)}")                    
-                #TODO Use zScript.txt to determine timeseries and trial data as opposed to length of data
-                elif key in time_series_dict.keys():        
-                    time_series_dict[key].extend(data_frame[key][idx].tolist()) 
-                else:
-                    nwb_trial_dict[key] = data_frame[key][idx]  
+                    nwb_trial_dict[key] = data_frame[key][trl_idx]  
 
             self.nwb_files[run].add_trial(**nwb_trial_dict)
 
-        # adding the time series data
-        first_key = True
-
-        for key in time_series_dict.keys():
-            if first_key:
-                first_key_time_series = TimeSeries(
-                    name = key,
-                    data = H5DataIO(
-                        data = SliceableDataChunkIterator(
-                            data = np.array(time_series_dict[key])), 
-                            compression = self.nwb_compression['type'], 
-                            compression_opts = self.nwb_compression['options']),
-                    unit = '',
-                    timestamps = H5DataIO(
-                        data = SliceableDataChunkIterator(
-                            data = np.array(experiment_time)), 
-                            compression = self.nwb_compression['type'], 
-                            compression_opts = self.nwb_compression['options']),
-                    conversion=1.0
-                    )
-                self.nwb_files[run].add_acquisition(first_key_time_series)
-                first_key = False
-            else:
-                self.nwb_files[run].add_acquisition(TimeSeries(
-                    name = key,
-                    data = H5DataIO(
-                        data=SliceableDataChunkIterator(
-                            data=np.array(time_series_dict[key])), 
-                            compression=self.nwb_compression['type'], 
-                            compression_opts=self.nwb_compression['options']),
-                    unit = '',
-                    timestamps = first_key_time_series,
-                    conversion = 1.0
-                ))
-
-        # adding unit data
-        for ch_id in range(self.num_channels):
-            self.nwb_files[run].add_unit(
-                spike_times = [float(item) for row in spike_times[0][ch_id] for item in row],
-                electrodes = [ch_id],
-                obs_intervals=obs_intervals)
-            
         if self.verbose:
-            print(f" + run {run} loaded successfully")
+            print(f"   - Run {run} loaded successfully")
 
-    # TODO
+    # TODO - it should return a representation string of the days/runs loaded in the dataset
     def __str__(self):
         pass
+
+    # TODO - it should return the total number of runs
+    def __len__(self):
+        pass
+
+    # TODO
+    def __add__(self):
+        pass
+
+    # TODO
+    def __sub__(self):
+        pass
+
+''' Useful instructions for nwb
+
+- get the behavior module: nwbfile.processing["behavior"]
+    + get timeseries from behavior module: nwbfile.processing["behavior"].get_data_interface('fingers_position')
+- removing a timeseries column: nwbfile.acquisition.pop("timeseries-name")
+
+'''
