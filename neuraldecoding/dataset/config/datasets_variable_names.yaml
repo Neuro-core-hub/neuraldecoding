@@ -1,4 +1,4 @@
 # use this config for setting the corresponding names of variables of interest coming from the experiment recording data system
 
 behavior_data: "FingerAnglesTIMRL" # name of the behavior data (i.e. the kinematics) variable
-sbp_data: 'NeuralFeature' # name of the spiking band power (SBP) data variable
+neural_data: 'NeuralFeature' # name of the spiking band power (SBP) data variable

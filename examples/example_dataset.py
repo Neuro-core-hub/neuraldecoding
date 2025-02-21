@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 from neuraldecoding.dataset import Dataset
 
 subject = 'Joker'
@@ -17,7 +18,7 @@ dataset.load_data(subject_name=subject, date=date, runs=runs)
 # dataset.load_data(data_path=data_path, runs=runs)
 
 # extracting features
-features_fields = ['sbp','fingers_kinematics']
+features_fields = ['sbp','mav','fingers_kinematics']  # sbp and mav are the same thing, just different names for the same feature when used for brain or EMG
 
 features_params = {
     'bin_size': 32,
@@ -34,3 +35,31 @@ features_params = {
 features = dataset.extract_features(fields=features_fields, params=features_params)
 
 print('Loading data completed')
+
+# plot for debugging feature extraction
+
+plt.close('all')
+fig, axs = plt.subplots(4,1, figsize=(15, 10))
+
+# Plot EMG channel 1
+axs[0].plot(features['mav'][:1000, 32])
+axs[0].set_title('MAV-EMG Channel 1')
+
+# Plot EMG channel 7
+axs[1].plot(features['mav'][:1000, 44])
+axs[1].set_title('MAV-EMG Channel 6')
+
+# Plot kinematics position (index 1 and 3)
+axs[2].plot(features['fingers_kinematics'][:1000, 1])
+axs[2].plot(features['fingers_kinematics'][:1000, 3])
+axs[2].set_title('Kinematics Position')
+
+# Plot kinematics velocity (index 6 and 9)
+axs[3].plot(features['fingers_kinematics'][:1000, 6])
+axs[3].plot(features['fingers_kinematics'][:1000, 8])
+axs[3].set_title('Kinematics Velocity')
+
+# Show the plot
+plt.tight_layout()
+plt.show()
+print('done')

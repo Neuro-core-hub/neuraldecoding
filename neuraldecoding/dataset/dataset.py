@@ -151,10 +151,10 @@ class Dataset:
         for run in self.runs:
             # retrieving trials info and data needed for the features extraction
             trials = self.nwb_files[run].trials.to_dataframe()
-            timestamps = self.nwb_files[run].processing['neural_data'].get_data_interface('sbp').timestamps[:] # TODO: there might be a better way of doing this
+            timestamps = self.nwb_files[run].processing['neural_data'].get_data_interface('neural_features').timestamps[:] # TODO: there might be a better way of doing this
 
             if 'sbp' in fields:
-                sbp_data = self.nwb_files[run].processing['neural_data'].get_data_interface('sbp').data[:]
+                neural_data = self.nwb_files[run].processing['neural_data'].get_data_interface('neural_features').data[:]
                 sample_width = self.nwb_files[run].acquisition['SampleWidth'].data[:] # TODO: change this when the normalization of the names will be done
 
             if 'fingers_kinematics' in fields:
@@ -216,8 +216,8 @@ class Dataset:
 
                 # extracting the features for each field
                 for field in fields:
-                    if field == 'sbp': # Spiking Band Power                        
-                        sbp_run_data = sbp_data[start_time_index:stop_time_index, :]
+                    if field == 'sbp' or field == 'mav': # Spiking Band Power or Mean Absolute Value - TODO: maybe change the name of these two fields                    
+                        sbp_run_data = neural_data[start_time_index:stop_time_index, :]
                         sample_width_run = sample_width[start_time_index:stop_time_index]
 
                         bins_start = bins_start_digit_lag if behav_lag else bins_start_digit
@@ -379,7 +379,7 @@ class Dataset:
 
         # retrieve the behavior variable name from the config file
         self.behavior_var_name = get_dataset_variable_name('behavior_data') 
-        self.sbp_var_name = get_dataset_variable_name('sbp_data')
+        self.neural_var_name = get_dataset_variable_name('neural_data')
 
         # Dynamically create trial column and create the time_series dictionary
         time_series_dict = dict()
@@ -391,7 +391,7 @@ class Dataset:
         for key in data_frame.keys():
             if key == 'ExperimentTime':
                 continue  # ExperimentTime are handled as special cases
-            elif key == self.behavior_var_name or key == self.sbp_var_name:
+            elif key == self.behavior_var_name or key == self.neural_var_name:
                 continue # Behavior data and SBP are handled as special case (stored in the respective modules)                
             elif not is_collection(data_frame[key][0]) or len(data_frame[key].iloc[-1]) != num_times:            
                 self.nwb_files[run].add_trial_column(name=key, description=key)
@@ -420,7 +420,7 @@ class Dataset:
 
         # preallocate time-series data arrays
         times = np.empty((total_times,), dtype=data_frame['ExperimentTime'][0].dtype)
-        sbp_data = np.empty((total_times,self.num_channels), dtype=data_frame[self.sbp_var_name][0].dtype)
+        neural_data = np.empty((total_times,self.num_channels), dtype=data_frame[self.neural_var_name][0].dtype)
         behavior_data = np.empty((total_times,num_behavior_vars), dtype=data_frame[self.behavior_var_name][0].dtype)
 
         # looping through the trials and populating the times-series data
@@ -432,7 +432,7 @@ class Dataset:
             end_idx = start_idx + len(times_trial_data)
 
             times[start_idx:end_idx] = times_trial_data
-            sbp_data[start_idx:end_idx] = data_frame[self.sbp_var_name][trl_idx]
+            neural_data[start_idx:end_idx] = data_frame[self.neural_var_name][trl_idx]
             behavior_data[start_idx:end_idx] = data_frame[self.behavior_var_name][trl_idx]
 
             # add all the other time-series data
@@ -458,21 +458,21 @@ class Dataset:
         self.nwb_modules[run]['behavior'].add_data_interface(fingers_position_ts)
             
         # adding neural data
-        sbp_data_ts = TimeSeries(
-            name="sbp",
+        neural_data_ts = TimeSeries(
+            name="neural_features",
             data=H5DataIO(
-                sbp_data,
+                neural_data,
                 compression=self.nwb_compression['type'], 
                 compression_opts=self.nwb_compression['options']
             ),
             unit="mV",
             timestamps=times,
-            description="Spiking Band Power (SBP) across time",
+            description="Neural data features across time",
             conversion=1.0,
-            comments="Spiking Band Power (SBP) for each 1ms bin"
+            comments="Neural data features, for chesteklab it's the Spiking Band Power (SBP) - i.e. the Mean Absolute Value, for each 1ms bin"
         )
 
-        self.nwb_modules[run]['neural_data'].add_data_interface(sbp_data_ts)
+        self.nwb_modules[run]['neural_data'].add_data_interface(neural_data_ts)
 
         # adding all the other time-series data as acquisition data
         for key in time_series_dict.keys():
@@ -506,7 +506,7 @@ class Dataset:
             for key in data_frame.keys():       
                 if key == 'ExperimentTime':
                     pass # ExperimentTime is handled as a special case    
-                elif key == self.behavior_var_name or key == self.sbp_var_name:
+                elif key == self.behavior_var_name or key == self.neural_var_name:
                     pass
                 elif key in time_series_dict.keys():
                     pass

@@ -24,17 +24,18 @@
 
 # implementation details that needs to be discussed
 
-- is the storing/saving of each run NWB file automatic or should it be done only if requested?
 
 # To-do list dataset package
 
+- [ ] completing the code for features_extraction function with all the possible features currently handled by pybmi.
 - [ ] after loading a run of a dataset from the binary files on the server, save the NWB file of the run into the server folder. This will allow the NWB file to be loaded directly in future requests for the same run, avoiding the need to recreate it (see below).
 - [ ] when loading a run of a dataset, add a check if for that run the NWB file was already created and stored in the server, if yes just load it instead of re-creating it
 - [ ] definition for utilities class methods like:  __str__ , __len__ , __add__ (to merge two datasets) , __sub__ (to remove the intersection between two datasets)
 - [ ] Currently, __add_run_data dynamically loads and read the keys from the server files (with the exception of variables such as behavior and sbp). We need to update this system so that the variable names coming from the server-data are standardized. To achieve this, we should define a mapping in a configuration file that associates the variable names in the server data with the corresponding standardized names used in the NWB file conversion. This change will allow us to support different data sources (e.g., data from another laboratory) that might use different names for the same variable. Additionally, all variable names in the NWB file should use underscores ( _ ) rather than CamelCase (e.g. TrialNumber (wrong) => trial_number (correct))
+- [ ] handling of channels selection: right now the loader is loading all the channels. We need to add the possibility to select a subset of channels or, better, to define the channels to load in a subject-config file fashion. Related to this there is the "problem" that for certain days the channels to use are in different indexes: like when Bank B was used to record instead of Bank A. We need to handle this case as well.
 - [ ] once the naming of the feature has been normalized (check above) replace the multiple if-statements of trials filtering in features_extraction with a forloop over the filter_conditions
 - [ ] writing the code for pre_processing function: this function takes as input a dictionary of params. The params indicate which pre_processing steps needs to be applied and the values (i.e. CAR, BP, notch)
-- [ ] writing the code for extracting_features function. This function extract the features and take as input the features to extract and params; params contains bin_size, behav_lag, overall_lag, overlap (take a look into the pybmi getZfeats for this).
 - [ ] writing the code for synching data functions. Basically we need to convert the functions from the Matlab package (svn_repository/Utility code/SynchZNeural) (needs a bit of understanding of why the definition of synching cpd and cerebus needs to be different)
 - [ ] completing the README.md with the inclusion of a package description, list of functions, and references to examples
-- [ ] adding examples for the different functions of the dataset package and the different ways of using them: from loading a single day data, to data normalizationa, features extraction, to creating a training/test dataset, etc..
+- [ ] completing the examples for the different functions of the dataset package and the different ways of using them: from loading a single day data, to data normalizationa, features extraction, to creating a training/test dataset, etc..
+- [ ] moving the server path to a config file, instead of being hardcoded in the code.
