@@ -83,8 +83,10 @@ def load_z_script(direc):
         raise Exception("zScript.txt file not found. Make sure you're passing the right folder path.")
 
 # TODO: optimize this function - it's very slow right now
+
 def read_xpc_data(contents, direc, num_channels, verbose=False):
     # supported data types and their byte sizes #START REMOVE
+    print("Running optimized code")
     cls = {'uint8': 1, 'int8': 1, 'uint16': 2, 'int16': 2, 'uint32': 4, 'int32': 4, 'single': 4, 'double': 8}
     # data types and their python equivalent
     data_con = {'uint8': np.ubyte, 'int8': np.byte, 'uint16': np.ushort, 'int16': np.short, 'uint32': np.uintc,
@@ -97,97 +99,121 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     for i in range(len(zstr)):
         zstr[i] = zstr[i].split('-') #last entry in each cell is blank
 
+    
+    # Extract names, types, and sizes using list comprehension, starting from index 1
+    names = [[zstr[i][j] for j in range(0, len(zstr[i])-1, 3)] for i in range(1, len(zstr))]
+    types = [[zstr[i][j] for j in range(1, len(zstr[i])-1, 3)] for i in range(1, len(zstr))]
+    sizes = [[zstr[i][j] for j in range(2, len(zstr[i])-1, 3)] for i in range(1, len(zstr))]
+
+    #######-----------------
     #Collect names, types, and sizes into list of list
-    names = []
-    types = []
-    sizes = []
+    names1 = []
+    types1 = []
+    sizes1 = []
     for i in range(1, len(zstr)):
-        names.append([])
-        types.append([])
-        sizes.append([])
+        names1.append([])
+        types1.append([])
+        sizes1.append([])
         for j in range(0, len(zstr[i]) - 1, 3):
-            names[i - 1].append(zstr[i][j])
+            names1[i - 1].append(zstr[i][j])
         for j in range(1, len(zstr[i]) - 1, 3):
-            types[i - 1].append(zstr[i][j])
+            types1[i - 1].append(zstr[i][j])
         for j in range(2, len(zstr[i]) - 1, 3):
-            sizes[i - 1].append(zstr[i][j])
+            sizes1[i - 1].append(zstr[i][j])
+
+
+    #____________xxxxxxxxx
+    
+    
 
     # Set flag(s) for specific field formatting:
-    for i in range(len(names)):
-        for j in range(len(names[i])):
-            if names[i][j] == 'SpikeChans':
-                spikeformat = True
-            else:
-                spikeformat = False
+    spikeformat = any('SpikeChans' in field_list for field_list in names)
+
+    # # Set flag(s) for specific field formatting:
+    # for i in range(len(names)):
+    #     for j in range(len(names[i])):
+    #         if names[i][j] == 'SpikeChans':
+    #             spikeformat = True
+    #         else:
+    #             spikeformat = False
 
 
 # def find_fields():
-    #Recover number of fields in each file type:
-    fnum = []
-    for i in range(len(names)):
-        fnum.append(len(names[i])) # Number of fields in each file
+    # Recover number of fields in each file type
+    fnum = [len(field_list) for field_list in names]
 
     fnames = [None] * 2 * sum(fnum)
     # use ord() to change hexidecimal notation to correct int values
-    bsizes = copy.deepcopy(sizes)
-    for i in range(len(fnum)):
-        for j in range(len(names[i])):
-            bsizes[i][j] = ord(bsizes[i][j])
+    bsizes = [[ord(size) for size in sublist] for sublist in sizes]
 
     # Calculate byte sizes for each feature and collect field names:
     m = 0
-    for i in range(len(fnum)):
-        for j in range(len(names[i])):
-            fnames[m] = names[i][j]
+    for i, field_list in enumerate(names):
+        for j, field_name in enumerate(field_list):
+            fnames[m] = field_name
             m += 2
-            # calculate the bytes sizes
-            bsizes[i][j] = cls[types[i][j]] * bsizes[i][j] #Match type to cls, get type byte size, multiply by feature length:
+            try:
+                bsizes[i][j] *= cls[types[i][j]]
+            except KeyError as e:
+                raise ValueError(f"Unknown data type '{types[i][j]}' in cls dictionary.") from e
+
 
     # Calculate bytes per timestep for each file:
-    bytes = []
-    for i in range(len(bsizes)):
-        bytes.append(int(np.sum(bsizes[i]) + 2)) #plus 2 for each trial count
+    bytes = [int(np.sum(file_bytes) + 2) for file_bytes in bsizes]
 
 # def find_num_trials():
-    # Get number of trials in this run:
-    ###################
+    # Get number of trials in this run
     trial_list = glob.glob(os.path.join(direc, 'tParams*'))
     ntrials = len(trial_list)
-    trials = []
-    for i in range(ntrials):
-        trials.append(int(re.findall('\d+', trial_list[i])[-1]))
-    trials = np.sort(trials)
+
+    # Extract and sort trial numbers more efficiently
+    trials = sorted([int(re.findall(r'\d+', trial_path)[-1]) for trial_path in trial_list])
+
+    # Check for dropped trials
     if trials[-1] != ntrials:
         warnings.warn("There is at least 1 dropped trial")
 
 # def set_field_names():
-    # initalize the dictionary with correct field names
-    dict_data = []
-    for j in range(trials[-1]):  # this creates a dictionary for each trial
-        all_data = {}
-        for i in range(0, len(fnames), 2):
-            all_data[fnames[i]] = None
-        all_data['TrialNumber'] = None
-        if spikeformat: # this is so its a nested dictionary and can match other formats
-            all_data['NeuralData'] = None
-            all_data['Channel'] = []
-            for k in range(num_channels):
-                all_data['Channel'].append({'SpikeTimes': []})
-        dict_data.append(all_data)
+    # Initialize the dictionary with correct field names
+    channel_structure = ([{'SpikeTimes': []} for _ in range(num_channels)] 
+                        if spikeformat else None)
+
+    base_dict = {
+    **{name: None for name in fnames[::2]},
+    'TrialNumber': None,
+    **(
+        {'NeuralData': [], 'Channel': channel_structure} 
+        if spikeformat else {}
+    )
+    }
+
+    
+
+    # Create list of dictionaries for all trials
+    dict_data = [copy.deepcopy(base_dict) for _ in range(trials[-1])]
+
+    
 
 ############################## Parse Data Strings Into Dictionary: ######################################
     data = [[], [], [], []] #initilize data
     dropped_list = []
+    file_templates = [
+    'tParams{}.bin',
+    'mBehavior{}.bin',
+    'dBehavior{}.bin',
+    'neural{}.bin'
+    ]
     for i in range(trials[-1]):
+        trial_num = i + 1
+        dict_data[i]['TrialNumber'] = trial_num
         try:
             # add trial number to dict
             dict_data[i]['TrialNumber'] = i + 1
 
             #read in data files
-            data[0] = np.fromfile(os.path.join(direc, 'tParams{}.bin'.format(i + 1)), dtype='uint8')
-            data[1] = np.fromfile(os.path.join(direc, 'mBehavior{}.bin'.format(i + 1)), dtype='uint8')
-            data[2] = np.fromfile(os.path.join(direc, 'dBehavior{}.bin'.format(i + 1)), dtype='uint8')
-            data[3] = np.fromfile(os.path.join(direc, 'neural{}.bin'.format(i + 1)), dtype='uint8')
+            for file_idx, template in enumerate(file_templates):
+                filepath = os.path.join(direc, template.format(trial_num))
+                data[file_idx] = np.fromfile(filepath, dtype='uint8')
 
         except:
             dict_data[i]['TrialNumber'] = None # this will set up the removal of empty dictionaries
@@ -200,108 +226,167 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
         for j in range(4 - spikeformat):
 
             # Calculate # of timesteps in this file:
-            nstep = int(len(data[j]) / bytes[j])
+            nstep = len(data[j]) // bytes[j]
 
             # Calculate the byte offsets for each feature in the timestep:
-            offs = (3 + np.cumsum(bsizes[j])).tolist() #cumsum only works on np arrays so convert to list after
-            offs.insert(0, 3) # starts at 3 because of trail counts
+            offs = np.concatenate(([3], 3 + np.cumsum(bsizes[j])))
 
             # Iterate through each field:
             for k in range(fnum[j]):
                 # Create a byte mask for the uint8 data:
+                #----------xxxxxxxxxxxxxxxxxxx
+                #mine
+                mask_length = offs[k + 1] - offs[k]
                 bmask = np.zeros(bytes[j], dtype=np.uint8)
-                bmask[range(offs[k] - 1, offs[k] + bsizes[j][k] - 1)] = 1
-                bmask = np.matlib.repmat(bmask, 1, nstep)
-                bmask = bmask[0]
+                bmask[offs[k] - 1:offs[k] + mask_length - 1] = 1
+                bmask = np.tile(bmask, nstep)
+                #-------------xxxxxxxxxxxxxxxxxxxxxx
+                
+                
+                
 
-                #Extract data and cast to desired type:
-                dat = data[j][bmask == 1].view((data_con[types[j][k]]))  # this has to be types
+                
 
-                #Reshape the data and add to dict
+                #---------------xxxxxxxxxxxxxxxxx-------------------
+                #Another try
+                #Extract and reshape data in one step
+                dat = data[j][bmask == 1].view(data_con[types[j][k]])
+
+                # Directly assign reshaped data to dictionary (avoid creating temporary variables)
                 dict_data[i][names[j][k]] = np.reshape(dat, (nstep, -1))
 
-                #format the data so scalars are not in lists, arrays are in lists, and multiple arrays are lists of lists
-                if len(dict_data[i][names[j][k]]) == 1: # if value is of form [[...]]  and not [[...][...][...][...]]
-                    if len(dict_data[i][names[j][k]][0]) != 1:
-                        dict_data[i][names[j][k]] = dict_data[i][names[j][k]][0]
+                # Simplify the data structure checking logic
+                if len(dict_data[i][names[j][k]]) == 1:
+                    # Avoid the second array access when checking length
+                    first_element = dict_data[i][names[j][k]][0]
+                    if len(first_element) == 1:
+                        dict_data[i][names[j][k]] = first_element[0]  # Extract scalar
                     else:
-                        dict_data[i][names[j][k]] = dict_data[i][names[j][k]][0][0]
+                        dict_data[i][names[j][k]] = first_element  # Extract single array
+                #--------------xxxxxxx-----------------
 
-        # Extract Neural data packets (split around TrialCount and End Packet byte):
+                
+
+        
+        # Extract Neural data packets (optimized for speed)
         if spikeformat:
-            new_string = int_to_string(data[3]) # convert to one continuous string
+            new_string = int_to_string(data[3])  # convert to one continuous string
+            
+            # Pre-compute the search pattern only once
+            search_char = chr((i+1) % 256)
+            if search_char in '.^$*+?{}[]|()\\':
+                pattern = '\\' + int_to_string(np.asarray([np.ushort(i + 1)]).view(np.ubyte))
+            else:
+                pattern = int_to_string(np.asarray([np.ushort(i + 1)]).view(np.ubyte))
+            
+            # Single regex compilation and search
+            pattern += '[^ÿ]*ÿ'
             try:
-                # If it is one of these special characters python doesnt like it and understand that its not special
-                # so add the \ to escape the special character
-                # for some reason though | thinks its super special
-                # if you just add the backslash it then grabs that when matching and messes up
-                # so the second if statement is removing that character from each match the first time it appears
-                # and that works but I have no idea why this is such a problem
-                if chr((i+1)%256) in ['.', '*', '^', '$', '+', '?', '{', '}', '[', ']', '|', '(', ')' ,'\\']:
-                    ndata = re.findall(
-                        '\\' + int_to_string(np.asarray([np.ushort(i + 1)]).view(np.ubyte)) + '[^ÿ]*ÿ',
-                        new_string)
-                else:
-                    ndata = re.findall(int_to_string(np.asarray([np.ushort(i+1)]).view(np.ubyte)) + '[^ÿ]*ÿ', new_string)
-
+                ndata = re.findall(pattern, new_string)
+                
+                # Pre-allocate result array for better memory efficiency
                 neural_data = []
-                for m in range(len(ndata)):
-                    if len(ndata[m][2:-1]) == 0:
-                        neural_data.append([])
-                    elif len(ndata[m][2:-1]) == 1:
-                        neural_data.append([ord(ndata[m][2:-1])])
+                neural_data.extend([] for _ in range(len(ndata)))
+                
+                # Process all matches at once
+                for m, match in enumerate(ndata):
+                    content = match[2:-1]  # Extract content once
+                    content_len = len(content)
+                    
+                    if content_len == 0:
+                        continue  # Keep empty list
+                    elif content_len == 1:
+                        neural_data[m] = [ord(content)]
                     else:
-                        neural_data_2 = []
-                        for n in range(len(ndata[m][2:-1])):
-                            neural_data_2.append(ord(ndata[m][2:-1][n]))
-                        neural_data.append(neural_data_2)
-
+                        # Use a list comprehension instead of iterative appends
+                        neural_data[m] = [ord(content[n]) for n in range(content_len)]
+                
                 dict_data[i]['NeuralData'] = neural_data
+            
+
 
             except re.error: # data is an empty cell
                 dict_data[i]['NeuralData'] = []
 
+
+
+
+
     # Format Specific Fields
     ############################################################################
-    # Change neural data field into spike times per channel:
+
+    # Change neural data field into spike times per channel (optimized for speed)
     if spikeformat:
         for i in range(trials[-1]):
-            if i in dropped_list: # if i equals the value of a dropped trial then skip it
+            if i in dropped_list:  # skip dropped trials
                 continue
-
-            spikenums = np.zeros((num_channels, len(dict_data[i]['NeuralData'])))
-            for t in range(len(dict_data[i]['NeuralData'])):
-                for j in range(len(dict_data[i]['NeuralData'][t])):
-                    if dict_data[i]['NeuralData'][t][j] != 0:
-                        spikenums[dict_data[i]['NeuralData'][t][j] - 1, t] += 1
-
+            
+            # Get references to avoid repeated dictionary lookups
+            neural_data = dict_data[i]['NeuralData']
+            exp_time = dict_data[i]['ExperimentTime']
+            neural_data_len = len(neural_data)
+            
+            # Use numpy for faster operations
+            spikenums = np.zeros((num_channels, neural_data_len), dtype=np.int32)
+            
+            # Vectorize inner loop where possible
+            for t in range(neural_data_len):
+                data_point = neural_data[t]
+                # Skip empty or zero-only arrays
+                if not data_point or all(x == 0 for x in data_point):
+                    continue
+                    
+                for j in range(len(data_point)):
+                    chan_idx = data_point[j] - 1  # -1 for zero-indexing
+                    if chan_idx >= 0:  # Only increment for non-zero values
+                        spikenums[chan_idx, t] += 1
+            
+            # Process each channel once
+            channel_data = dict_data[i]['Channel']
             for c in range(num_channels):
-                if np.any(spikenums[c, :]):
-                    times = dict_data[i]['ExperimentTime'][spikenums[c, :] == 1]
-                    spikenumsi = spikenums[c, (spikenums[c, :] == 1)]
-                    idx = np.cumsum(spikenumsi)
-                    j = np.ones((1, int(idx[-1])), dtype=int)
-
-                    dict_data[i]['Channel'][c]['SpikeTimes'] = times[np.cumsum(j) - 1].T
-
-                if len(dict_data[i]['Channel'][c]['SpikeTimes']) == 1:
-                    if len(dict_data[i]['Channel'][c]['SpikeTimes'][0]) != 1:
-                        dict_data[i]['Channel'][c]['SpikeTimes'] = dict_data[i]['Channel'][c]['SpikeTimes'][0].astype(
-                            int)
-                    else:
-                        dict_data[i]['Channel'][c]['SpikeTimes'] = dict_data[i]['Channel'][c]['SpikeTimes'][0][
-                            0].astype(int)
-
-            #Removes these two fields
+                # Only process channels with spikes
+                spike_mask = spikenums[c, :] == 1
+                if np.any(spike_mask):
+                    # Get spike times directly with the mask
+                    times = exp_time[spike_mask]
+                    
+                    # Simplify the counting logic
+                    spike_count = np.sum(spike_mask)
+                    
+                    # Directly assign the spike times (transposed)
+                    channel_data[c]['SpikeTimes'] = times.T
+                    
+                    # Format optimization - handle scalar vs array cases
+                    spike_times = channel_data[c]['SpikeTimes']
+                    if len(spike_times) == 1:
+                        if len(spike_times[0]) != 1:
+                            channel_data[c]['SpikeTimes'] = spike_times[0].astype(np.int32)
+                        else:
+                            channel_data[c]['SpikeTimes'] = int(spike_times[0][0])  # Direct int conversion
+            
+            # Remove unneeded fields (moved outside the channel loop)
             dict_data[i].pop('SpikeChans', None)
             dict_data[i].pop('NeuralData', None)
+   
 
     # this next one removes the skipped trials
     # must use a generator because of indexing issues if you don't
     if trials[-1] != ntrials: # only run if there is a trial that is dropped to save time
         dict_data = [trial for trial in dict_data if trial['TrialNumber'] != None]
+
+    # df_og=pd.DataFrame(dict_data)
+    # #print(df_og.shape)  # Check if DataFrame has rows/columns
+    # #print(df_og.head())  # Look at first few rows
+    # try:
+    #     df_og.to_csv('output_data_optimized.csv', index=False)
+    #     print("File saved successfully")
+    # except Exception as e:
+    #     print(f"Error saving file: {e}")
+    # #df_og.to_excel('original_data.xlsx',index=False)
     
     return pd.DataFrame(dict_data)
+
+
 
 def __find_num_trials(trial_list):    
     """
