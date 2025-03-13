@@ -98,7 +98,6 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     # Split each substring into its fieldname/datatype/numels substrings:
     for i in range(len(zstr)):
         zstr[i] = zstr[i].split('-') #last entry in each cell is blank
-
     
     # Extract names, types, and sizes using list comprehension, starting from index 1
     names = [[zstr[i][j] for j in range(0, len(zstr[i])-1, 3)] for i in range(1, len(zstr))]
@@ -121,24 +120,9 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
         for j in range(2, len(zstr[i]) - 1, 3):
             sizes1[i - 1].append(zstr[i][j])
 
-
-    #____________xxxxxxxxx
-    
-    
-
     # Set flag(s) for specific field formatting:
     spikeformat = any('SpikeChans' in field_list for field_list in names)
 
-    # # Set flag(s) for specific field formatting:
-    # for i in range(len(names)):
-    #     for j in range(len(names[i])):
-    #         if names[i][j] == 'SpikeChans':
-    #             spikeformat = True
-    #         else:
-    #             spikeformat = False
-
-
-# def find_fields():
     # Recover number of fields in each file type
     fnum = [len(field_list) for field_list in names]
 
@@ -157,11 +141,9 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
             except KeyError as e:
                 raise ValueError(f"Unknown data type '{types[i][j]}' in cls dictionary.") from e
 
-
     # Calculate bytes per timestep for each file:
     bytes = [int(np.sum(file_bytes) + 2) for file_bytes in bsizes]
 
-# def find_num_trials():
     # Get number of trials in this run
     trial_list = glob.glob(os.path.join(direc, 'tParams*'))
     ntrials = len(trial_list)
@@ -173,7 +155,6 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     if trials[-1] != ntrials:
         warnings.warn("There is at least 1 dropped trial")
 
-# def set_field_names():
     # Initialize the dictionary with correct field names
     channel_structure = ([{'SpikeTimes': []} for _ in range(num_channels)] 
                         if spikeformat else None)
@@ -187,12 +168,8 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     )
     }
 
-    
-
     # Create list of dictionaries for all trials
     dict_data = [copy.deepcopy(base_dict) for _ in range(trials[-1])]
-
-    
 
 ############################## Parse Data Strings Into Dictionary: ######################################
     data = [[], [], [], []] #initilize data
@@ -385,41 +362,3 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     # #df_og.to_excel('original_data.xlsx',index=False)
     
     return pd.DataFrame(dict_data)
-
-
-
-def __find_num_trials(trial_list):    
-    """
-    Find the number of trials and the trial numbers from the list of trial files
-    """    
-    ntrials = len(trial_list)
-    trials = []
-    for i in range(ntrials):
-        trials.append(int(re.findall('\d+', trial_list[i])[-1]))
-    trials = np.sort(trials)
-    if trials[-1] != ntrials:
-        warnings.warn("There is at least 1 dropped trial")
-
-    return ntrials, trials
-
-def __set_field_names(fnames, trials, num_channels, spike_format):
-    dict_data = []
-
-    for j in range(trials[-1]):  # this creates a dictionary for each trial
-        all_data = {}
-
-        for i in range(0, len(fnames), 2):
-            all_data[fnames[i]] = None
-
-        all_data['TrialNumber'] = None
-
-        if spike_format: # this is so its a nested dictionary and can match other formats
-            all_data['NeuralData'] = None
-            all_data['Channel'] = []
-
-            for k in range(num_channels):
-                all_data['Channel'].append({'SpikeTimes': []})
-
-        dict_data.append(all_data)
-
-    return dict_data

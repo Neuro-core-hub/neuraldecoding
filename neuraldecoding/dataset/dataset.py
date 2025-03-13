@@ -455,7 +455,7 @@ class Dataset:
             comments="Raw position data"
         )
 
-        self.nwb_modules[run]['behavior'].add_data_interface(fingers_position_ts)
+        self.nwb_modules[run]['behavior'].add(fingers_position_ts)
             
         # adding neural data
         neural_data_ts = TimeSeries(
@@ -471,9 +471,10 @@ class Dataset:
             conversion=1.0,
             comments="Neural data features, for chesteklab it's the Spiking Band Power (SBP) - i.e. the Mean Absolute Value, for each 1ms bin"
         )
-
-        self.nwb_modules[run]['neural_data'].add_data_interface(neural_data_ts)
-
+        import pdb
+        pdb.set_trace()
+        self.nwb_modules[run]['neural_data'].add(neural_data_ts)
+        
         # adding all the other time-series data as acquisition data
         for key in time_series_dict.keys():
             self.nwb_files[run].add_acquisition(
