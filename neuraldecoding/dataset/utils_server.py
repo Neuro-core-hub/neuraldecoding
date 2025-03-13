@@ -361,4 +361,4 @@ def read_xpc_data(contents, direc, num_channels, verbose=False):
     #     print(f"Error saving file: {e}")
     # #df_og.to_excel('original_data.xlsx',index=False)
     
-    return pd.DataFrame(dict_data)
+    return dict_data

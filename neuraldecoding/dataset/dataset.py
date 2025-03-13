@@ -332,14 +332,14 @@ class Dataset:
         if self.verbose:
             print(f"   - Reading server data")
 
-        data_frame = read_xpc_data(contents, run_path, num_channels=self.num_channels, verbose=self.verbose)
+        data_dict = read_xpc_data(contents, run_path, num_channels=self.num_channels, verbose=self.verbose)
 
         # initializing the nwb modules and columns
         self.__initialize_nwb_modules(run)
-        time_series_dict = self.__initialize_nwb_columns(run, data_frame) # TODO: consider to change this part to handle the data columns initializaition predefined and indipendent of the data content
+        time_series_dict = self.__initialize_nwb_columns(run, data_dict) # TODO: consider to change this part to handle the data columns initializaition predefined and indipendent of the data content
 
         # populate the nwb file with the run data
-        self.__add_run_data(run, data_frame, time_series_dict)
+        self.__add_run_data(run, data_dict, time_series_dict)
     
     def __initialize_nwb_modules(self, run):
         """
@@ -362,15 +362,15 @@ class Dataset:
             'neural_data': neural_data_module
         }
 
-    def __initialize_nwb_columns(self, run, data_frame):
+    def __initialize_nwb_columns(self, run, data_dict):
         """
-        Initialize the columns of the NWB file based on the data frame keys. Returns the time_series key names dictionary
+        Initialize the columns of the NWB file based on the dictionary keys. Returns the time_series key names dictionary
 
         Inputs:
             run: int
                 Run number
-            data_frame: pandas.DataFrame
-                Data frame with the data from the server
+            data_dict: list of dictionaries
+                Dictionary with the data from the server
 
         Outputs:
             time_series_dict: dict
@@ -384,60 +384,60 @@ class Dataset:
         # Dynamically create trial column and create the time_series dictionary
         time_series_dict = dict()
 
-        num_trials = len(data_frame)
-        num_times = len(data_frame['ExperimentTime'].iloc[-1]) # num of times for last trial - used to understand if a variable is a time-series
-        num_total_times = sum(len(data_frame['ExperimentTime'][trl_idx]) for trl_idx in range(num_trials))
+        num_trials = len(data_dict)
+        num_times = len(data_dict[-1]['ExperimentTime']) # num of times for last trial - used to understand if a variable is a time-series
+        num_total_times = sum(len(data_dict[trl_idx]['ExperimentTime']) for trl_idx in range(num_trials))
         
-        for key in data_frame.keys():
+        for key in data_dict[0].keys():
             if key == 'ExperimentTime':
                 continue  # ExperimentTime are handled as special cases
             elif key == self.behavior_var_name or key == self.neural_var_name:
                 continue # Behavior data and SBP are handled as special case (stored in the respective modules)                
-            elif not is_collection(data_frame[key][0]) or len(data_frame[key].iloc[-1]) != num_times:            
+            elif not is_collection(data_dict[0][key]) or len(data_dict[-1][key]) != num_times:            
                 self.nwb_files[run].add_trial_column(name=key, description=key)
             else:
-                time_series_dict[key] = np.empty((num_total_times, data_frame[key][0].shape[1]), dtype=data_frame[key][0].dtype)
+                time_series_dict[key] = np.empty((num_total_times, data_dict[0][key].shape[1]), dtype=data_dict[0][key].dtype)
 
         return time_series_dict
 
-    def __add_run_data(self, run, data_frame, time_series_dict):
+    def __add_run_data(self, run, data_dict, time_series_dict):
         """
-        Add the data from the server data frame to the NWB file
+        Add the data from the server data dictionary to the NWB file
         Inputs:
             run: int
-            data_frame: pandas.DataFrame
+            data_dict: list of dictionaries
             time_series_dict: dict
         """
 
         if self.verbose:
             print(f"   - Converting data to NWB file")
 
-        num_trials = len(data_frame)
-        num_behavior_vars = data_frame[self.behavior_var_name][0].shape[1]
+        num_trials = len(data_dict)
+        num_behavior_vars = data_dict[0][self.behavior_var_name].shape[1]
         experiment_time = []
 
-        total_times = sum(len(data_frame['ExperimentTime'][trl_idx]) for trl_idx in range(num_trials))
+        total_times = sum(len(data_dict[trl_idx]['ExperimentTime']) for trl_idx in range(num_trials))
 
         # preallocate time-series data arrays
-        times = np.empty((total_times,), dtype=data_frame['ExperimentTime'][0].dtype)
-        neural_data = np.empty((total_times,self.num_channels), dtype=data_frame[self.neural_var_name][0].dtype)
-        behavior_data = np.empty((total_times,num_behavior_vars), dtype=data_frame[self.behavior_var_name][0].dtype)
+        times = np.empty((total_times,), dtype=data_dict[0]['ExperimentTime'].dtype)
+        neural_data = np.empty((total_times,self.num_channels), dtype=data_dict[0][self.neural_var_name].dtype)
+        behavior_data = np.empty((total_times,num_behavior_vars), dtype=data_dict[0][self.behavior_var_name].dtype)
 
         # looping through the trials and populating the times-series data
         start_idx = 0
 
         for trl_idx in range(num_trials):
-            times_trial_data = np.squeeze(data_frame['ExperimentTime'][trl_idx])
+            times_trial_data = np.squeeze(data_dict[trl_idx]['ExperimentTime'])
 
             end_idx = start_idx + len(times_trial_data)
 
             times[start_idx:end_idx] = times_trial_data
-            neural_data[start_idx:end_idx] = data_frame[self.neural_var_name][trl_idx]
-            behavior_data[start_idx:end_idx] = data_frame[self.behavior_var_name][trl_idx]
+            neural_data[start_idx:end_idx] = data_dict[trl_idx][self.neural_var_name]
+            behavior_data[start_idx:end_idx] = data_dict[trl_idx][self.behavior_var_name]
 
             # add all the other time-series data
             for key in time_series_dict.keys():
-                time_series_dict[key][start_idx:end_idx] = data_frame[key][trl_idx] 
+                time_series_dict[key][start_idx:end_idx] = data_dict[trl_idx][key]
 
             start_idx = end_idx
 
@@ -455,7 +455,7 @@ class Dataset:
             comments="Raw position data"
         )
 
-        self.nwb_modules[run]['behavior'].add(fingers_position_ts)
+        self.nwb_modules[run]['behavior'].add_data_interface(fingers_position_ts)
             
         # adding neural data
         neural_data_ts = TimeSeries(
@@ -471,10 +471,9 @@ class Dataset:
             conversion=1.0,
             comments="Neural data features, for chesteklab it's the Spiking Band Power (SBP) - i.e. the Mean Absolute Value, for each 1ms bin"
         )
-        import pdb
-        pdb.set_trace()
-        self.nwb_modules[run]['neural_data'].add(neural_data_ts)
-        
+
+        self.nwb_modules[run]['neural_data'].add_data_interface(neural_data_ts)
+
         # adding all the other time-series data as acquisition data
         for key in time_series_dict.keys():
             self.nwb_files[run].add_acquisition(
@@ -500,11 +499,11 @@ class Dataset:
         # add the trials to the NWB file
         for trl_idx in range(num_trials):
             # trial times
-            nwb_trial_dict['start_time'] = data_frame['ExperimentTime'][trl_idx][0][0]
-            nwb_trial_dict['stop_time'] = data_frame['ExperimentTime'][trl_idx][-1][0]
+            nwb_trial_dict['start_time'] = data_dict[trl_idx]['ExperimentTime'][0][0]
+            nwb_trial_dict['stop_time'] = data_dict[trl_idx]['ExperimentTime'][-1][0]
 
             # looping through the data frame keys for dynamically adding them (TODO: the keys should be defined in a config file)
-            for key in data_frame.keys():       
+            for key in data_dict[trl_idx].keys():       
                 if key == 'ExperimentTime':
                     pass # ExperimentTime is handled as a special case    
                 elif key == self.behavior_var_name or key == self.neural_var_name:
@@ -513,9 +512,9 @@ class Dataset:
                     pass
                 else: # non-time series data
                     if key == 'TrialNumber':
-                        data_frame.loc[trl_idx, key] -= 1  # subtract 1 since indexes in the matlab version start from 1
+                        data_dict[trl_idx][key] -= 1  # subtract 1 since indexes in the matlab version start from 1
                     
-                    nwb_trial_dict[key] = data_frame[key][trl_idx]  
+                    nwb_trial_dict[key] = data_dict[trl_idx][key]
 
             self.nwb_files[run].add_trial(**nwb_trial_dict)
 
