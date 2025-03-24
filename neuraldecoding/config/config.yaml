@@ -1,0 +1,10 @@
+defaults:
+  - _self_
+  - dataset: zstruct
+
+dataset:
+  date: 2023-04-03
+  runs: [3]
+  subject: Joker
+  nwb:
+    save: true
