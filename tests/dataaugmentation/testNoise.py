@@ -1,43 +1,61 @@
-import torch
-import numpy as np
-import pandas as pd
-from scipy.spatial import KDTree
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from neuraldecoding.dataaugmentation import DataAugmentation as da
-from matplotlib import pyplot as plt
-import TestDataAugmentation as tda
-import unittest
-import unittest
+from tests.dataaugmentation.UtilsTestDataAugmentation import generateData
+
 import numpy as np
-from TestDataAugmentation import generateData, plotData
-from sklearn.preprocessing import MinMaxScaler
-import os
-import pickle
+import unittest
 
 
+class TestNoise(unittest.TestCase):
+    """
+    Unit test class for verifying different numpy add noise functions in DataAugmentation.
 
-class TestDA(unittest.TestCase):
-
+    This test suite covers:
+        - add_noise_white
+        - add_noise_random_walk
+        - add_noise_constant (both 'same' and 'different' bias types)
+    """
     def setUp(self):
-        np.random.seed(12345)
+        """
+        Set up function that sets seed and generates synthetic test data for all test cases.
 
-        with open(os.path.join('C:\\Files\\UM\\ND\\DataAugmentation\\Data', '2024-02-05_preprocess.pkl'), 'rb') as f:
-            data_CO, data_RD = pickle.load(f)
-        self.x = data_CO['sbp']
-        self.y = data_CO['finger_kinematics']
+        The data is simulated based on distributions extracted from `2024-02-05_preprocess.pkl`:
+        - self.x: (22321, 96), Gaussian with mean = 11.1161 and std = 15.6922 (sbp)
+        - self.y: (22321, 4), Gaussian with mean = 0.2433 and std = 0.2706 (finger kinematics)
+        """
+        self.seed = 12345
+        np.random.seed(self.seed)
+
+        nTimeBins = 22321
+        mu_x = 11.116120635071743
+        std_x = 15.69221856007768
+        mu_y = 0.2433446115719394
+        std_y = 0.27057285460646824
+
+        self.x = generateData(nTimeBins,96,'gaussian',mu_x,std_x)
+        self.y = generateData(nTimeBins,4,'gaussian',mu_y,std_y)
+
         
     def test_noise_white(self):
-        
-        std = 4
+        """
+        Tests add_noise_white by verifying:
+            - Determinism given fixed seed
+            - Zero mean of noise
+            - Expected standard deviation of noise
+            - Output shape matches input
+            - Consistent behavior across a range of std values
+        """
         X = self.x
+        std = 4
+
         noise_X = da.add_noise_white(X, std)
 
         # Test 1: determinism
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_1 = da.add_noise_white(X,std)
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_2 = da.add_noise_white(X,std)
         np.testing.assert_array_equal(result_1, result_2, "test add_noise_white: not following determinism")
 
@@ -59,15 +77,22 @@ class TestDA(unittest.TestCase):
             assert np.allclose(observed_std, std, rtol=0.2), f"Failed for std={std}"
 
     def test_noise_random_walk(self):
-        
+        """
+        Tests add_noise_random_walk by verifying:
+            - Determinism given fixed seed
+            - Noise is a smooth random walk with ~zero mean of diff
+            - Observed std of diff noise matches expected
+            - Output shape matches input
+            - Consistent behavior across multiple std values
+        """
         std = 1
         X = self.x
         noise_X = da.add_noise_random_walk(X, std)
 
         # Test 1: determinism
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_1 = da.add_noise_random_walk(X,std)
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_2 = da.add_noise_random_walk(X,std)
         np.testing.assert_array_equal(result_1, result_2, "test add_noise_random_walk: not following determinism")
         
@@ -93,19 +118,28 @@ class TestDA(unittest.TestCase):
             assert np.allclose(observed_std, std, rtol=0.2), f"test add_noise_random_walk:Failed for std={std}"
 
     def test_noise_constant(self):
+        """
+        Tests add_noise_constant by verifying:
+            - Determinism given fixed seed for both 'same' and 'different' bias types
+            - Output shape matches input for both types
+            - For 'same': constant offset per channel over time
+            - For 'different': different offsets across channels
+            - Invalid bias type defaults to 'same'
+            - Mean and std of added noise match expectations across multiple stds
+        """
         std = 1
         X = self.x
 
         # Test 1: determinism
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_1 = da.add_noise_constant(X,std,'same')
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_2 = da.add_noise_constant(X,std,'same')
         np.testing.assert_array_equal(result_1, result_2, "test add_noise_constant (same): not following determinism")
 
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_1 = da.add_noise_constant(X,std,'different')
-        np.random.seed(12345)
+        np.random.seed(self.seed)
         result_2 = da.add_noise_constant(X,std,'different')
         np.testing.assert_array_equal(result_1, result_2, "test add_noise_constant (different): not following determinism")
         
@@ -139,6 +173,23 @@ class TestDA(unittest.TestCase):
             channel_noise = noise[:, channel]
             assert np.allclose(channel_noise, channel_noise[0]), "test add_noise_constant:Invalid type didn't default to 'same' behavior"
 
+        # Test 6: Mean and Std
+        std_values = [0.01, 0.1, 1.0, 2.0, 4.0]
+        for bias_type in ['same', 'different']:
+            for std in std_values:
+                np.random.seed(self.seed)
+                bias_X = da.add_noise_constant(X, std, type=bias_type)
+                noise = bias_X - X
+                if bias_type == 'different':
+                    noise_mean = np.mean(noise)
+                    assert abs(noise_mean) < 0.2, f"test add_noise_constant: Mean not ~0 for 'different', got {noise_mean}"
+                    noise_std = np.std(noise)
+                    assert np.allclose(noise_std, std, rtol=0.2), \
+                        f"test add_noise_constant: Std mismatch for 'different', expected={std}, got {noise_std}"
+                elif bias_type == 'same':
+                    noise_std = np.std(noise)
+                    assert noise_std < 1e-6, \
+                        f"test add_noise_constant: Std not ~0 for 'same', got {noise_std}"
 
 if __name__ == '__main__':
     unittest.main()

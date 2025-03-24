@@ -1,11 +1,6 @@
-import torch
 import numpy as np
-import pandas as pd
-from scipy.spatial import KDTree
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from neuraldecoding.dataaugmentation import DataAugmentation as da
 from matplotlib import pyplot as plt
 
 def generateData(time,channel,method,mu=0.,std=1.,val = 1.):
