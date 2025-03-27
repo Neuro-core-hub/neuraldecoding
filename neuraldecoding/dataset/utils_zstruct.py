@@ -52,7 +52,7 @@ def get_server_data_path(is_monkey=True, custom_server_folder=None):
     if is_monkey:
         server_data_path = os.path.join(server_data_path, "Monkeys")
     else:
-        server_data_path = os.path.join(server_data_path, "Humans")
+        server_data_path = os.path.join(server_data_path, "Humans", "RPNI")
 
     return server_data_path
 
@@ -517,7 +517,7 @@ def initialize_nwb_file(
     return nwb_file
 
 
-def get_dataset_details(subject_name=None, date=None, data_path=None):
+def get_dataset_details(data_path, subject, date):
     """
     Set the data path and the subject object for a specific subject and date
 
@@ -530,17 +530,14 @@ def get_dataset_details(subject_name=None, date=None, data_path=None):
             Folder path to load the data from (assuming it is a folder with the runs folders inside) or None if loading using subject-date format
     """
     if data_path is None:
-        data_path = os.path.join(server_dir, subject_name, date)
-
-    # normalizing the path to be OS independent
-    data_path = os.path.normpath(data_path)
+        raise ValueError("data_path is required")
 
     # retrieving the subject name from the data_path if not directly provided
-    if subject_name is None:
-        subject_name = data_path.split(os.sep)[-2]
+    if subject is None:
+        subject = data_path.split(os.sep)[-2]
 
     # setting the subject object
-    subject = Subject(description=subject_name, subject_id=subject_name)
+    subject = Subject(description=subject, subject_id=subject)
 
     # setting the creation time
     creation_time = get_creation_path_time(data_path)
@@ -602,7 +599,6 @@ def add_run_data(
     times = np.empty(
         (total_times,), dtype=data_dict[0][xpc_dict["experiment_time_field"]].dtype
     )
-    times /= 1000
     neural_data = np.empty(
         (total_times, xpc_dict["num_channels"]),
         dtype=data_dict[0][xpc_dict["signal_field"]].dtype,
@@ -623,7 +619,9 @@ def add_run_data(
         end_idx = start_idx + len(times_trial_data)
 
         times[start_idx:end_idx] = times_trial_data
-        neural_data[start_idx:end_idx] = data_dict[trl_idx][xpc_dict["signal_field"]]
+        neural_data[start_idx:end_idx] = data_dict[trl_idx][xpc_dict["signal_field"]][
+            :, : xpc_dict["num_channels"]
+        ]
         behavior_data[start_idx:end_idx] = data_dict[trl_idx][
             xpc_dict["behavior_field"]
         ]
@@ -633,6 +631,9 @@ def add_run_data(
             time_series_dict[key][start_idx:end_idx] = data_dict[trl_idx][key]
 
         start_idx = end_idx
+
+    # Set times to milliseconds
+    times /= 1000
 
     # adding behavior data
     behavior_ts = TimeSeries(
@@ -694,39 +695,41 @@ def add_run_data(
         )
 
     # Add spike series
-    spike_times = [[] for _ in range(xpc_dict["num_channels"])]
-    for trial in data_dict:
+    if xpc_dict["spikes_exist"]:
+        spike_times = [[] for _ in range(xpc_dict["num_channels"])]
+        for trial in data_dict:
+            for ch_idx in range(xpc_dict["num_channels"]):
+                spike_times[ch_idx].extend(
+                    [trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]]
+                    if type(trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"])
+                    is int
+                    else trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]
+                )
+            # Pop spikes field from data_dict
+            trial.pop(xpc_dict["spikes_field"], None)
+        all_spike_times = list(heapq.merge(*spike_times))
+        spikes = np.zeros((len(all_spike_times), xpc_dict["num_channels"]))
         for ch_idx in range(xpc_dict["num_channels"]):
-            spike_times[ch_idx].extend(
-                [trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]]
-                if type(trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]) is int
-                else trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]
-            )
-        # Pop spikes field from data_dict
-        trial.pop(xpc_dict["spikes_field"], None)
-    all_spike_times = list(heapq.merge(*spike_times))
-    spikes = np.zeros((len(all_spike_times), xpc_dict["num_channels"]))
-    for ch_idx in range(xpc_dict["num_channels"]):
-        # Find indices for each spike time
-        spikes[
-            np.searchsorted(all_spike_times, np.array(spike_times[ch_idx])), ch_idx
-        ] = 1
-    # Add spike series
-    electrode_table = nwb_file.create_electrode_table_region(
-        region=list(range(xpc_dict["num_channels"])),
-        description=xpc_dict["electrode_group"]["description"],
-    )
-    spike_series = SpikeEventSeries(
-        name=xpc_dict["spikes_name"],
-        data=H5DataIO(
-            spikes,
-            compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"],
-        ),
-        electrodes=electrode_table,
-        timestamps=np.array(all_spike_times, dtype=float),
-    )
-    nwb_file.add_acquisition(spike_series)
+            # Find indices for each spike time
+            spikes[
+                np.searchsorted(all_spike_times, np.array(spike_times[ch_idx])), ch_idx
+            ] = 1
+        # Add spike series
+        electrode_table = nwb_file.create_electrode_table_region(
+            region=list(range(xpc_dict["num_channels"])),
+            description=xpc_dict["electrode_group"]["description"],
+        )
+        spike_series = SpikeEventSeries(
+            name=xpc_dict["spikes_name"],
+            data=H5DataIO(
+                spikes,
+                compression=nwb_dict["compression"]["type"],
+                compression_opts=nwb_dict["compression"]["options"],
+            ),
+            electrodes=electrode_table,
+            timestamps=np.array(all_spike_times, dtype=float),
+        )
+        nwb_file.add_acquisition(spike_series)
 
     # looping through the trials for adding the trials and all the other non-timeseries data to the NWB file
     # base structure of each trial
@@ -774,18 +777,24 @@ def get_nwb_from_run(
     run,
     xpc_dict,
     nwb_dict,
+    is_monkey,
 ):
     """
     Get the NWB file from the run
     """
+
     if data_path is None:
-        data_path = os.path.join(get_server_data_path(), subject, date)
+        data_path = os.path.join(
+            get_server_data_path(is_monkey),
+            subject,
+            date,
+        )
 
     # normalizing the path to be OS independent
     data_path = os.path.normpath(data_path)
     # Get dataset details
     subject, creation_time, experimenter, notes_content = get_dataset_details(
-        subject, date, data_path
+        data_path, subject, date
     )
     # Get the institution and lab
     institution = "University of Michigan"

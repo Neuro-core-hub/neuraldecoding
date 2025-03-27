@@ -112,6 +112,7 @@ class Dataset:
             print(f"Loading data for {self.cfg.subject} from {self.cfg.data_path}")
 
         # loading each run
+        # TODO: figure out a way of combining the runs into a single NWB file
         for run in self.cfg.runs:
             # TODO: Check if run is already saved as nwb file and if it is just load it
             if self.verbose:
@@ -124,6 +125,7 @@ class Dataset:
                 run=run,
                 xpc_dict=self.cfg.xpc,
                 nwb_dict=self.cfg.nwb,
+                is_monkey=self.cfg.is_monkey,
             )
             if self.cfg.nwb.save:
                 path = self.cfg.data_path

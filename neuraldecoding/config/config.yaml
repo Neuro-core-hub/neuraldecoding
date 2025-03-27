@@ -1,6 +1,6 @@
 defaults:
   - _self_
-  - dataset: zstruct
+  - dataset: zstruct_monkey_brain
 
 dataset:
   date: 2023-04-03

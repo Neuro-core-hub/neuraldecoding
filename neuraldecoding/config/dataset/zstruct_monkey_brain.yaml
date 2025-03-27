@@ -25,13 +25,13 @@ xpc:
   spikes_name: "spikes"
   num_channels: 96
   device: 
-    name: "Utah Array"
-    description: "Utah Array"
+    name: "Cerebus"
+    description: "Data acquisition system"
     manufacturer: "Blackrock Neurotech"
   electrode_group:
     name: "Utah Array"
     description: "Utah Array"
-    location: "XXX"
+    location: "M1"
 nwb:
   compression:
     type: "gzip"
