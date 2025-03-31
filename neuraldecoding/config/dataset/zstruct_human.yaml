@@ -2,41 +2,10 @@ type: zstruct
 date: ???
 runs: ???
 server_path: "Z:/Data/Humans/RPNI"
-institution: "University of Michigan"
-lab: "Chestek Lab"
 subject: ???
 is_monkey: false
 data_path: null
-xpc:
-  behavior_field: "FingerAnglesTIMRL"
-  behavior_name: "finger_positions"
-  behavior_description: "DoF position, from 0 to 1"
-  behavior_unit: "Arbitrary units"
-  behavior_comments: "Raw position data"
-  signal_field: "EMGFeats"
-  signal_name: "emg"
-  signal_description: "Mean absolute value of EMG"
-  signal_conversion: 2.5E-7
-  signal_filtering: "bandpass: 100-500 Hz"
-  signal_comments: "Mean absolute value, for each 1ms bin"
-  experiment_time_field: "ExperimentTime"
-  spikes_exist: false
-  spikes_field: null
-  spikes_name: null
-  num_channels: 16
-  device: 
-    name: "Nomad"
-    description: "Data acquisition system"
-    manufacturer: "Ripple Neuro"
-  electrode_group:
-    name: "emg_electrodes"
-    description: "EMG electrodes (Synapse)"
-    location: "XXX"
-nwb:
-  compression:
-    type: "gzip"
-    options: 4
-  save: true
+  
 
 
 

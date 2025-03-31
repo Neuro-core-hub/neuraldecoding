@@ -1,9 +1,5 @@
 import os
-import yaml
 import numpy as np
-from pynwb.file import Subject
-from pynwb.device import Device
-from pynwb.ecephys import ElectrodeGroup, TimeSeries
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 

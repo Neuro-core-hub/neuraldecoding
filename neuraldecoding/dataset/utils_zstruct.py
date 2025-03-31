@@ -1,21 +1,16 @@
 import os
 import warnings
 from sys import platform
-import neuraldecoding.dataset.utils_dataset as utils_dataset
 import numpy as np
-import numpy.matlib
 import re
 import copy
 import glob
-import warnings
-import pandas as pd
 from pynwb import NWBFile
 from pynwb.file import Subject
 from pynwb.device import Device
 from pynwb.ecephys import (
     ElectrodeGroup,
     ElectricalSeries,
-    EventDetection,
     SpikeEventSeries,
 )
 from pynwb.base import TimeSeries
@@ -33,11 +28,17 @@ def get_server_data_path(is_monkey=True, custom_server_folder=None):
     """
     Returns the server filepath based on what operating system is being used.
 
-    Inputs:
-        is_monkey: bool
-            If True, the path will be set to the monkey data folder. If False, the path will be set to the human data folder
-        win_server_folder: str - Default: 'Z'
-            The server folder path for Windows systems (if different from the default 'Z')
+    Parameters
+    ----------
+    is_monkey : bool, default=True
+        If True, the path will be set to the monkey data folder. If False, the path will be set to the human data folder.
+    custom_server_folder : str, optional
+        The custom server folder path. If provided, this will be used instead of the default paths.
+
+    Returns
+    -------
+    str
+        The complete path to the data directory.
     """
     # choose the standard path based on the OS
     if custom_server_folder is not None:
@@ -58,6 +59,20 @@ def get_server_data_path(is_monkey=True, custom_server_folder=None):
 
 
 def get_server_notes_details(data_path):
+    """
+    Extract experimenter information and notes content from the notes file in the data directory.
+
+    Parameters
+    ----------
+    data_path : str
+        Path to the data directory containing the notes file.
+
+    Returns
+    -------
+    tuple
+        A tuple containing (experimenter, notes_content) where experimenter is a list of names
+        and notes_content is the full text of the notes file.
+    """
     experiment_regex = "(?i)Experiment(er)?(s)?(:)?( )*"
     personnel_regex = "(?i)Personnel(:)?( )*"
     notes_regex = "(?i)Notes.*\.txt$"
@@ -94,6 +109,24 @@ def get_server_notes_details(data_path):
 
 
 def load_z_script(direc):
+    """
+    Load and read the zScript.txt file from the specified directory.
+
+    Parameters
+    ----------
+    direc : str
+        Directory path containing the zScript.txt file.
+
+    Returns
+    -------
+    str
+        Contents of the zScript.txt file.
+
+    Raises
+    ------
+    Exception
+        If the zScript.txt file is not found in the specified directory.
+    """
     try:
         # load in and read z translator
         f = open(r"{}".format(os.path.join(direc, "zScript.txt")), "r")
@@ -111,7 +144,28 @@ def load_z_script(direc):
 # TODO: optimize this function - it's very slow right now
 
 
-def read_xpc_data(contents, direc, xpc_dict, verbose=False):
+def read_xpc_data(contents, direc, xpc_dict, nwb_dict, verbose=False):
+    """
+    Parse the zScript contents and binary data files to create a structured dictionary of experimental data.
+
+    Parameters
+    ----------
+    contents : str
+        Contents of the zScript.txt file.
+    direc : str
+        Directory path containing the binary data files.
+    xpc_dict : dict
+        Dictionary containing configuration parameters for parsing the data.
+    nwb_dict : dict
+        Dictionary containing configuration parameters for the NWB file.
+    verbose : bool, default=False
+        If True, print additional information during processing.
+
+    Returns
+    -------
+    list
+        List of dictionaries, where each dictionary contains the data for one trial.
+    """
     # supported data types and their byte sizes #START REMOVE
     print("Running optimized code")
     cls = {
@@ -220,7 +274,7 @@ def read_xpc_data(contents, direc, xpc_dict, verbose=False):
         **{name: None for name in fnames[::2]},
         "TrialNumber": None,
         **(
-            {xpc_dict["signal_name"]: [], xpc_dict["spikes_field"]: channel_structure}
+            {nwb_dict["signal_name"]: [], xpc_dict["spikes_field"]: channel_structure}
             if spikeformat
             else {}
         ),
@@ -334,10 +388,10 @@ def read_xpc_data(contents, direc, xpc_dict, verbose=False):
                         # Use a list comprehension instead of iterative appends
                         neural_data[m] = [ord(content[n]) for n in range(content_len)]
 
-                dict_data[i][xpc_dict["signal_name"]] = neural_data
+                dict_data[i][nwb_dict["signal_name"]] = neural_data
 
             except re.error:  # data is an empty cell
-                dict_data[i][xpc_dict["signal_name"]] = []
+                dict_data[i][nwb_dict["signal_name"]] = []
 
     # Format Specific Fields
     ############################################################################
@@ -349,7 +403,7 @@ def read_xpc_data(contents, direc, xpc_dict, verbose=False):
                 continue
 
             # Get references to avoid repeated dictionary lookups
-            neural_data = dict_data[i][xpc_dict["signal_name"]]
+            neural_data = dict_data[i][nwb_dict["signal_name"]]
             exp_time = dict_data[i][xpc_dict["experiment_time_field"]]
             neural_data_len = len(neural_data)
 
@@ -399,7 +453,7 @@ def read_xpc_data(contents, direc, xpc_dict, verbose=False):
 
             # Remove unneeded fields (moved outside the channel loop)
             dict_data[i].pop("SpikeChans", None)
-            dict_data[i].pop(xpc_dict["signal_name"], None)
+            dict_data[i].pop(nwb_dict["signal_name"], None)
 
     # this next one removes the skipped trials
     # must use a generator because of indexing issues if you don't
@@ -423,17 +477,21 @@ def read_xpc_data(contents, direc, xpc_dict, verbose=False):
 
 def initialize_nwb_columns(nwb_file, data_dict, xpc_dict):
     """
-    Initialize the columns of the NWB file based on the dictionary keys. Returns the time_series key names dictionary
+    Initialize the columns of the NWB file based on the dictionary keys and identify time series data.
 
-    Inputs:
-        run: int
-            Run number
-        data_dict: list of dictionaries
-            Dictionary with the data from the server
+    Parameters
+    ----------
+    nwb_file : pynwb.NWBFile
+        The NWB file object to add columns to.
+    data_dict : list of dict
+        List of dictionaries containing the data for each trial.
+    xpc_dict : dict
+        Dictionary containing configuration parameters for parsing the data.
 
-    Outputs:
-        time_series_dict: dict
-            Dictionary of the time series data initialized
+    Returns
+    -------
+    dict
+        Dictionary of pre-allocated arrays for time series data.
     """
 
     # Dynamically create trial column and create the time_series dictionary
@@ -484,15 +542,37 @@ def initialize_nwb_file(
     xpc_dict,
 ):
     """
-    Initialize the NWB file
+    Initialize an NWB file with metadata and electrode information.
 
-    Inputs:
-        run: int
-            Run number
+    Parameters
+    ----------
+    data_path : str
+        Path to the data directory.
+    run : int
+        Run number.
+    creation_time : float
+        Timestamp of when the data was created.
+    experimenter : list
+        List of experimenter names.
+    notes_content : str
+        Content of the notes file.
+    institution : str
+        Institution name.
+    lab : str
+        Lab name.
+    subject : pynwb.file.Subject
+        Subject information.
+    device : pynwb.device.Device
+        Recording device information.
+    electrode_group : pynwb.ecephys.ElectrodeGroup
+        Electrode group information.
+    xpc_dict : dict
+        Dictionary containing configuration parameters.
 
-    Outputs:
-        nwb_file: pynwb.file.NWBFile
-            NWB file object
+    Returns
+    -------
+    pynwb.NWBFile
+        Initialized NWB file object.
     """
 
     # Get dataset details
@@ -519,15 +599,30 @@ def initialize_nwb_file(
 
 def get_dataset_details(data_path, subject, date):
     """
-    Set the data path and the subject object for a specific subject and date
+    Extract subject information, creation time, experimenter, and notes from the data directory.
 
-    Inputs:
-        subject_name: str
-            Subject name
-        date: str
-            Date of the recording
-        data_path: str
-            Folder path to load the data from (assuming it is a folder with the runs folders inside) or None if loading using subject-date format
+    Parameters
+    ----------
+    data_path : str
+        Path to the data directory.
+    subject : str or None
+        Subject name. If None, it will be extracted from the data path.
+    date : str
+        Date of the recording.
+
+    Returns
+    -------
+    tuple
+        A tuple containing (subject, creation_time, experimenter, notes_content) where:
+        - subject is a pynwb.file.Subject object
+        - creation_time is a timestamp
+        - experimenter is a list of names
+        - notes_content is the full text of the notes file
+
+    Raises
+    ------
+    ValueError
+        If data_path is None.
     """
     if data_path is None:
         raise ValueError("data_path is required")
@@ -547,32 +642,8 @@ def get_dataset_details(data_path, subject, date):
     return subject, creation_time, experimenter, notes_content
 
 
-def initialize_nwb_modules(nwb_file):
-    """
-    Initialize the NWB modules for the run NWB file
-
-    Inputs:
-        run: int
-            Run number
-    """
-    behavior_module = nwb_file.create_processing_module(
-        name="behavior", description="Raw behavioral data"
-    )
-
-    neural_data_module = nwb_file.create_processing_module(
-        name="neural_data", description="Neural data"
-    )
-
-    nwb_modules = {
-        "behavior": behavior_module,
-        "neural_data": neural_data_module,
-    }
-    return nwb_modules
-
-
 def add_run_data(
     nwb_file,
-    nwb_modules,
     data_dict,
     time_series_dict,
     xpc_dict,
@@ -580,11 +651,22 @@ def add_run_data(
     verbose=False,
 ):
     """
-    Add the data from the server data dictionary to the NWB file
-    Inputs:
-        run: int
-        data_dict: list of dictionaries
-        time_series_dict: dict
+    Add experimental data to the NWB file, including neural, behavioral, and spike data.
+
+    Parameters
+    ----------
+    nwb_file : pynwb.NWBFile
+        The NWB file object to add data to.
+    data_dict : list of dict
+        List of dictionaries containing the data for each trial.
+    time_series_dict : dict
+        Dictionary of pre-allocated arrays for time series data.
+    xpc_dict : dict
+        Dictionary containing configuration parameters for the data.
+    nwb_dict : dict
+        Dictionary containing NWB-specific configuration parameters.
+    verbose : bool, default=False
+        If True, print additional information during processing.
     """
 
     num_trials = len(data_dict)
@@ -637,16 +719,16 @@ def add_run_data(
 
     # adding behavior data
     behavior_ts = TimeSeries(
-        name=xpc_dict["behavior_name"],
+        name=nwb_dict["behavior_name"],
         data=H5DataIO(
             behavior_data,
             compression=nwb_dict["compression"]["type"],
             compression_opts=nwb_dict["compression"]["options"],
         ),
-        unit=xpc_dict["behavior_unit"],  # From 0 to 1
+        unit=nwb_dict["behavior_unit"],  # From 0 to 1
         timestamps=times,
-        description=xpc_dict["behavior_description"],
-        comments=xpc_dict["behavior_comments"],
+        description=nwb_dict["behavior_description"],
+        comments=nwb_dict["behavior_comments"],
     )
 
     # Add finger position as acquisition
@@ -655,21 +737,21 @@ def add_run_data(
 
     # adding neural data
     neural_data_ts = ElectricalSeries(
-        name=xpc_dict["signal_name"],
+        name=nwb_dict["signal_name"],
         data=H5DataIO(
             neural_data,
             compression=nwb_dict["compression"]["type"],
             compression_opts=nwb_dict["compression"]["options"],
         ),
         timestamps=times,
-        description=xpc_dict["signal_description"],
-        conversion=xpc_dict["signal_conversion"],
+        description=nwb_dict["signal_description"],
+        conversion=nwb_dict["signal_conversion"],
         channel_conversion=[1.0] * xpc_dict["num_channels"],
-        filtering=xpc_dict["signal_filtering"],
-        comments=xpc_dict["signal_comments"],
+        filtering=nwb_dict["signal_filtering"],
+        comments=nwb_dict["signal_comments"],
         electrodes=nwb_file.create_electrode_table_region(
             region=list(range(xpc_dict["num_channels"])),
-            description=xpc_dict["electrode_group"]["description"],
+            description=nwb_dict["electrode_group"]["description"],
         ),
     )
 
@@ -717,10 +799,10 @@ def add_run_data(
         # Add spike series
         electrode_table = nwb_file.create_electrode_table_region(
             region=list(range(xpc_dict["num_channels"])),
-            description=xpc_dict["electrode_group"]["description"],
+            description=nwb_dict["electrode_group"]["description"],
         )
         spike_series = SpikeEventSeries(
-            name=xpc_dict["spikes_name"],
+            name=nwb_dict["spikes_name"],
             data=H5DataIO(
                 spikes,
                 compression=nwb_dict["compression"]["type"],
@@ -780,7 +862,29 @@ def get_nwb_from_run(
     is_monkey,
 ):
     """
-    Get the NWB file from the run
+    Create and populate an NWB file from experimental run data.
+
+    Parameters
+    ----------
+    subject : str or None
+        Subject name. If None, it will be extracted from the data path.
+    date : str
+        Date of the recording.
+    data_path : str or None
+        Path to the data directory. If None, it will be constructed from server path.
+    run : str or int
+        Run identifier.
+    xpc_dict : dict
+        Dictionary containing configuration parameters for parsing the data.
+    nwb_dict : dict
+        Dictionary containing NWB-specific configuration parameters.
+    is_monkey : bool
+        If True, the path will be set to the monkey data folder. If False, the path will be set to the human data folder.
+
+    Returns
+    -------
+    pynwb.NWBFile
+        The populated NWB file object.
     """
 
     if data_path is None:
@@ -797,11 +901,11 @@ def get_nwb_from_run(
         data_path, subject, date
     )
     # Get the institution and lab
-    institution = "University of Michigan"
-    lab = "Chestek Lab"
+    institution = nwb_dict["institution"]
+    lab = nwb_dict["lab"]
     # Get the device and electrode group
-    device = Device(**dict(xpc_dict["device"]))
-    electrode_group = ElectrodeGroup(device=device, **dict(xpc_dict["electrode_group"]))
+    device = Device(**dict(nwb_dict["device"]))
+    electrode_group = ElectrodeGroup(device=device, **dict(nwb_dict["electrode_group"]))
 
     # Initialize the NWB file
     nwb_file = initialize_nwb_file(
@@ -818,13 +922,9 @@ def get_nwb_from_run(
         xpc_dict,
     )
 
-    # Initialize the nwb modules
-    nwb_modules = initialize_nwb_modules(nwb_file)
-
     # Load the data from the server
     load_data_server(
         nwb_file,
-        nwb_modules,
         data_path,
         run,
         xpc_dict,
@@ -836,31 +936,38 @@ def get_nwb_from_run(
 
 def load_data_server(
     nwb_file,
-    nwb_modules,
     data_path,
     run,
     xpc_dict,
     nwb_dict,
 ):
     """
-    Load the data from the server and populate the nwb_file
+    Load the data from the server and populate the NWB file with experimental data.
 
-    Inputs:
-        data_path: str
-            Path to the data
-        run: int
-            Run number
-        num_channels: int
-            Number of channels
-        verbose: bool
-            Verbose flag
+    Parameters
+    ----------
+    nwb_file : pynwb.NWBFile
+        The NWB file object to populate with data.
+    data_path : str
+        Path to the data directory.
+    run : int
+        Run number to load.
+    xpc_dict : dict
+        Dictionary containing configuration parameters for parsing the data.
+    nwb_dict : dict
+        Dictionary containing NWB-specific configuration parameters.
+
+    Returns
+    -------
+    list of dict
+        List of dictionaries containing the processed data for each trial.
     """
     run_path = os.path.join(data_path, f"Run-{run:03d}")
 
     # loading the zScript file content
     contents = load_z_script(run_path)
 
-    data_dict = read_xpc_data(contents, run_path, xpc_dict)
+    data_dict = read_xpc_data(contents, run_path, xpc_dict, nwb_dict)
 
     # initializing the nwb modules and columns
     time_series_dict = initialize_nwb_columns(nwb_file, data_dict, xpc_dict)
@@ -868,7 +975,6 @@ def load_data_server(
     # populate the nwb file with the run data
     add_run_data(
         nwb_file,
-        nwb_modules,
         data_dict,
         time_series_dict,
         xpc_dict,

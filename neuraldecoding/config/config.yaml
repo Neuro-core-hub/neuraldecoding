@@ -1,6 +1,8 @@
 defaults:
+  - dataset/zstruct_monkey
+  - dataset/nwb/monkey_brain
+  - dataset/xpc/monkey_brain
   - _self_
-  - dataset: zstruct_monkey_brain
 
 dataset:
   date: 2023-04-03
