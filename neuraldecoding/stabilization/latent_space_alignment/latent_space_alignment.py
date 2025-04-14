@@ -31,9 +31,9 @@ class LatentSpaceAlignment(Stabilization):
         self.dim_red_method.setup(ndims)
         self.alignment_method.setup(ndims)
 
-        lm = self.dim_red_method.calc_lm(data)
+        lm, args = self.dim_red_method.calc_lm(data)
         self.alignment_method.set_baseline(lm)
-        latent_ds = self.dim_red_method.reduce(data, lm)
+        latent_ds = self.dim_red_method.reduce(data, lm, args)
 
         return latent_ds
     
@@ -46,11 +46,11 @@ class LatentSpaceAlignment(Stabilization):
         Returns:
             ls (numpy array of shape [ndims x timepoints]): aligned latent space
         """        
-        lm = self.dim_red_method.calc_lm(data)
+        lm, args = self.dim_red_method.calc_lm(data)
 
         aligned_lm = self.alignment_method.get_aligned_lm(lm)
 
-        latent_ds = self.dim_red_method.reduce(data, aligned_lm)
+        latent_ds = self.dim_red_method.reduce(data, aligned_lm, args)
         
         return latent_ds
     

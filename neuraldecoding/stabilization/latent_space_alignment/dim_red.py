@@ -16,8 +16,8 @@ class DimRed(ABC):
         
 class LoadingMatrixDimRed(DimRed):
     def apply(self, data):
-        lm = self.calc_lm(data)
-        reduced_data = self.reduce(data, lm)
+        lm, args = self.calc_lm(data)
+        reduced_data = self.reduce(data, lm, args)
         return reduced_data
     
 class FactorAnalysis(LoadingMatrixDimRed):
@@ -39,9 +39,9 @@ class FactorAnalysis(LoadingMatrixDimRed):
         W = lm_partial/psi
         loading_matrix = W.T @ np.linalg.inv(np.eye(len(lm_partial))+np.dot(W, lm_partial.T))
 
-        return loading_matrix
+        return loading_matrix, None
     
-    def reduce(self, data, lm):
+    def reduce(self, data, lm, args = None):
         data_means = np.mean(data.neural, axis = 0)
         reduced_data = (data.neural - data_means) @ lm
         return reduced_data
@@ -52,20 +52,39 @@ class PCA(LoadingMatrixDimRed):
         pca.fit(ds.neural)
         lm = pca.components_.T
         
-        return lm
+        return lm, None
     
-    def reduce(self, data, lm):
+    def reduce(self, data, lm, args = None):
         data_means = np.mean(data.neural, axis = 0)
         ls = (data.neural - data_means) @ lm
         ls_ds = data.make_latent_ds(ls)
-        return ls_ds
+        return ls_ds, None
     
 class NoDimRed(LoadingMatrixDimRed):
     def calc_lm(self, data):
-        return np.eye(data.neural.shape[1])
+        return np.eye(data.neural.shape[1]), None
     
-    def reduce(self, data, lm):
+    def reduce(self, data, lm, args):
         return data
+    
+## TODO add .toml file to fa repo
+# class DegenhartFactorAnalysis(LoadingMatrixDimRed):
+#     def calc_lm(self, data):
+#         d, lm, psi = dfa.get_factor_analysis_loading(data.kin, self.ndims)
+#         args = {'d': d, 
+#                 'psi': psi}
+#         return lm, args
+    
+#     def __reduce__(self, data, lm, args):
+#         beta, O = dfa.get_stabilization_matrices(lm, args['psi'], args['d'])
+#         z_a = data.neural @ beta.T + np.expand_dims(O, axis = -1).T
+
+#         return z_a
+
+
+        
+        
+    
  
 # TODO
 # class ProSVD(DimRed):   
