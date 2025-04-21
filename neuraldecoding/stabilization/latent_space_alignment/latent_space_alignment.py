@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from stabilization import Stabilization
+from ..stabilization import Stabilization
 
 class LatentSpaceAlignment(Stabilization):
     def __init__(self, dim_red_method, alignment_method, ndims = None): 
@@ -18,7 +18,7 @@ class LatentSpaceAlignment(Stabilization):
         """Train the LatentSpaceAlignment. Sets day_0 lm and returns latent space
 
         Args:
-            data (numpy array of shape [n x timepoints]): day 0 data
+            data (numpy array of shape [n x timepoints]): day 0 neural data
 
         Returns:
             ls (numpy array of shape [ndims x timepoints]): latent space
@@ -28,8 +28,8 @@ class LatentSpaceAlignment(Stabilization):
         else:
             ndims = self.ndims
             
-        self.dim_red_method.setup(ndims)
-        self.alignment_method.setup(ndims)
+        self.dim_red_method.set_dims(ndims)
+        self.alignment_method.set_dims(ndims)
 
         lm, args = self.dim_red_method.calc_lm(data)
         self.alignment_method.set_baseline(lm)
@@ -41,7 +41,7 @@ class LatentSpaceAlignment(Stabilization):
         """Extract and align a latent space
 
         Args:
-            data (numpy array of shape [ndims x timepoints]): day k data
+            data (numpy array of shape [ndims x timepoints]): day k neural data
 
         Returns:
             ls (numpy array of shape [ndims x timepoints]): aligned latent space

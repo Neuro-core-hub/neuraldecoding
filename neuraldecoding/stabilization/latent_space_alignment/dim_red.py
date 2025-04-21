@@ -3,15 +3,19 @@ import math
 import numpy as np
 from sklearn.decomposition import FactorAnalysis as FA
 from sklearn.decomposition import PCA as PrincipalComponentAnalyisis
+import warnings
 
 # import adaptive_latents.prosvd as psvd
 
 class DimRed(ABC):
-    def __init__(self, ndims):
+    def __init__(self, ndims = None):
         """set ndims
         Args:
             ndims (int): number of dimensions to reduce to 
         """        
+        self.ndims = ndims
+
+    def set_dims(self, ndims):
         self.ndims = ndims
         
 class LoadingMatrixDimRed(DimRed):
@@ -42,6 +46,8 @@ class FactorAnalysis(LoadingMatrixDimRed):
         return loading_matrix, None
     
     def reduce(self, data, lm, args = None):
+        if args is not None: 
+            warnings.warn("Warning: Args passed to FactorAnalysis.reduce() when they are not needed")
         data_means = np.mean(data.neural, axis = 0)
         reduced_data = (data.neural - data_means) @ lm
         return reduced_data
@@ -55,6 +61,8 @@ class PCA(LoadingMatrixDimRed):
         return lm, None
     
     def reduce(self, data, lm, args = None):
+        if args is not None: 
+            warnings.warn("Warning: Args passed to PCA.reduce() when they are not needed")
         data_means = np.mean(data.neural, axis = 0)
         ls = (data.neural - data_means) @ lm
         ls_ds = data.make_latent_ds(ls)
@@ -81,11 +89,6 @@ class NoDimRed(LoadingMatrixDimRed):
 
 #         return z_a
 
-
-        
-        
-    
- 
 # TODO
 # class ProSVD(DimRed):   
 #     ## Note: this is very much setup for offline analysis, for online it will need to be altered

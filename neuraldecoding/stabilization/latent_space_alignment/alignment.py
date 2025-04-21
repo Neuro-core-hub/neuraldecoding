@@ -6,7 +6,7 @@ class Alignment():
     def __init__():
         raise NotImplementedError
     
-    def setup(self, ndims):
+    def set_dims(self, ndims):
         """set ndims
 
         Args:
@@ -34,13 +34,16 @@ class ProcrustesAlignment(Alignment):
     """
     Use orthogonal procrustes to align day_0 lm to day_k lm
     """    
+    def __init__(self):
+        self.name = "procrustes_alignment"
+
     def align(self, lm):              
-        m = self.baseline @ lm.T
+        m = self.baseline.T @ lm
         U, _, V = np.linalg.svd(m)
         
-        S = V.T @ U.T
+        S =  U @ V
         
-        aligned_lm = S.T @ lm
+        aligned_lm = lm @ S.T
         
         return aligned_lm
     
@@ -49,7 +52,7 @@ class SwitchLM(Alignment):
     Use day_0 lm
     """   
     def __init__(self):
-        self.name = "switch"
+        self.name = "switch_alignment"
 
     def align(self, lm):
         return self.baseline
@@ -57,10 +60,10 @@ class SwitchLM(Alignment):
 class NoAlignment(Alignment):
     """
     Don't perform any alignment
-    """            
-    def get_aligned_lm(self, lm):
-        return lm 
-    
+    """          
+    def __init__(self):
+        self.name = "no_alignment"  
+
     def align(self, lm):
         return lm
     
