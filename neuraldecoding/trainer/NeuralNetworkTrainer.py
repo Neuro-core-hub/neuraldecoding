@@ -16,8 +16,8 @@ def main(train_data, valid_data, config: DictConfig):
     Trains a Neural Network. First loads data into dataloader, then uses TrainerImplementation class to train model.
 
     Parameters:
-        train_data: training data (dict with chans, states), assumed numpy
-        valid_data: validation data (dict with chans, states), assumed numpy
+        train_data: training data, assumed numpy
+        valid_data: validation data, assumed numpy
         config:  Hydra configuration file containing all required parameters (see train model function)
     
     Returns:
@@ -25,16 +25,10 @@ def main(train_data, valid_data, config: DictConfig):
     """
     trainer = TrainerImplementation()
 
-    train_dataset = torch.utils.data.TensorDataset(
-        torch.tensor(train_data['chans'], dtype=torch.float32), 
-        torch.tensor(train_data['states'], dtype=torch.float32)
-    )
+    train_dataset = torch.utils.data.TensorDataset(torch.tensor(train_data, dtype=torch.float32))
     train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
-    valid_dataset = torch.utils.data.TensorDataset(
-        torch.tensor(valid_data['chans'], dtype=torch.float32), 
-        torch.tensor(valid_data['states'], dtype=torch.float32)
-    )
+    valid_dataset = torch.utils.data.TensorDataset(torch.tensor(valid_data, dtype=torch.float32), dtype=torch.float32)
     valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=True)
     
     model, results = trainer.train_model(train_dataloader, valid_dataloader, config)
@@ -145,9 +139,9 @@ class TrainerImplementation(Trainer):
         """
         model.train()
         running_loss = 0.0
-        for batch in train_data:
-            x = batch['chans'].to(device)
-            y = batch['states'].to(device)
+        for x,y in train_data: # assumed one batch
+            x = x.to(device)
+            y = y.to(device)
 
             optimizer.zero_grad()
             yhat = model(x)
@@ -174,9 +168,9 @@ class TrainerImplementation(Trainer):
         all_targets = []
 
         with torch.no_grad():
-            for val_batch in valid_data:
-                x_val = val_batch['chans'].to(device)
-                y_val = val_batch['states'].to(device)
+            for x_val, y_val in valid_data: # assumed one batch
+                x_val = x_val.to(device)
+                y_val = y_val.to(device)
 
                 yhat_val = model(x_val)
                 if isinstance(yhat_val, tuple):
