@@ -4,54 +4,90 @@ import pandas as pd
 from scipy.spatial import KDTree
 from sklearn.base import BaseEstimator
 import sys
+import warnings
 
 EPSILON = sys.float_info.epsilon
 
-# ------------------------
-# --- Legacy Functions ---
-# ------------------------
+# ---------------
+# --- Classes ---
+# ---------------
 
-def add_training_noise(x,
-                       bias_neural_std=None,
-                       noise_neural_std=None,
-                       noise_neural_walk_std=None,
-                       bias_allchans_neural_std=None,
-                       device='cpu'):
-    """Function to add different types of noise to training input data to make models more robust.
-       Identical to the methods in Willet 2021.
+class StandardScaler:
+    """A copy of the scikit learn StandardScaler, but works with PyTorch tensors and can export/load params."""
+    def __init__(self, forward_transform_normalizes=True):
+        self.forward_transform_normalizes = forward_transform_normalizes
+        # True: transform() does raw -> normalized      (like for neural input scaling)
+        # False: transform() does normalized -> raw     (like for output prediction scaling)
 
-    Args:
-        x (tensor):                     neural data of shape [batch_size x num_chans x conv_size]
-        bias_neural_std (float):        std of bias noise
-        noise_neural_std (float):       std of white noise
-        noise_neural_walk_std (float):  std of random walk noise
-        bias_allchans_neural_std (float): std of bias noise, bias is same across all channels
-        device (device):                torch device (cpu or cuda)
-    """
-    if bias_neural_std:
-        # bias is constant across time (i.e. the 3 conv inputs), but different for each channel & batch
-        # biases = torch.normal(0, bias_neural_std, x.shape[:2]).unsqueeze(2).repeat(1, 1, x.shape[2])
-        biases = torch.normal(torch.zeros(x.shape[:2]), bias_neural_std).unsqueeze(2).repeat(1, 1, x.shape[2])
-        x = x + biases.to(device=device)
+        self.mean_ = None
+        self.std_ = None
+        self.mean_np_ = None
+        self.std_np_ = None
 
-    if noise_neural_std:
-        # adds white noise to each channel and timepoint (independent)
-        # noise = torch.normal(0, noise_neural_std, x.shape)
-        noise = torch.normal(torch.zeros_like(x), noise_neural_std)
-        x = x + noise.to(device=device)
+    def fit(self, X):
+        """Compute the mean and std to be used for later scaling."""
+        if isinstance(X, torch.Tensor):
+            self.mean_ = torch.mean(X, dim=0, keepdim=True)
+            self.std_ = torch.std(X, dim=0, unbiased=False, keepdim=True) + 1e-8
+            self.mean_np_ = self.mean_.cpu().numpy()
+            self.std_np_ = self.std_.cpu().numpy()
+        elif isinstance(X, np.ndarray):
+            self.mean_np_ = np.mean(X, axis=0)
+            self.std_np_ = np.std(X, axis=0) + 1e-8
+            self.mean_ = torch.tensor(self.mean_np_)
+            self.std_ = torch.tensor(self.std_np_)
+        else:
+            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
+        return self
 
-    if noise_neural_walk_std:
-        # adds a random walk to each channel (noise is summed across time)
-        # noise = torch.normal(0, noise_neural_walk_std, x.shape).cumsum(dim=2)
-        noise = torch.normal(torch.zeros_like(x), noise_neural_walk_std).cumsum(dim=2)
-        x = x + noise.to(device=device)
+    def _normalize(self, X):
+        if isinstance(X, torch.Tensor):
+            return (X - self.mean_) / self.std_
+        elif isinstance(X, np.ndarray):
+            return (X - self.mean_np_) / self.std_np_
+        else:
+            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
 
-    if bias_allchans_neural_std:
-        # bias is constant across time (i.e. the 3 conv inputs), and same for each channel
-        biases = torch.normal(torch.zeros((x.shape[0], 1, 1)), bias_allchans_neural_std).repeat(1, x.shape[1], x.shape[2])
-        x = x + biases.to(device=device)
+    def _unnormalize(self, X):
+        if isinstance(X, torch.Tensor):
+            return X * self.std_ + self.mean_
+        elif isinstance(X, np.ndarray):
+            return X * self.std_np_ + self.mean_np_
+        else:
+            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
 
-    return x
+    def transform(self, X):
+        if (self.mean_ is None) or (self.std_ is None):
+            warnings.warn("Using an untrained scaler... not scaling X")
+            return X
+
+        if self.forward_transform_normalizes:
+            return self._normalize(X)
+        else:
+            return self._unnormalize(X)
+
+    def inverse_transform(self, X):
+        if (self.mean_ is None) or (self.std_ is None):
+            warnings.warn("Using an untrained scaler... not scaling X")
+            return X
+
+        if self.forward_transform_normalizes:
+            return self._unnormalize(X)
+        else:
+            return self._normalize(X)
+
+    def export_params(self):
+        """Export the mean and std as a dictionary."""
+        return {'mean': self.mean_, 'std': self.std_}
+
+    def load_params(self, params):
+        """Load the mean and std from a dictionary."""
+        self.mean_ = params['mean']
+        self.std_ = params['std']
+        self.mean_np_ = self.mean_.cpu().numpy()
+        self.std_np_ = self.std_.cpu().numpy()
+        return self
+
 
 # ------------------------
 # --- Helper Functions ---
@@ -236,7 +272,7 @@ def normalize_scaler(X,
 
         Args:
             X (ndarray): numpy array of size [N, numfeats]
-            Normalizer (scipy.scaler): sklearn scaler
+            Normalizer (sklearn.scaler): sklearn scaler with predefined parameters (e.g. sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True))
         
         Returns:
             normalize_X (ndarray): Normalized input data
@@ -251,15 +287,15 @@ def normalize_scaler(X,
 # --- Util Functions ---
 # ----------------------
 
-def add_time_history(X,
-                     Y,
-                     num_bins = 0,
-                     padding = None,
-                     reshape = False
-                     ):
+def add_time_history_2D(X,
+                        Y,
+                        num_bins = 0,
+                        padding = None
+                        ):
     """
         Takes in neural data X and behavior Y and returns two "adjusted" neural data and behavior matrices
         based on the optional params. The number of historical bins of neural data can be set.
+        Returns the adjusted matrices in 2D form, it has the history appended as extra columns [1, neu*hist+1].
 
         Args:
             X (ndarray): The neural data, which should be [t, neu] in size, where t is the numebr of smaples and neu is the number
@@ -270,9 +306,6 @@ def add_time_history(X,
                     padding (string): Default None, disabled. This fills previous neural data with values before the experiment began. A single
                     scalar wil fill all previous neural data with that value. Otherwise, a [1,neu] ndarray equal to the first
                     dimension of X (# of neurons) should represent the value to fill for each channel.
-            reshape (bool, optional): Default False. If history is added, will return the adjusted matrices either in 2d or 3d form (2d has the history appended
-                    as extra columns, 3d has history as a third dimension. For example, reshape true returns a sample as:
-                    [1, neu*hist+1] whereas reshape false returns: [1, neu, hist+1]. 
 
         Returns:
             adjX (ndarray): The adjusted neural data.
@@ -295,10 +328,50 @@ def add_time_history(X,
         adjX[:,:,h] = X[h:X.shape[0]-num_bins+h,:]
     adjY = Y[num_bins:,:]
 
-    if reshape:
-        #NOTE: History will be succesive to each column (ie with history 5, columns 0-5 will be channel 1, 6-10
-        # channel 2, etc..
-        adjX = adjX.reshape(adjX.shape[0],-1)
+    adjX = adjX.reshape(adjX.shape[0],-1)
+
+    return adjX, adjY
+
+def add_time_history_3D(X,
+                        Y,
+                        num_bins = 0,
+                        padding = None
+                        ):
+    """
+        Takes in neural data X and behavior Y and returns two "adjusted" neural data and behavior matrices
+        based on the optional params. The number of historical bins of neural data can be set.
+        Returns the adjusted matrices in 3D form, it has history as a third dimension [1, neu, hist+1].
+
+        Args:
+            X (ndarray): The neural data, which should be [t, neu] in size, where t is the numebr of smaples and neu is the number
+                    of neurons.
+            Y (ndarray): The behavioral data, which should be [t, dim] in size, where t is the number of samples and dim is the
+                    number of states.
+            num_bins (int, optional): Default 0. The number of bins to append to each sample of neural data from the previous 'hist' bins.
+                    padding (string): Default None, disabled. This fills previous neural data with values before the experiment began. A single
+                    scalar wil fill all previous neural data with that value. Otherwise, a [1,neu] ndarray equal to the first
+                    dimension of X (# of neurons) should represent the value to fill for each channel.
+
+        Returns:
+            adjX (ndarray): The adjusted neural data.
+            adjY (ndarray): The adjusted behavioral data.
+    """
+    nNeu = X.shape[1]
+    if padding is not None:
+        if isinstance(padding, np.ndarray):
+            Xadd = np.tile(padding, num_bins)
+            Yadd = np.zeros((num_bins, Y.shape[1]))
+        else:
+            Xadd = np.ones((num_bins, nNeu))*padding
+            Yadd = np.zeros((num_bins, Y.shape[1]))
+        X = np.concatenate((Xadd, X))
+        Y = np.concatenate((Yadd, Y))
+
+    #reshape data to include historical bins
+    adjX = np.zeros((X.shape[0]-num_bins, nNeu, num_bins+1))
+    for h in range(num_bins+1):
+        adjX[:,:,h] = X[h:X.shape[0]-num_bins+h,:]
+    adjY = Y[num_bins:,:]
 
     return adjX, adjY
 
@@ -378,12 +451,12 @@ def normalize(X,
 
         Args:
             X (ndarray): numpy array of size [N, numfeats]
-            method (string): Method to use for normalization. Options includes 'moving_average', 'scipy'.
-            **kwargs: additional parameters. For moving average, it includes 'win_size', and 'axis'. For scipy, it includes 'normalizer'.
+            method (string): Method to use for normalization. Options includes 'moving_average', 'sklearn'.
+            **kwargs: additional parameters. For moving average, it includes 'win_size', and 'axis'. For sklearn, it includes 'normalizer'. N.B. Normalizer should contain predefined parameters (e.g. sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True))
 
         Returns:
             normalize_X (ndarray): Normalized input data
-            normalizer (scipy.scaler): Scipy normalizer, none if method is moving average
+            normalizer (sklearn.scaler): Sklearn normalizer, none if method is moving average
     """
 
     if(method == "moving_average"):
@@ -393,10 +466,10 @@ def normalize(X,
             raise ValueError("moving_average method requires 'win_size' and 'axis'")
         normalize_X = normalize_moving_average(X, win_size, axis)
         return normalize_X, None
-    elif(method == "scipy"):
+    elif(method == "sklearn"):
         normalizer = kwargs.get('normalizer')
         if normalizer is None:
-            raise ValueError("scipy method requires 'normalizer'")
+            raise ValueError("sklearn method requires 'normalizer'")
         normalize_X, normalizer = normalize_scaler(X, normalizer)
         return normalize_X, normalizer
 
