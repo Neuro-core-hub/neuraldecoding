@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import torch
 from tqdm import tqdm
-from LinearModel import LinearModel
+from .LinearModel import LinearModel
 
 
 class KalmanFilter(LinearModel):

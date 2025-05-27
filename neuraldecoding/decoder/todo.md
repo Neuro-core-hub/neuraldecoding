@@ -1,0 +1,21 @@
+In the decoders branch:
+- [x] Move `decoders.py` into a decoders branch.
+- [x] Make an `__init__.py` file, import `decoders.py` so decoders will be accessible as `neuraldecoding.decoders.INSERTCLASSNAME`.
+- [x] Abstract decoder class:
+    - [x] Add `get_input_shape` and `get_output_shape`.
+    - [x] Remove `save_decoder` for now; everything needed to construct the decoder will be in the config folder.
+- [ ] Make documentation for what the config file should look like (or just have an example `.yaml` for `LinearDecoder` next):
+    - [x] Config file should contain the classname of the model being used.
+    - [x] Location of the saved model.
+    - [x] Input shape, output shape.
+- [x] Write a `LinearDecoder` class which:
+    - [x] Loads a saved `LinearModel` from the `neuraldecoding` model class.
+        - [x] Sidenote: Implement `LinearModel` (probably `sklearn` is fine for now).
+                model implemented at LinearRegression.py with tests in tests
+    - [x] Runs predictions on the linear model.
+- [ ] Write a script which (can use Joey's code in dataset as reference for this most likely):
+    - [x] Opens one session from the dataset.
+    - [x] Takes 300 trials as training, 75 as test, adds 7 bins of time history.
+    - [ ] Trains the linear regression and saves it (and a `.yaml` file probably).
+    - [ ] Creates a decoder with said model, gets predictions on the 75 test trials.
+    - [ ] Measures r^2.
