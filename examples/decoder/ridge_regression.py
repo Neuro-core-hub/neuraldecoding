@@ -6,6 +6,7 @@ from scipy.stats import pearsonr
 from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression
 from neuraldecoding.decoder.OfflineDecoders import LinearDecoder
 import yaml
+from sklearn.metrics import r2_score
 
 # Example script of decoding data using ridge regression with decoder
 # Data path needs to be specified first here:
@@ -73,4 +74,7 @@ decoder.load_model()
 rr_prediction = decoder.predict(neural_test)
 
 r = np.array([pearsonr(finger_test[:, i], rr_prediction[:, i])[0] for i in range(finger_test.shape[1])])
+r_squared = [r2_score(finger_test[:, i], rr_prediction[:, i]) for i in range(finger_test.shape[1])]
 print("Pearson r for each output dimension:", r)
+print("r^2 for each output dimension:", r_squared)
+
