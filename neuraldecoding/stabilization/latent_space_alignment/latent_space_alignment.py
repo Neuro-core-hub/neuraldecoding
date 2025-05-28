@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from stabilization import Stabilization
+from neuraldecoding.stabilization import Stabilization
 
 class LatentSpaceAlignment(Stabilization):
     def __init__(self, dim_red_method, alignment_method, ndims = None): 
