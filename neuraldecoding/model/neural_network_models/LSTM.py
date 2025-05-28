@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
-from .NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.utils.training_utils import calc_corr
+import numpy as np
 
 class LSTM(nn.Module, NeuralNetworkModel):
     def __init__(self, model_params):
@@ -23,8 +25,34 @@ class LSTM(nn.Module, NeuralNetworkModel):
         ''' 
 
         model_params["rnn_type"] = "lstm"
-        nn.Module.__init__(self)
-        NeuralNetworkModel.__init__(self, model_params)
+        # nn.Module.__init__(self)
+        # NeuralNetworkModel.__init__(self, model_params)
+
+        super(LSTM, self).__init__()
+
+        self.input_size = model_params["input_size"]
+        self.hidden_size = model_params["hidden_size"]
+        self.num_layers = model_params["num_layers"]
+        self.num_outputs = model_params["num_outputs"]
+        self.device = model_params.get("device", "cpu") 
+        self.hidden_noise_std = model_params.get("hidden_noise_std", 0.0)
+        self.dropout_input = model_params.get("dropout_input", False)
+        self.drop_prob = model_params.get("drop_prob", 0.0)
+
+        # Define LSTM layer
+        self.rnn = nn.LSTM(
+            input_size=self.input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            batch_first=True,
+            dropout=self.drop_prob if self.num_layers > 1 else 0  # Dropout only applies if num_layers > 1
+        )
+
+        # Define output layer
+        self.fc = nn.Linear(self.hidden_size, self.num_outputs)
+
+        # Dropout layer for input (if enabled)
+        self.input_dropout = nn.Dropout(self.drop_prob) if self.dropout_input else nn.Identity()
 
 
     def __call__(self, data):
@@ -96,7 +124,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         return hidden
     
 
-    def train_step(self, data_loader, criterion, optimizer, training_params):
+    def train_step(self, data_loader, criterion, optimizer, training_params): # TODO: Change to batch
         """
         Trains LSTM Model (see BASE_RNN for details)
         """
@@ -105,6 +133,62 @@ class LSTM(nn.Module, NeuralNetworkModel):
 
         # return val_loss, (loss_history_train, loss_history_val, corr_history)
         pass
+
+    def _train_one_epoch(self, train_data, model, optimizer, loss_func, device):
+        """
+        Runs one epoch of training.
+        """
+        model.train()
+        running_loss = 0.0
+        for x,y in train_data: # assumed one batch
+            x = x.to(device)
+            y = y.to(device)
+
+            optimizer.zero_grad()
+            yhat = model(x)
+
+            if isinstance(yhat, tuple):
+                yhat = yhat[0]  # RNNs return y, h
+
+            loss = loss_func(yhat, y)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+        return running_loss / len(train_data)
+    
+    def _validate_one_epoch(self, valid_data, model, loss_func, device):
+        """
+        Runs one epoch of validation.
+        """
+        model.eval()
+        running_val_loss = 0.0
+        all_predictions = []
+        all_targets = []
+
+        with torch.no_grad():
+            for x_val, y_val in valid_data: # assumed one batch
+                x_val = x_val.to(device)
+                y_val = y_val.to(device)
+
+                yhat_val = model(x_val)
+                if isinstance(yhat_val, tuple):
+                    yhat_val = yhat_val[0]
+
+                val_loss = loss_func(yhat_val, y_val).item()
+                running_val_loss += val_loss
+
+                all_predictions.append(yhat_val.cpu().numpy())
+                all_targets.append(y_val.cpu().numpy())
+
+        # Concatenate predictions and targets for correlation calculation
+        all_predictions = np.concatenate(all_predictions, axis=0)
+        all_targets = np.concatenate(all_targets, axis=0)
+        correlation = calc_corr(all_predictions, all_targets)
+
+        val_loss_avg = running_val_loss / len(valid_data)
+        return val_loss_avg, correlation
 
 
     def save_model(self, filepath):
@@ -144,3 +228,4 @@ class LSTM(nn.Module, NeuralNetworkModel):
         model_params = checkpoint["model_params"]
         self.hidden_size = model_params["hidden_size"]
         self.num_layers = model_params["num_layers"]
+

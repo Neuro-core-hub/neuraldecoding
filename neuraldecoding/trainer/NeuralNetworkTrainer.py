@@ -6,7 +6,9 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
 from neuraldecoding.model.Model import Model
-from Trainer import Trainer
+from neuraldecoding.trainer.Trainer import Trainer
+from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.model.neural_network_models.LSTM import LSTM
 
 
 
@@ -53,6 +55,12 @@ class TrainerImplementation(Trainer):
         loss_class = getattr(torch.nn, loss_config.type)
         return loss_class(**loss_config.params)
     
+    def create_model(self, model_config: DictConfig) -> torch.nn.Module:
+        """Creates and returns a loss function based on the configuration."""
+        model_class = globals()[model_config['type']]  
+        model = model_class(model_config['parameters']) 
+        return model
+    
     def calc_corr(self, y1,y2):
         """Calculates the correlation between y1 and y2 (tensors)"""
         corr = []
@@ -83,13 +91,9 @@ class TrainerImplementation(Trainer):
         Returns:
             model, (loss_history_train, loss_history_val, corr_history): trained model,  training loss history, validation loss history, correlation history
         """
-
-        # Load configurations
-        train_data = self.load_data(config.train_data.path)
-        valid_data = self.load_data(config.valid_data.path)
         
         # Main Training params
-        model = config.model
+        model = self.create_model(config.model)
         optimizer = self.create_optimizer(config.optimizer, model.parameters())
         scheduler = self.create_scheduler(config.scheduler, optimizer)
         loss_func = self.create_loss_function(config.loss_func)
@@ -108,10 +112,10 @@ class TrainerImplementation(Trainer):
         for epoch in range(num_epochs):
 
             # Train for one epoch
-            train_loss = self._train_one_epoch(train_data, model, optimizer, loss_func, device)
+            train_loss = model._train_one_epoch(train_data, model, optimizer, loss_func, device)
 
             # Validate after each epoch
-            val_loss, correlation = self._validate_one_epoch(valid_data, model, loss_func, device)
+            val_loss, correlation = model._validate_one_epoch(valid_data, model, loss_func, device)
 
             # Record losses and correlation
             loss_history_train.append(train_loss)
@@ -125,7 +129,7 @@ class TrainerImplementation(Trainer):
             # Print progress
             if print_results and (epoch % print_every == 0 or epoch == num_epochs - 1):
                 print(f"Epoch {epoch}/{num_epochs - 1}, Train Loss: {train_loss:.4f}, "
-                      f"Val Loss: {val_loss:.4f}, Correlation: {correlation:.4f}")
+                      f"Val Loss: {val_loss:.4f}, Correlation: {correlation[0]:.4f}, {correlation[1]:.4f}")
 
             if print_results:
                 print("*** Training Complete ***")
@@ -133,59 +137,3 @@ class TrainerImplementation(Trainer):
         return model, (loss_history_train, loss_history_val, corr_history)
 
 
-    def _train_one_epoch(self, train_data, model, optimizer, loss_func, device):
-        """
-        Runs one epoch of training.
-        """
-        model.train()
-        running_loss = 0.0
-        for x,y in train_data: # assumed one batch
-            x = x.to(device)
-            y = y.to(device)
-
-            optimizer.zero_grad()
-            yhat = model(x)
-
-            if isinstance(yhat, tuple):
-                yhat = yhat[0]  # RNNs return y, h
-
-            loss = loss_func(yhat, y)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-        return running_loss / len(train_data)
-    
-
-    def _validate_one_epoch(self, valid_data, model, loss_func, device):
-        """
-        Runs one epoch of validation.
-        """
-        model.eval()
-        running_val_loss = 0.0
-        all_predictions = []
-        all_targets = []
-
-        with torch.no_grad():
-            for x_val, y_val in valid_data: # assumed one batch
-                x_val = x_val.to(device)
-                y_val = y_val.to(device)
-
-                yhat_val = model(x_val)
-                if isinstance(yhat_val, tuple):
-                    yhat_val = yhat_val[0]
-
-                val_loss = loss_func(yhat_val, y_val).item()
-                running_val_loss += val_loss
-
-                all_predictions.append(yhat_val.cpu().numpy())
-                all_targets.append(y_val.cpu().numpy())
-
-        # Concatenate predictions and targets for correlation calculation
-        all_predictions = np.concatenate(all_predictions, axis=0)
-        all_targets = np.concatenate(all_targets, axis=0)
-        correlation = self.calc_corr(all_predictions, all_targets)
-
-        val_loss_avg = running_val_loss / len(valid_data)
-        return val_loss_avg, correlation
