@@ -37,7 +37,7 @@ class Decoder(ABC):
 
         # Get model stuff
         if cfg["model"]["name"] in model_reg:
-            self.model = model_reg[cfg["model"]["name"]](params=cfg["model"]["parameters"])
+            self.model = model_reg[cfg["model"]["name"]](cfg["model"]["parameters"])
         else:
             raise ValueError(f"Model {cfg['model']['name']} is not registered in model_reg.")
         
@@ -98,3 +98,37 @@ class Decoder(ABC):
             np.ndarray: Output shape of the model
         """
         return np.array(self.output_shape)
+    
+class LinearDecoder(Decoder):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+    def predict(self, neural_data):
+        """
+        Predict outputs given neural data in offline setting.
+
+        Args:
+            neural_data (numpy.ndarray): Input neural data of shape [N, numfeats]
+
+        Returns:
+            prediction (torch.Tensor): Predicted output
+        """
+        prediction = self.model(neural_data)
+        
+        return prediction
+    
+class NeuralNetworkDecoder(Decoder):
+    def __init__(self, cfg):
+        super().__init__(cfg)
+    def predict(self, neural_data):
+        """
+        Predict outputs given neural data in offline setting.
+
+        Args:
+            neural_data (numpy.ndarray): Input neural data of shape [N, numfeats]
+
+        Returns:
+            prediction (torch.Tensor): Predicted output
+        """
+        prediction = self.model(neural_data)
+        
+        return prediction

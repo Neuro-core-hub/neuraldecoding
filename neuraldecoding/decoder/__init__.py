@@ -1,1 +1,1 @@
-from .OfflineDecoders import *
+from .Decoder import *

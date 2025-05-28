@@ -29,7 +29,7 @@ def create_dataloaders(train_X, train_Y, valid_X, valid_Y, batch_size=32):
 
 def load_config():
     """Loads the Hydra configuration file (train.yaml)."""
-    return OmegaConf.load(os.path.join("configs", "trainer", "train.yaml"))
+    return OmegaConf.load(os.path.join("configs", "trainer", "testTrainer.yaml"))
 
 class testTrainer(unittest.TestCase):
     def setUp(self):

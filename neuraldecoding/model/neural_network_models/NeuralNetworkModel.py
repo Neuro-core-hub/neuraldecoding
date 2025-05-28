@@ -4,7 +4,6 @@ import torch
 import numpy as np
 
 class NeuralNetworkModel(Model):
-
     def __call__(self, data: Any) -> Any:
         pass
 

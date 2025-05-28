@@ -205,7 +205,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
                 "hidden_size": self.hidden_size,
                 "num_layers": self.num_layers,
             },
-            "model_type": self.rnn_type
+            "model_type": "LSTM"
         }
         torch.save(checkpoint_dict, filepath)
 

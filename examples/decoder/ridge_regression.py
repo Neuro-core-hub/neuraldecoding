@@ -4,7 +4,7 @@ from neuraldecoding.utils import data_tools
 import numpy as np
 from scipy.stats import pearsonr
 from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression
-from neuraldecoding.decoder.OfflineDecoders import LinearDecoder
+from neuraldecoding.decoder import LinearDecoder
 import yaml
 from sklearn.metrics import r2_score
 

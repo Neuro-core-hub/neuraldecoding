@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from neuraldecoding.decoder import LinearDecoder
 import yaml
-from types import SimpleNamespace
 
 class TestLinearDecoder(unittest.TestCase):
     def setUp(self):
