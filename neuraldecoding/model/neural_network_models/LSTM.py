@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from NeuralNetworkModel import NeuralNetworkModel
+from .NeuralNetworkModel import NeuralNetworkModel
 
 class LSTM(nn.Module, NeuralNetworkModel):
     def __init__(self, model_params):

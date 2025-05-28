@@ -1,0 +1,8 @@
+model:
+  name: "LinearRegression" # Names defined in model module
+  parameters:
+    fit_intercept: True # arbitrary parameters feeding into the model
+  input_shape: [2,1] # input shape in list
+  output_shape: [2,] # output shape in list
+
+fpath: "tests/decoder/models/linear_regression_model.pkl" # directory to saved model
