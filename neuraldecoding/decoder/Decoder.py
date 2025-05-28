@@ -24,7 +24,7 @@ class Decoder(ABC):
         if cfg["model"]["name"] in model_reg:
             self.model = model_reg[cfg["model"]["name"]](params=cfg["model"]["parameters"])
         else:
-            raise ValueError(f"Model '{cfg["model"]["name"]}' is not registered in model_reg.")
+            raise ValueError(f"Model {cfg['model']['name']} is not registered in model_reg.")
         self.fpath = cfg["fpath"]
         self.input_shape = cfg["model"]["input_shape"]
         self.output_shape = cfg["model"]["output_shape"]

@@ -6,4 +6,4 @@ model:
   input_shape: [1, 769] # input shape in list
   output_shape: [1,4] # output shape in list
 
-fpath: "examples/decoder/models/ridge_regression_model.pkl" # directory to saved model
+fpath: "examples\\decoder\\models\\ridge_regression_model.pkl" # directory to saved model
