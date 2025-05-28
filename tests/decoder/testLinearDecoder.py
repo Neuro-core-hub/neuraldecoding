@@ -19,7 +19,7 @@ class TestLinearDecoder(unittest.TestCase):
         np.testing.assert_array_equal(self.decoder.get_input_shape(), np.array([2, 1]))
         np.testing.assert_array_equal(self.decoder.get_output_shape(), np.array([2]))
         self.assertEqual(
-            self.decoder.fpath, 
+            os.path.normpath(self.decoder.fpath), 
             os.path.join("tests", "decoder", "models", "linear_regression_model.pkl")
         )
 
