@@ -10,6 +10,8 @@ import yaml
 from sklearn.metrics import r2_score
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from neuraldecoding.utils import parse_verify_config
+from hydra import initialize, compose
 
 # Example script of decoding data using ridge regression with decoder
 # Data path needs to be specified first here:
@@ -17,9 +19,11 @@ data_path = "/mnt/D8C4D588C4D56970/ND/github/LINK_dataset/data/pickles"
 
 
 # Load in config
-config_path = os.path.join("configs","decoder","exampleKalmanFilter.yaml")
-with open(config_path, "r") as file:
-            cfg = yaml.safe_load(file)
+cfg_path = os.path.join("..","..","configs","example_Kalman_Filter")
+with initialize(version_base=None, config_path=cfg_path):
+    config = compose("config")
+cfg = parse_verify_config(config, 'decoder')
+
 # Load in data
 dates = data_tools.extract_dates_from_filenames(data_path)
 date = dates[42]
@@ -81,31 +85,10 @@ decoder.load_model()
 
 mses = []
 corrs = []
+predictions = torch.zeros_like(finger_test)
 for j in tqdm(range(finger_test.shape[0])):
     prediction = decoder.predict(neural_test[j,:].unsqueeze(0))
-    print(prediction)
-    mse = torch.mean((finger_test[j, :].unsqueeze(0) - prediction) ** 2)
-    corr, _ = pearsonr(finger_test[j, :].numpy(), prediction[0, :].numpy())
-    mses.append(mse.item())
-    corrs.append(corr)
+    predictions[j, :] = prediction
 
-print("Average Mean Squared Error:", np.mean(mses))
-print("Average Pearson Correlation:", np.mean(corrs))
-
-plt.figure(figsize=(12, 6))
-
-plt.subplot(1, 2, 1)
-plt.plot(mses, label="Mean Squared Error", color="blue")
-plt.xlabel("Test Sample Index")
-plt.ylabel("MSE")
-plt.title("Mean Squared Error per Test Sample")
-plt.legend()
-
-plt.subplot(1, 2, 2)
-plt.plot(corrs, label="Pearson Correlation", color="green")
-plt.xlabel("Test Sample Index")
-plt.ylabel("Correlation")
-plt.title("Pearson Correlation per Test Sample")
-plt.legend()
-
-plt.show()
+corr, _ = pearsonr(predictions, finger_test)
+print(corr)

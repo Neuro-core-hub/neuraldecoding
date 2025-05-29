@@ -8,6 +8,8 @@ from neuraldecoding.decoder import LinearDecoder
 import yaml
 from sklearn.metrics import r2_score
 import torch
+from hydra import initialize, compose
+from neuraldecoding.utils import parse_verify_config
 
 # Example script of decoding data using ridge regression with decoder
 # Data path needs to be specified first here:
@@ -15,9 +17,11 @@ data_path = "/mnt/D8C4D588C4D56970/ND/github/LINK_dataset/data/pickles"
 
 
 # Load in config
-config_path = os.path.join("configs","decoder","exampleRidgeRegression.yaml")
-with open(config_path, "r") as file:
-            cfg = yaml.safe_load(file)
+cfg_path = os.path.join("..","..","configs","example_ridge_regression")
+
+with initialize(version_base=None, config_path=cfg_path):
+    config = compose("config")
+cfg = parse_verify_config(config, 'decoder')
 # Load in data
 dates = data_tools.extract_dates_from_filenames(data_path)
 date = dates[42]

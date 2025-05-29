@@ -6,6 +6,8 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from omegaconf import OmegaConf
 from neuraldecoding.trainer.NeuralNetworkTrainer import TrainerImplementation
+from neuraldecoding.utils import parse_verify_config
+from hydra import initialize, compose
 
 def load_synthetic_data():
     """Loads the synthetic train and validation data from .npy files."""
@@ -29,7 +31,12 @@ def create_dataloaders(train_X, train_Y, valid_X, valid_Y, batch_size=32):
 
 def load_config():
     """Loads the Hydra configuration file (train.yaml)."""
-    return OmegaConf.load(os.path.join("configs", "trainer", "testTrainer.yaml"))
+    cfg_path = os.path.join("..","..","configs","test_trainer")
+
+    with initialize(version_base=None, config_path=cfg_path):
+        config = compose("config")
+    cfg = parse_verify_config(config, 'trainer')
+    return cfg
 
 class testTrainer(unittest.TestCase):
     def setUp(self):

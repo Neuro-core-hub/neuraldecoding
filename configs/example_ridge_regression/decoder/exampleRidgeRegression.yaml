@@ -6,4 +6,14 @@ model:
   input_shape: [1, 769] # input shape in list
   output_shape: [1,4] # output shape in list
 
+stabilization:
+  name: "LatentSpaceAlignment"
+  parameters:
+    dim_red_method: "FactorAnalysis"
+    alignment_method: "ProcrustesAlignment"
+    ndims: 10
+  date_0: '2024-08-23'
+  date_k: '2024-11-11'
+
+
 fpath: "examples/decoder/models/ridge_regression_model.pkl" # directory to saved model

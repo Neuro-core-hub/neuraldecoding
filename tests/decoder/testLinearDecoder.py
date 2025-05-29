@@ -2,16 +2,17 @@ import unittest
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import numpy as np
-import torch
 from neuraldecoding.decoder import LinearDecoder
-import yaml
+from hydra import initialize, compose
+from neuraldecoding.utils import parse_verify_config
 
 class TestLinearDecoder(unittest.TestCase):
     def setUp(self):
-        cfg_path = os.path.join("configs", "decoder", "testLinearDecoder.yaml")
+        cfg_path = os.path.join("..","..","configs","test_linear_decoder")
 
-        with open(cfg_path, "r") as file:
-            self.cfg = yaml.safe_load(file)
+        with initialize(version_base=None, config_path=cfg_path):
+            config = compose("config")
+        self.cfg = parse_verify_config(config, 'decoder')
         self.decoder = LinearDecoder(self.cfg)
 
     def test_initialization(self):
