@@ -1,0 +1,12 @@
+model:
+  name: "KalmanFilter" # Names defined in model module
+  parameters:
+    append_ones_y: False
+    device: True
+    return_tensor: True
+    yhat: [ 7.6127e-01,  4.8506e-01, -2.6989e-04, -5.7489e-05]
+
+  input_shape: [1,97] # input shape in list
+  output_shape: [1,4] # output shape in list
+
+fpath: "examples/decoder/models/kalman_filter.pkl" # directory to saved model

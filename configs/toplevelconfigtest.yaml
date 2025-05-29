@@ -1,28 +1,29 @@
-model:
-  name: "LSTM" # Names defined in model module
-  parameters:
-    input_size: 1
-    num_outputs: 10
-    hidden_size: 64
-    num_layers: 2  
-    rnn_type: lstm  
-    device: cpu  
-    hidden_noise_std: 0.0  
-    dropout_input: False 
-    drop_prob: 0.2  
-  input_shape: [1] # input shape in list
-  output_shape: [10] # output shape in list
+decoder:
+  model:
+    name: "LSTM" # Names defined in model module
+    parameters:
+      input_size: 1
+      num_outputs: 10
+      hidden_size: 64
+      num_layers: 2  
+      rnn_type: lstm  
+      device: cpu  
+      hidden_noise_std: 0.0  
+      dropout_input: False 
+      drop_prob: 0.2  
+    input_shape: [1] # input shape in list
+    output_shape: [10] # output shape in list
 
-stabilization:
-  name: "LatentSpaceAlignment"
-  parameters:
-    dim_red_method: "FactorAnalysis"
-    alignment_method: "ProcrustesAlignment"
-    ndims: 10
-  date_0: '2024-08-23'
-  date_k: '2024-11-11'
+  stabilization:
+    name: "LatentSpaceAlignment"
+    parameters:
+      dim_red_method: "FactorAnalysis"
+      alignment_method: "ProcrustesAlignment"
+      ndims: 10
+    date_0: "2024-08-23"
+    date_k: "2024-11-11"
 
-fpath: "tests/decoder/models/linear_regression_model.pkl" # directory to saved model
+  fpath: "tests/decoder/models/linear_regression_model.pkl" # directory to saved model
 
 model:
   type: LSTM  

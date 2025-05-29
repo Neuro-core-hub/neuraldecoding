@@ -1,5 +1,6 @@
 import copy
 from abc import ABC, abstractmethod
+from typing import Self
 
 import numpy as np
 import torch
@@ -21,12 +22,12 @@ stabilization_reg = {
     }
 
 class Decoder(ABC):
-    def __init__(self, cfg):
+    def __init__(self, cfg: dict) -> None:
         """
         Decoder Class
 
         Args:
-            cfg: config
+            cfg: config dictionary
         """
         # Stabilization implementation, not verified commented out for now
         # # Get stabilization stuff
@@ -51,7 +52,7 @@ class Decoder(ABC):
         # Load model from path
         self.load_model()
 
-    def load_model(self, fpath = None):
+    def load_model(self, fpath : str = None) -> None:
         """
         Load decoder's model parameters from a specified location
 
@@ -61,7 +62,7 @@ class Decoder(ABC):
         self.fpath = fpath if fpath is not None else self.fpath
         self.model.load_model(self.fpath)
 
-    def get_decoder(self):
+    def get_decoder(self) -> Self:
         """
         Returns deep-copied decoder object with parameters loaded from the specified file path.
         """
@@ -100,9 +101,9 @@ class Decoder(ABC):
         return np.array(self.output_shape)
     
 class LinearDecoder(Decoder):
-    def __init__(self, cfg):
+    def __init__(self, cfg: dict) -> None:
         super().__init__(cfg)
-    def predict(self, neural_data):
+    def predict(self, neural_data: np.ndarray) -> torch.Tensor:
         """
         Predict outputs given neural data in offline setting.
 
@@ -117,9 +118,9 @@ class LinearDecoder(Decoder):
         return prediction
     
 class NeuralNetworkDecoder(Decoder):
-    def __init__(self, cfg):
+    def __init__(self, cfg: dict) -> None:
         super().__init__(cfg)
-    def predict(self, neural_data):
+    def predict(self, neural_data: np.ndarray) -> torch.Tensor:
         """
         Predict outputs given neural data in offline setting.
 

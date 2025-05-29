@@ -7,6 +7,7 @@ from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression
 from neuraldecoding.decoder import LinearDecoder
 import yaml
 from sklearn.metrics import r2_score
+import torch
 
 # Example script of decoding data using ridge regression with decoder
 # Data path needs to be specified first here:
