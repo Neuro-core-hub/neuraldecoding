@@ -21,7 +21,8 @@ class KalmanFilter(LinearModel):
         """
 
         self.A, self.C, self.W, self.Q = None, None, None, None
-        self.At, self.Ct = None, None
+        self.At, self.Ct = None, None#
+        self.Pt = None
         self.yh = np.expand_dims(np.array(model_params["yhat"]), axis=0) if "yhat" in model_params else None
         self.append_ones_y = model_params["append_ones_y"]
         self.device = model_params["device"]
@@ -108,40 +109,29 @@ class KalmanFilter(LinearModel):
             self.Q = self.Q.numpy()
 
         if self.yh is None:
-            self.yh = np.zeros((x.shape[0], self.A.shape[1]))
-        yhat = self.yh
-        Pt = self.W.copy()
+            self.yh = np.zeros((1, self.A.shape[1]))
         
-        # janky online implementation
-        if(yhat.shape[0]==1):
-            yt = yhat @ self.A.T                                # predict new state
-            Pt = self.A @ Pt @ self.A.T + self.W                        # compute error covariance
-            K = np.linalg.lstsq((self.C @ Pt @ self.C.T + self.Q).T,
-                                (Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
-            yhat_new = yt.T + K @ (x[:, :].T - self.C @ yt.T)	        # update state estimate
-            Pt = (np.eye(Pt.shape[0]) - K @ self.C) @ Pt	            # update error covariance
-            yhat_new = yhat_new.T
-            self.yh = yhat_new
-            if self.append_ones_y:
-                yhat_new = yhat_new[:, :-1]
-            if self.return_tensor:
-                yhat_new = torch.Tensor(yhat_new)
-            return yhat_new
-        else:
-            for t in tqdm(range(1, yhat.shape[0])):
-                yt = yhat[t-1, :] @ self.A.T                                # predict new state
-                Pt = self.A @ Pt @ self.A.T + self.W                        # compute error covariance
-                K = np.linalg.lstsq((self.C @ Pt @ self.C.T + self.Q).T,
-                                    (Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
-                yhat[t, :] = yt.T + K @ (x[t, :].T - self.C @ yt.T)	        # update state estimate
-                Pt = (np.eye(Pt.shape[0]) - K @ self.C) @ Pt	            # update error covariance
+        if self.Pt is None:
+            self.Pt = self.W.copy()
 
-            if self.return_tensor:
-                yhat = torch.Tensor(yhat)
-            if self.append_ones_y:
-                yhat = yhat[:, :-1]
-            self.yh = yhat
-            return yhat
+        yhat = self.yh
+        all_yhat = np.zeros((x.shape[0], self.A.shape[1]))
+        for t in range(x.shape[0]):
+            yt = yhat @ self.A.T                                # predict new state
+            self.Pt = self.A @ self.Pt @ self.A.T + self.W                        # compute error covariance
+            K = np.linalg.lstsq((self.C @ self.Pt @ self.C.T + self.Q).T,
+                                (self.Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
+            yhat = yt.T + K @ (x[t, :].T.reshape(-1, 1) - self.C @ yt.T)	        # update state estimate
+            
+            self.Pt = (np.eye(self.Pt.shape[0]) - K @ self.C) @ self.Pt	            # update error covariance
+            yhat = yhat.reshape(1, self.A.shape[1])
+            all_yhat[t, :] = yhat
+        self.yh = yhat
+
+        if self.return_tensor:
+            all_yhat = torch.from_numpy(all_yhat)
+
+        return all_yhat
 
     def set_start_yhat(self, start_yh):
         self.yh[0, :] = start_yh
@@ -182,3 +172,8 @@ class KalmanFilter(LinearModel):
         self.C = model_dict['C']
         self.W = model_dict['W']
         self.Q = model_dict['Q']
+
+    def initialize(self, yhat, Pt = None):
+        self.yh = yhat
+        if Pt is not None:
+            self.Pt = Pt

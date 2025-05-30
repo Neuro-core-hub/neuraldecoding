@@ -83,12 +83,34 @@ model.save_model(model_path)
 decoder = LinearDecoder(cfg)
 decoder.load_model()
 
-mses = []
-corrs = []
-predictions = torch.zeros_like(finger_test)
-for j in tqdm(range(finger_test.shape[0])):
-    prediction = decoder.predict(neural_test[j,:].unsqueeze(0))
-    predictions[j, :] = prediction
+print("Decoding with Offline Setting")
+predictions_offline = decoder.predict(neural_test)
 
-corr, _ = pearsonr(predictions, finger_test)
-print(corr)
+print("Decoding with Online Setting")
+predictions_online = torch.zeros_like(finger_test)
+for j in tqdm(range(finger_test.shape[0])):
+    if j == 500 or j == 1000 or j == 1500:
+        # Example intervention
+        print(f"Intervening initialization at index {j}")
+        new_yhat = np.expand_dims(np.array([ 7.6127e-01,  4.8506e-01, -2.6989e-04, -5.7489e-05]),axis=0)
+        decoder.model.initialize(new_yhat)
+
+    prediction = decoder.predict(neural_test[j,:].unsqueeze(0))
+    predictions_online[j, :] = prediction
+
+corr_offline, _ = pearsonr(predictions_offline, finger_test)
+print(f"Offline correlation: {corr_offline}")
+
+corr_online, _ = pearsonr(predictions_online, finger_test)
+print(f"Online correlation: {corr_online}")
+
+# Plot predictions and finger_test together
+plt.figure(figsize=(10, 6))
+plt.plot(predictions_online.detach().numpy()[:,0], label="Offline Predictions", alpha=0.7)
+plt.plot(predictions_offline.detach().numpy()[:,0], label="Online Predictions", alpha=0.7)
+plt.plot(finger_test.detach().numpy()[:,0], label="Ground Truth", alpha=0.7)
+plt.xlabel("Time")
+plt.ylabel("Values")
+plt.title("Predictions vs Finger Test")
+plt.legend()
+plt.show()
