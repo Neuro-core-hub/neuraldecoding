@@ -133,9 +133,6 @@ class KalmanFilter(LinearModel):
 
         return all_yhat
 
-    def set_start_yhat(self, start_yh):
-        self.yh[0, :] = start_yh
-
     def save_model(self, fpath):
         """
         Saves the model in its current state at the specified filepath
