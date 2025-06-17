@@ -10,19 +10,18 @@ class Regression(LinearModel):
     def __init__(self, params = {}):
         super().__init__(params)
 
-    def __call__(self, data: Any, is_torch = False) -> Any:
-        return self.forward(data, is_torch)
+    def __call__(self, data: Any) -> Any:
+        return self.forward(data)
 
     def train_step(self, input_data: Any) -> None:
         X, y = input_data
         self.model.fit(X, y)
 
-    def forward(self, data: Any, is_torch = False) -> Any:
+    def forward(self, data: Any) -> Any:
+        if isinstance(data, np.ndarray):
+            data = torch.from_numpy(data)
         predictions = self.model.predict(data)
-        if is_torch:
-            return torch.tensor(predictions, dtype=torch.float64)
-        else:
-            return predictions
+        return torch.tensor(predictions, dtype=torch.float64)
 
     def save_model(self, filepath: str) -> None:
         with open(filepath, 'wb') as f:

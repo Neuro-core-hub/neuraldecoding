@@ -2,6 +2,7 @@ import unittest
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import numpy as np
+import torch
 from neuraldecoding.decoder import LinearDecoder
 from hydra import initialize, compose
 from neuraldecoding.utils import parse_verify_config
@@ -29,9 +30,10 @@ class TestLinearDecoder(unittest.TestCase):
     def test_predict(self):
         X_test = np.array([[0.5], [1.5]])
         prediction = self.decoder.predict(X_test)
-        actual_predictions =[3.49852095, 6.45254363]
+        actual_predictions =torch.tensor([3.49852095, 6.45254363], dtype=torch.float64)
+
         tolerance = 1e-1
-        self.assertTrue(np.allclose(prediction, actual_predictions, atol=tolerance), "Predictions after loading do not match actual values")
+        self.assertTrue(torch.allclose(prediction, actual_predictions, atol=tolerance), "Predictions after loading do not match actual values")
         
     def test_get_input_shape(self):
         np.testing.assert_array_equal(self.decoder.get_input_shape(), np.array([2, 1]))

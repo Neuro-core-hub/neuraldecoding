@@ -1,6 +1,7 @@
 import sys, os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 import numpy as np
+import torch
 import unittest
 from neuraldecoding.model.linear_models import LinearRegression
 
@@ -18,9 +19,9 @@ class testLinearRegression(unittest.TestCase):
 
         X_test = np.array([[0.5], [1.5]])
         predictions = self.model(X_test)
-        actual_predictions = [3.49852095, 6.45254363]
+        actual_predictions = torch.tensor([3.49852095, 6.45254363], dtype=torch.float64)
         tolerance = 1e-1
-        self.assertTrue(np.allclose(predictions, actual_predictions, atol=tolerance), "Predictions do not match actual values")
+        self.assertTrue(torch.allclose(predictions, actual_predictions, atol=tolerance), "Predictions do not match actual values")
 
     def test_save_and_load_model(self):
         self.model.train_step((self.X, self.y))
@@ -33,10 +34,10 @@ class testLinearRegression(unittest.TestCase):
 
         X_test = np.array([[0.5], [1.5]])
         predictions_loaded = loaded_model(X_test)
-        actual_predictions =[3.49852095, 6.45254363]
+        actual_predictions =torch.tensor([3.49852095, 6.45254363], dtype=torch.float64)
         tolerance = 1e-1
 
-        self.assertTrue(np.allclose(predictions_loaded, actual_predictions, atol=tolerance), "Predictions after loading do not match actual values")
+        self.assertTrue(torch.allclose(predictions_loaded, actual_predictions, atol=tolerance), "Predictions after loading do not match actual values")
 
         if os.path.exists(model_path):
             os.remove(model_path)
