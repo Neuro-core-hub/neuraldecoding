@@ -104,7 +104,6 @@ print(f"Offline correlation: {corr_offline}")
 corr_online, _ = pearsonr(predictions_online, finger_test)
 print(f"Online correlation: {corr_online}")
 
-# Plot predictions and finger_test together
 plt.figure(figsize=(10, 6))
 plt.plot(predictions_online.detach().numpy()[:,0], label="Offline Predictions", alpha=0.7)
 plt.plot(predictions_offline.detach().numpy()[:,0], label="Online Predictions", alpha=0.7)

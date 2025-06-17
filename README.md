@@ -1,13 +1,9 @@
 # neural_decoding
 
-1. Add conda forge to conda channel: `conda config --append channels conda-forge`
-
-2. Install environment: `conda create -n ND —file requirement.txt python=3.12`
-
-3. Install pytorch from: `https://pytorch.org/get-started/locally/`
-
+Install environment: `conda env create -f environment.yaml`
 
 # Running Tests
+
 Run `python -m unittest discover -s tests -p "test*.py"`
 
 # Running Examples
