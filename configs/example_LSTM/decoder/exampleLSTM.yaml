@@ -1,8 +1,8 @@
 model:
   name: "LSTM"  
   parameters:
-    input_size: 1
-    num_outputs: 10
+    input_size: 96
+    num_outputs: 4
     hidden_size: 64
     num_layers: 2
     rnn_type: lstm
@@ -10,8 +10,8 @@ model:
     hidden_noise_std: 0.0
     dropout_input: False
     drop_prob: 0.2
-  input_shape: [1] # input shape in list
-  output_shape: [10] # output shape in list
+  input_shape: [96] # input shape in list
+  output_shape: [4] # output shape in list
 
 stabilization:
   name: "LatentSpaceAlignment"

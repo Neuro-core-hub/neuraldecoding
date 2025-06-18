@@ -5,41 +5,54 @@ import torch
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, TensorDataset
+from neuraldecoding.utils import prep_data_and_split, load_one_nwb
 from neuraldecoding.model.Model import Model
 from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 from neuraldecoding.model.neural_network_models.LSTM import LSTM
+import os
+#TODO: generic neural network trainer
 
+class LSTMTrainer(Trainer):
+    def __init__(self, config):
+        super().__init__()
+        self.model = self.create_model(config.model)
+        self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
+        self.scheduler = self.create_scheduler(config.scheduler, self.optimizer)
+        self.loss_func = self.create_loss_function(config.loss_func)
+        self.num_epochs = config.training.num_epochs
+        self.batch_size = config.training.batch_size
+        self.print_results = config.training.get("print_results", True)
+        self.print_every = config.training.get("print_every", 10)
+        self.device = torch.device(config.training.device)
 
+        self.split_ratio = config.data.params.split_ratio
+        self.split_seed = config.data.params.split_seed
+        self.data_path = config.data.data_path
+        self.sequence_length = config.data.params.sequence_length
+        self.num_train_trials = config.data.params.num_train_trials
+        self.train_X, self.train_Y, self.valid_X, self.valid_Y = self.load_data()
+        self.train_loader, self.valid_loader = self.create_dataloaders()
 
-@hydra.main(version_base="1.3", config_path="./configs", config_name="train.yaml")
-def main(train_data, valid_data, config: DictConfig):
-    """
-    Trains a Neural Network. First loads data into dataloader, then uses TrainerImplementation class to train model.
-
-    Parameters:
-        train_data: training data, assumed numpy
-        valid_data: validation data, assumed numpy
-        config:  Hydra configuration file containing all required parameters (see train model function)
+    def load_data(self): # TODO, finalize this when dataset is merged to main
+        if not os.path.exists(self.data_path):
+            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
+        """Assuming data is dictionary output of one NWB file, change later"""
+        data = load_one_nwb(self.data_path)
+        train_X, valid_X, train_Y, valid_Y = prep_data_and_split(data, self.sequence_length, self.num_train_trials)
+        return train_X, train_Y, valid_X, valid_Y
     
-    Returns:
-        model, results (tuple containing results information, see train model function)
-    """
-    trainer = TrainerImplementation()
-
-    train_dataset = torch.utils.data.TensorDataset(torch.tensor(train_data, dtype=torch.float32))
-    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-
-    valid_dataset = torch.utils.data.TensorDataset(torch.tensor(valid_data, dtype=torch.float32), dtype=torch.float32)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=32, shuffle=True)
+    def create_dataloaders(self):
+        """Creates PyTorch DataLoaders for training and validation data."""
+        train_dataset = TensorDataset(self.train_X.detach().clone().to(torch.float32), 
+                                    self.train_Y.detach().clone().to(torch.float32))
+        valid_dataset = TensorDataset(self.valid_X.detach().clone().to(torch.float32), 
+                                    self.valid_Y.detach().clone().to(torch.float32))
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
+        return train_loader, valid_loader
     
-    model, results = trainer.train_model(train_dataloader, valid_dataloader, config)
-    return model, results
-
-
-class TrainerImplementation(Trainer):
-
-
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
         """Creates and returns an optimizer based on the configuration."""
         optimizer_class = getattr(torch.optim, optimizer_config.type)
@@ -68,72 +81,38 @@ class TrainerImplementation(Trainer):
             corr.append(np.corrcoef(y1[:, i], y2[:, i])[1, 0])
         return corr
 
+    def train_model(self, train_loader = None, valid_loader = None):
+        if(train_loader is not None):
+            self.train_loader = train_loader
+        if(valid_loader is not None):
+            self.valid_loader = valid_loader
 
-    def train_model(self,
-                    train_data: DataLoader,
-                    valid_data: DataLoader,
-                    config: DictConfig) -> Model:
-        
-        """
-        Implements the training loop with the specified model and parameters.
-        
-        Parameters:
-            train_data: Training data, should be torch DataLoader
-            valid_data: Validation data, should be torch DataLoader
-            config: Hydra configuration file containing all required parameters:
-                - model
-                - optimizer
-                - scheduler
-                - loss_function
-                - training (dict containing: num_epochs, device, print_results (optional), print_every (optional))
-
-        
-        Returns:
-            model, (loss_history_train, loss_history_val, corr_history): trained model,  training loss history, validation loss history, correlation history
-        """
-        
-        # Main Training params
-        model = self.create_model(config.model)
-        optimizer = self.create_optimizer(config.optimizer, model.parameters())
-        scheduler = self.create_scheduler(config.scheduler, optimizer)
-        loss_func = self.create_loss_function(config.loss_func)
-
-        # secondary training parameters
-        num_epochs = config.training.num_epochs
-        print_results = config.training.get("print_results", True)
-        print_every = config.training.get("print_every", 10)
-
-                
-        # move to appropriate device       
-        device = torch.device(config.training.device)
-    
-        # MAIN LOOP
-        loss_history_train, loss_history_val, corr_history = [], [], []
-        for epoch in range(num_epochs):
+        self.logger = {'train_loss': [], 'val_loss': [], 'correlation': []}
+        for epoch in range(self.num_epochs):
 
             # Train for one epoch
-            train_loss = model._train_one_epoch(train_data, model, optimizer, loss_func, device)
+            train_loss = self.model._train_one_epoch(self.train_loader, self.model, self.optimizer, self.loss_func, self.device)
 
             # Validate after each epoch
-            val_loss, correlation = model._validate_one_epoch(valid_data, model, loss_func, device)
+            val_loss, correlation = self.model._validate_one_epoch(self.train_loader, self.model, self.loss_func, self.device)
 
             # Record losses and correlation
-            loss_history_train.append(train_loss)
-            loss_history_val.append(val_loss)
-            corr_history.append(correlation)
+            self.logger['train_loss'].append(train_loss)
+            self.logger['val_loss'].append(val_loss)
+            self.logger['correlation'].append(correlation)
 
             # Scheduler step
-            if scheduler:
-                scheduler.step()
+            if self.scheduler:
+                self.scheduler.step()
 
             # Print progress
-            if print_results and (epoch % print_every == 0 or epoch == num_epochs - 1):
-                print(f"Epoch {epoch}/{num_epochs - 1}, Train Loss: {train_loss:.4f}, "
+            if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
+                print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, "
                       f"Val Loss: {val_loss:.4f}, Correlation: {correlation[0]:.4f}, {correlation[1]:.4f}")
 
-            if print_results:
+            if self.print_results:
                 print("*** Training Complete ***")
 
-        return model, (loss_history_train, loss_history_val, corr_history)
+        return self.model, self.logger
 
 

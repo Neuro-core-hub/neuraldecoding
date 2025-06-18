@@ -51,11 +51,7 @@ trainer_struct = {
             'print_every': int
         },
         'data': {
-            'train_data': {
-                'path': str
-            },
-            'valid_data': {
-                'path': str
-            }
+            'data_path': str,
+            'params': DictConfig
         }
     }
