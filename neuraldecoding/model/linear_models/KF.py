@@ -128,8 +128,8 @@ class KalmanFilter(LinearModel):
             all_yhat[t, :] = yhat
         self.yh = yhat
 
-        if self.return_tensor:
-            all_yhat = torch.from_numpy(all_yhat)
+
+        all_yhat = torch.from_numpy(all_yhat)
 
         return all_yhat
 

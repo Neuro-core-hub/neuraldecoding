@@ -15,8 +15,8 @@ from hydra import initialize, compose
 
 # Example script of decoding data using ridge regression with decoder
 # Data path needs to be specified first here:
-data_path = "/mnt/D8C4D588C4D56970/ND/github/LINK_dataset/data/pickles"
-
+# data_path = "/mnt/D8C4D588C4D56970/ND/github/LINK_dataset/data/pickles"
+data_path = "D:\\ND\\github\\LINK_dataset\\data\\pickles"
 
 # Load in config
 cfg_path = os.path.join("..","..","configs","example_Kalman_Filter")
