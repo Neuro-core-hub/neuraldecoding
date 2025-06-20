@@ -3,9 +3,11 @@ import math
 import numpy as np
 from sklearn.decomposition import FactorAnalysis as FA
 from sklearn.decomposition import PCA as PrincipalComponentAnalyisis
-import warnings
+# sys.path.append('AdaptiveLatents')
+import adaptive_latents.prosvd as psvd
 
-# import adaptive_latents.prosvd as psvd
+# sys.path.append('fa_stable_manifolds_python')
+import factor_analysis as fa_stable
 
 class DimRed(ABC):
     def __init__(self, ndims = None):
@@ -65,8 +67,7 @@ class PCA(LoadingMatrixDimRed):
             warnings.warn("Warning: Args passed to PCA.reduce() when they are not needed")
         data_means = np.mean(data.neural, axis = 0)
         ls = (data.neural - data_means) @ lm
-        ls_ds = data.make_latent_ds(ls)
-        return ls_ds, None
+        return ls
     
 class NoDimRed(LoadingMatrixDimRed):
     def calc_lm(self, data):
@@ -74,66 +75,71 @@ class NoDimRed(LoadingMatrixDimRed):
     
     def reduce(self, data, lm, args):
         return data
-    
-## TODO add .toml file to fa repo
-# class DegenhartFactorAnalysis(LoadingMatrixDimRed):
-#     def calc_lm(self, data):
-#         d, lm, psi = dfa.get_factor_analysis_loading(data.kin, self.ndims)
-#         args = {'d': d, 
-#                 'psi': psi}
-#         return lm, args
-    
-#     def __reduce__(self, data, lm, args):
-#         beta, O = dfa.get_stabilization_matrices(lm, args['psi'], args['d'])
-#         z_a = data.neural @ beta.T + np.expand_dims(O, axis = -1).T
-
-#         return z_a
-
-# TODO
-# class ProSVD(DimRed):   
-#     ## Note: this is very much setup for offline analysis, for online it will need to be altered
-#     ## I have an idea of how to do this, but wanted to keep the initial implementation simple
-#     def __init__(self, ndims, l = 1, l1 = .2):
-#         """initialize ProSVD
-
-#         Args:
-#             l (int, optional): step size
-#             l1 (float, optional): proportion of data to initialize on
-#         """        
-#         self.l = l
-#         self.l1 = l1
-#         super().__init__(ndims)
-
-#     def get_lm(self, data):
-#         pro = psvd.BaseProSVD(self.ndims)
-
-#         n_init = int(data.neural.shape[0]*self.l1)
-#         A_init = data.neural[:n_init, :].T
-#         pro.initialize(A_init)
-
-#         if self.l == -1:
-#             l = data.neural.shape[0] - n_init
-#         else:
-#             l = self.l
-
-#         if l == 0:
-#             num_updates = 0
-
-#         else:
-#             num_updates = math.ceil((data.neural.shape[0] - n_init) / l)
-            
-#         for i in range(num_updates):
-#             start_idx = (i * l)+n_init
-#             end_idx = start_idx + l 
-#             pro.updateSVD(data.neural[start_idx:end_idx, :].T)
  
-#         return pro.Q
+class ProSVD(DimRed):   
+    ## Note: this is very much setup for offline analysis, for online it will need to be altered
+    ## I have an idea of how to do this, but wanted to keep the initial implementation simple
+    def __init__(self, l = 1, l1 = .2):
+        """initialize ProSVD
+
+        Args:
+            l (int, optional): step size
+            l1 (float, optional): proportion of data to initialize on
+        """        
+        self.l = l
+        self.l1 = l1
+
+    def get_lm(self, data):
+        pro = psvd.BaseProSVD(self.ndims)
+
+        n_init = int(data.neural.shape[0]*self.l1)
+        A_init = data.neural[:n_init, :].T
+        pro.initialize(A_init)
+
+        if self.l == -1:
+            l = data.neural.shape[0] - n_init
+        else:
+            l = self.l
+
+        if l == 0:
+            num_updates = 0
+
+        else:
+            num_updates = math.ceil((data.neural.shape[0] - n_init) / l)
+            
+        for i in range(num_updates):
+            start_idx = (i * l)+n_init
+            end_idx = start_idx + l 
+            pro.updateSVD(data.neural[start_idx:end_idx, :].T)
+ 
+        return pro.Q
      
-#     def reduce(self, data, lm):
+    def reduce(self, data, lm):
 
-#         ls = data @ lm
+        ls = data @ lm
 
-#         return ls
+        return ls
     
-
   
+class EMFactorAnalysis1(DimRed):
+    """
+    This is the factor analysis version used by procrustes alignment of factors (Degenhart 2022)
+    """
+
+    def __init__(self, n_restarts = 5, max_n_inits = 300, ll_diff_threshold = .01, min_priv_var = .1):
+        self.n_restarts = n_restarts
+        self.max_n_inits = max_n_inits
+        self.ll_diff_threshold = ll_diff_threshold
+        self.min_priv_var = min_priv_var
+        
+    def calc_lm(self, data):
+        d, base_lm, psi, _, _ = fa_stable.fit_factor_analysis(data, self.ndims, max_n_its = self.max_n_inits, 
+                                        ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var)
+
+        return base_lm, d, psi
+    
+    def reduce(self, data, lm, d, psi):
+        regularized_lm, O = fa_stable.get_stabilization_matrices(lm, psi, d)
+        reduced_data = data @ regularized_lm.T + np.expand_dims(O, axis = -1).T
+        return reduced_data
+    
