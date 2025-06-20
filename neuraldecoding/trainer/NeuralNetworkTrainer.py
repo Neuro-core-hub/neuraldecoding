@@ -15,7 +15,8 @@ import os
 class NNTrainer(Trainer):
     def __init__(self, config):
         super().__init__()
-        self.model = self.create_model(config.model)
+        self.device = torch.device(config.training.device)
+        self.model = self.create_model(config.model).to(self.device)
         self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
         self.scheduler = self.create_scheduler(config.scheduler, self.optimizer)
         self.loss_func = self.create_loss_function(config.loss_func)
@@ -23,7 +24,6 @@ class NNTrainer(Trainer):
         self.batch_size = config.training.batch_size
         self.print_results = config.training.get("print_results", True)
         self.print_every = config.training.get("print_every", 10)
-        self.device = torch.device(config.training.device)
         self.data_path = config.data.data_path
 
     def load_data(self):

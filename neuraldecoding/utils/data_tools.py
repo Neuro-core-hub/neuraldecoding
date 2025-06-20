@@ -168,7 +168,18 @@ def prep_data_and_split(data_dict, seq_len, num_train_trials):
             neural_testing_hist = add_history(neural_testing, seq_len)
             return neural_training_hist, neural_testing_hist, torch.tensor(finger_training), torch.tensor(finger_testing)
         else:
-            return neural_training, neural_testing, torch.tensor(finger_training), torch.tensor(finger_testing)
+            return torch.tensor(neural_training), torch.tensor(neural_testing), torch.tensor(finger_training), torch.tensor(finger_testing)
 
     else:
         raise Exception('not enough trials')
+    
+def add_hist(X, Y, hist=10):
+    nNeu = X.shape[1]
+
+    adjX = np.zeros((X.shape[0]-hist, nNeu, hist+1))
+    for h in range(hist+1):
+        adjX[:,:,h] = X[h:X.shape[0]-hist+h,:]
+    adjY = Y[hist:,:]
+
+    adjX = adjX.reshape(adjX.shape[0],-1)
+    return adjX, adjY

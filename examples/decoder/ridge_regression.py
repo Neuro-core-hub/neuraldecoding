@@ -5,6 +5,7 @@ import numpy as np
 from scipy.stats import pearsonr
 from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression
 from neuraldecoding.decoder import LinearDecoder
+from neuraldecoding.trainer.LinearTrainer import LinearTrainer
 import yaml
 from sklearn.metrics import r2_score
 import torch
