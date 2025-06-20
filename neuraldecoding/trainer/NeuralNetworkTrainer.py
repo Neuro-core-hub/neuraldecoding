@@ -12,8 +12,6 @@ from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 from neuraldecoding.model.neural_network_models.LSTM import LSTM
 import os
-#TODO: generic neural network trainer
-
 class NNTrainer(Trainer):
     def __init__(self, config):
         super().__init__()
