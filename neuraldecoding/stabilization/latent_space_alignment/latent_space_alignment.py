@@ -91,11 +91,11 @@ class PAF(Stabilization):
         Returns:
             ls (numpy array of shape [ndims x timepoints]): aligned latent space
         """        
-        lm = self.dim_red_method.calc_lm(data)
-
+        lm, d, psi = self.dim_red_method.calc_lm(data)
+        
         aligned_lm = self.alignment_method.get_aligned_lm(lm)
 
-        latent_ds = self.dim_red_method.reduce(data, aligned_lm)
+        latent_ds = self.dim_red_method.reduce(data, aligned_lm, d, psi)
         
         return latent_ds
     
