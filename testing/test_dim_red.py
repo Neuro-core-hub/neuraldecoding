@@ -11,7 +11,7 @@ def test_factor_analysis():
     lib_transformed = lib.fit_transform(ds)
     
     package = dim_red.FactorAnalysis(ndims)
-    lm = package.calc_lm(ds)
+    lm, _ = package.calc_lm(ds)
     package_transformed = package.reduce(ds, lm)
     
     assert np.allclose(lib_transformed == package_transformed)
@@ -25,7 +25,7 @@ def test_pca():
     lib_transformed = lib.fit_transform(ds)
     
     package = dim_red.PCA(ndims)
-    lm = package.calc_lm(ds)
+    lm, _ = package.calc_lm(ds)
     package_transformed = package.reduce(ds, lm)
     
     assert np.allclose(lib_transformed == package_transformed)
@@ -44,4 +44,6 @@ def test_no_dim_red():
     
     assert np.allclose(ds == package_transformed)
     
-    
+def test_deg_fa():
+    ## TODO
+    raise NotImplementedError
