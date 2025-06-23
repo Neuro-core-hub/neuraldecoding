@@ -83,10 +83,15 @@ class LSTM(nn.Module, NeuralNetworkModel):
             h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
         """
 
+        if x.dim() != 3:
+            raise ValueError(f"Input tensor must be 3D (batch_size, num_inputs, sequence_length), got shape {x.shape}")
+        if x.shape[1] != self.input_size:
+            raise ValueError(f"Input feature dimension mismatch: expected {self.input_size}, got {x.shape[1]}")
+
         x = x.permute(0, 2, 1)  # put in format (batches, sequence length (history), features)
 
         if self.dropout_input and self.training:
-            x = self.dropout_input(x)
+            x = self.input_dropout(x)
 
         if h is None:
             h = self.init_hidden(x.shape[0]) # x.shape[0] is batch size
