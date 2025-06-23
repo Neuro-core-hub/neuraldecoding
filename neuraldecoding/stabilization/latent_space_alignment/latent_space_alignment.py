@@ -58,7 +58,7 @@ class LatentSpaceAlignment(Stabilization):
         data = self.extract_latent_space(data)
         return data
     
-class PAF(Stabilization):
+class PAF(LatentSpaceAlignment):
     def fit(self, data):
         """Train the LatentSpaceAlignment. Sets day_0 lm and returns latent space
 

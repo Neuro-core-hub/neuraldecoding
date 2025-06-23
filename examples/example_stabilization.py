@@ -1,8 +1,8 @@
 import os
+from neuraldecoding.dataset import Dataset
 from neuraldecoding.stabilization.latent_space_alignment import latent_space_alignment as lse
 from neuraldecoding.stabilization.latent_space_alignment import dim_red
 from neuraldecoding.stabilization.latent_space_alignment import alignment
-from neuraldecoding.dataset import Dataset
 
 ## To stabilize
 subject = 'Joker'
@@ -20,7 +20,7 @@ stabilization = lse.LatentSpaceAlignment(dim_red_method = dim_red.FactorAnalysis
                                          alignment_method = alignment.ProcrustesAlignment(), 
                                          ndims = 10)
 
-ls_0 = stabilization.train(ds_0)
+ls_0 = stabilization.fit(ds_0)
 # model.train(ls_0)
 
 ls_k = stabilization.extract_latent_space(ds_k)
