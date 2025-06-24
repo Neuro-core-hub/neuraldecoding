@@ -32,7 +32,8 @@ trainer_struct = {
             'batch_size': int,
             'device': str,
             'print_results': bool,
-            'print_every': int
+            'print_every': int,
+            'clear_cache': bool
         },
         'evaluation': {
             'metrics': ListConfig,

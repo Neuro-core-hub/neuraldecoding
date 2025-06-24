@@ -26,6 +26,7 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
+        self.clear_cache = config.training.clear_cache
         # Evaluation and logging params
         self.print_results = config.training.get("print_results", True)
         self.print_every = config.training.get("print_every", 10)
@@ -112,11 +113,13 @@ class LSTMTrainer(NNTrainer):
             for x,y in self.train_loader:
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
                 train_all_targets.append(y.detach().cpu().numpy())
+                if(self.clear_cache):
+                    del y, yhat
 
             train_all_predictions = np.concatenate(train_all_predictions, axis=0)
             train_all_targets = np.concatenate(train_all_targets, axis=0)
@@ -129,12 +132,16 @@ class LSTMTrainer(NNTrainer):
             val_all_targets = []
             with torch.no_grad():
                 for x_val, y_val in self.valid_loader:
+                    x_val = x_val.to(self.device)
+                    y_val = y_val.to(self.device)
                     yhat_val, _ = self.model(x_val)
                     val_loss = self.loss_func(yhat_val, y_val)
 
                     running_val_loss += val_loss.item()
                     val_all_predictions.append(yhat_val.cpu().numpy())
                     val_all_targets.append(y_val.cpu().numpy())
+                    if(self.clear_cache):
+                        del y_val, yhat_val
 
             val_all_predictions = np.concatenate(val_all_predictions, axis=0)
             val_all_targets = np.concatenate(val_all_targets, axis=0)
@@ -167,3 +174,8 @@ class LSTMTrainer(NNTrainer):
         return self.model, self.logger
 
 
+    def clear_gpu_cache(self):
+        self.model.cpu()
+        del self.model
+        del self.optimizer
+        torch.cuda.empty_cache()

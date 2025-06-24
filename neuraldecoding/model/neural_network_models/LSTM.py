@@ -127,7 +127,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
                         torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
         return hidden
 
-    def train_step(self, x, y, model, optimizer, loss_func): # TODO: Change to batch
+    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False): # TODO: Change to batch
         """
         Trains LSTM Model
         """
@@ -137,65 +137,10 @@ class LSTM(nn.Module, NeuralNetworkModel):
 
         loss.backward()
         optimizer.step()
+        if(clear_cache):
+            del x, y
 
         return loss, yhat
-
-    def _train_one_epoch(self, train_data, model, optimizer, loss_func, device):
-        """
-        Runs one epoch of training.
-        """
-        model.train()
-        running_loss = 0.0
-        for x,y in train_data: # assumed one batch
-            x = x.to(device)
-            y = y.to(device)
-
-            optimizer.zero_grad()
-            yhat = model(x)
-
-            if isinstance(yhat, tuple):
-                yhat = yhat[0]  # RNNs return y, h
-
-            loss = loss_func(yhat, y)
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-
-        return running_loss / len(train_data)
-    
-    def _validate_one_epoch(self, valid_data, model, loss_func, device):
-        """
-        Runs one epoch of validation.
-        """
-        model.eval()
-        running_val_loss = 0.0
-        all_predictions = []
-        all_targets = []
-
-        with torch.no_grad():
-            for x_val, y_val in valid_data: # assumed one batch
-                x_val = x_val.to(device)
-                y_val = y_val.to(device)
-
-                yhat_val = model(x_val)
-                if isinstance(yhat_val, tuple):
-                    yhat_val = yhat_val[0]
-
-                val_loss = loss_func(yhat_val, y_val).item()
-                running_val_loss += val_loss
-
-                all_predictions.append(yhat_val.cpu().numpy())
-                all_targets.append(y_val.cpu().numpy())
-
-        # Concatenate predictions and targets for correlation calculation
-        all_predictions = np.concatenate(all_predictions, axis=0)
-        all_targets = np.concatenate(all_targets, axis=0)
-        correlation = calc_corr(all_predictions, all_targets)
-
-        val_loss_avg = running_val_loss / len(valid_data)
-        return val_loss_avg, correlation
-
 
     def save_model(self, filepath):
         """
