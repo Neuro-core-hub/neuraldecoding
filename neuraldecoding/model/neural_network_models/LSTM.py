@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
+import numpy as np
 
 class LSTM(nn.Module, NeuralNetworkModel):
     def __init__(self, model_params):
@@ -23,8 +24,34 @@ class LSTM(nn.Module, NeuralNetworkModel):
         ''' 
 
         model_params["rnn_type"] = "lstm"
-        nn.Module.__init__(self)
-        NeuralNetworkModel.__init__(self, model_params)
+        # nn.Module.__init__(self)
+        # NeuralNetworkModel.__init__(self, model_params)
+
+        super(LSTM, self).__init__()
+
+        self.input_size = model_params["input_size"]
+        self.hidden_size = model_params["hidden_size"]
+        self.num_layers = model_params["num_layers"]
+        self.num_outputs = model_params["num_outputs"]
+        self.device = model_params.get("device", "cpu") 
+        self.hidden_noise_std = model_params.get("hidden_noise_std", 0.0)
+        self.dropout_input = model_params.get("dropout_input", False)
+        self.drop_prob = model_params.get("drop_prob", 0.0)
+
+        # Define LSTM layer
+        self.rnn = nn.LSTM(
+            input_size=self.input_size,
+            hidden_size=self.hidden_size,
+            num_layers=self.num_layers,
+            batch_first=True,
+            dropout=self.drop_prob if self.num_layers > 1 else 0  # Dropout only applies if num_layers > 1
+        )
+
+        # Define output layer
+        self.fc = nn.Linear(self.hidden_size, self.num_outputs)
+
+        # Dropout layer for input (if enabled)
+        self.input_dropout = nn.Dropout(self.drop_prob) if self.dropout_input else nn.Identity()
 
 
     def __call__(self, data):
@@ -55,10 +82,15 @@ class LSTM(nn.Module, NeuralNetworkModel):
             h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
         """
 
+        if x.dim() != 3:
+            raise ValueError(f"Input tensor must be 3D (batch_size, num_inputs, sequence_length), got shape {x.shape}")
+        if x.shape[1] != self.input_size:
+            raise ValueError(f"Input feature dimension mismatch: expected {self.input_size}, got {x.shape[1]}")
+
         x = x.permute(0, 2, 1)  # put in format (batches, sequence length (history), features)
 
         if self.dropout_input and self.training:
-            x = self.dropout_input(x)
+            x = self.input_dropout(x)
 
         if h is None:
             h = self.init_hidden(x.shape[0]) # x.shape[0] is batch size
@@ -94,18 +126,21 @@ class LSTM(nn.Module, NeuralNetworkModel):
             hidden = (torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device),
                         torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
         return hidden
-    
 
-    def train_step(self, data_loader, criterion, optimizer, training_params):
+    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False): # TODO: Change to batch
         """
-        Trains LSTM Model (see BASE_RNN for details)
+        Trains LSTM Model
         """
+        yhat, _ = model(x)
 
-        # val_loss, (loss_history_train, loss_history_val, corr_history) = super().train_model(data_loader, criterion, optimizer, training_params)
+        loss = loss_func(yhat, y)
 
-        # return val_loss, (loss_history_train, loss_history_val, corr_history)
-        pass
+        loss.backward()
+        optimizer.step()
+        if(clear_cache):
+            del x, y
 
+        return loss, yhat
 
     def save_model(self, filepath):
         """
@@ -121,7 +156,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
                 "hidden_size": self.hidden_size,
                 "num_layers": self.num_layers,
             },
-            "model_type": self.rnn_type
+            "model_type": "LSTM"
         }
         torch.save(checkpoint_dict, filepath)
 
@@ -144,3 +179,4 @@ class LSTM(nn.Module, NeuralNetworkModel):
         model_params = checkpoint["model_params"]
         self.hidden_size = model_params["hidden_size"]
         self.num_layers = model_params["num_layers"]
+

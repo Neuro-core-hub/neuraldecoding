@@ -1,0 +1,3 @@
+defaults:
+  - decoder/exampleRidgeRegression
+  - _self_
