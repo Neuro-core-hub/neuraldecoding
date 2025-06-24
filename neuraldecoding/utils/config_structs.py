@@ -13,31 +13,15 @@ decoder_struct = {'model': {'name': str,
 trainer_struct = {
         'model': {
             'type': str,
-            'parameters': {
-                'input_size': int,
-                'num_outputs': int,
-                'hidden_size': int,
-                'num_layers': int,
-                'rnn_type': str,
-                'device': str,
-                'hidden_noise_std': float,
-                'dropout_input': bool,
-                'drop_prob': float
-            }
+            'parameters': DictConfig
         },
         'optimizer': {
             'type': str,
-            'params': {
-                'lr': float,
-                'weight_decay': float
-            }
+            'params': DictConfig
         },
         'scheduler': {
             'type': str,
-            'params': {
-                'step_size': int,
-                'gamma': float
-            }
+            'params': DictConfig
         },
         'loss_func': {
             'type': str,
@@ -49,6 +33,10 @@ trainer_struct = {
             'device': str,
             'print_results': bool,
             'print_every': int
+        },
+        'evaluation': {
+            'metrics': ListConfig,
+            'params': DictConfig
         },
         'data': {
             'data_path': str,

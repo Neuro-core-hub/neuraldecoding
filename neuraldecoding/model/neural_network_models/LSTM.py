@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
-from neuraldecoding.utils.training_utils import calc_corr
 import numpy as np
 
 class LSTM(nn.Module, NeuralNetworkModel):
@@ -127,17 +126,19 @@ class LSTM(nn.Module, NeuralNetworkModel):
             hidden = (torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device),
                         torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
         return hidden
-    
 
-    def train_step(self, data_loader, criterion, optimizer, training_params): # TODO: Change to batch
+    def train_step(self, x, y, model, optimizer, loss_func): # TODO: Change to batch
         """
-        Trains LSTM Model (see BASE_RNN for details)
+        Trains LSTM Model
         """
+        yhat, _ = model(x)
 
-        # val_loss, (loss_history_train, loss_history_val, corr_history) = super().train_model(data_loader, criterion, optimizer, training_params)
+        loss = loss_func(yhat, y)
 
-        # return val_loss, (loss_history_train, loss_history_val, corr_history)
-        pass
+        loss.backward()
+        optimizer.step()
+
+        return loss, yhat
 
     def _train_one_epoch(self, train_data, model, optimizer, loss_func, device):
         """

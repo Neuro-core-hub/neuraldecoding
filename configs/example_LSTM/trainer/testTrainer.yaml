@@ -20,8 +20,8 @@ optimizer:
 scheduler:
   type: StepLR
   params:
-    step_size: 10
-    gamma: 0.5
+    step_size: 50
+    gamma: 0.4472
 
 loss_func:
   type: MSELoss

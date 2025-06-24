@@ -7,14 +7,18 @@ from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import DataLoader, TensorDataset
 from neuraldecoding.utils import prep_data_and_split, load_one_nwb
-from neuraldecoding.model.Model import Model
+import neuraldecoding.model.neural_network_models
 from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 from neuraldecoding.model.neural_network_models.LSTM import LSTM
+import neuraldecoding.utils.eval_metrics
+from neuraldecoding.utils.eval_metrics import *
 import os
+
 class NNTrainer(Trainer):
     def __init__(self, config):
         super().__init__()
+        # General training params 
         self.device = torch.device(config.training.device)
         self.model = self.create_model(config.model).to(self.device)
         self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
@@ -22,9 +26,12 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
+        # Evaluation and logging params
         self.print_results = config.training.get("print_results", True)
         self.print_every = config.training.get("print_every", 10)
-        self.data_path = config.data.data_path
+        self.metrics = config.evaluation.metrics
+        self.metric_params = config.evaluation.get("params", {})
+        self.logger = {metric: [[], []] for metric in self.metrics}
 
     def load_data(self):
         pass
@@ -49,16 +56,9 @@ class NNTrainer(Trainer):
     
     def create_model(self, model_config: DictConfig) -> torch.nn.Module:
         """Creates and returns a loss function based on the configuration."""
-        model_class = globals()[model_config['type']]  
-        model = model_class(model_config['parameters']) 
+        model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
+        model = model_class(model_config.parameters)
         return model
-    
-    def calc_corr(self, y1,y2):
-        """Calculates the correlation between y1 and y2 (tensors)"""
-        corr = []
-        for i in range(y1.shape[1]):
-            corr.append(np.corrcoef(y1[:, i], y2[:, i])[1, 0])
-        return corr
 
     def train_model(self, train_loader = None, valid_loader = None):
         pass
@@ -67,14 +67,17 @@ class NNTrainer(Trainer):
 class LSTMTrainer(NNTrainer):
     def __init__(self, config):
         super().__init__(config)
+        # LSTM specific params
+        self.sequence_length = config.data.params.sequence_length
+        # Data specific params, TODO: change when dataset is finalized
         self.split_ratio = config.data.params.split_ratio
         self.split_seed = config.data.params.split_seed
         self.data_path = config.data.data_path
-        self.sequence_length = config.data.params.sequence_length
         self.num_train_trials = config.data.params.num_train_trials
         self.train_X, self.train_Y, self.valid_X, self.valid_Y = self.load_data()
         self.train_loader, self.valid_loader = self.create_dataloaders()
-
+        
+        
     def load_data(self): # TODO, finalize this when dataset is merged to main
         if not os.path.exists(self.data_path):
             raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
@@ -94,24 +97,59 @@ class LSTMTrainer(NNTrainer):
         return train_loader, valid_loader
 
     def train_model(self, train_loader = None, valid_loader = None):
+        # Override loaders if provided
         if(train_loader is not None):
             self.train_loader = train_loader
         if(valid_loader is not None):
             self.valid_loader = valid_loader
 
-        self.logger = {'train_loss': [], 'val_loss': [], 'correlation': []}
         for epoch in range(self.num_epochs):
+            # Train
+            self.model.train()
+            running_loss = 0.0
+            train_all_predictions = []
+            train_all_targets = []
+            for x,y in self.train_loader:
+                self.optimizer.zero_grad()
 
-            # Train for one epoch
-            train_loss = self.model._train_one_epoch(self.train_loader, self.model, self.optimizer, self.loss_func, self.device)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func)
 
-            # Validate after each epoch
-            val_loss, correlation = self.model._validate_one_epoch(self.train_loader, self.model, self.loss_func, self.device)
+                running_loss += loss.item()
+                train_all_predictions.append(yhat.detach().cpu().numpy())
+                train_all_targets.append(y.detach().cpu().numpy())
 
-            # Record losses and correlation
-            self.logger['train_loss'].append(train_loss)
-            self.logger['val_loss'].append(val_loss)
-            self.logger['correlation'].append(correlation)
+            train_all_predictions = np.concatenate(train_all_predictions, axis=0)
+            train_all_targets = np.concatenate(train_all_targets, axis=0)
+            train_loss = running_loss / len(self.train_loader)
+
+            # Validate
+            self.model.eval()
+            running_val_loss = 0.0
+            val_all_predictions = []
+            val_all_targets = []
+            with torch.no_grad():
+                for x_val, y_val in self.valid_loader:
+                    yhat_val, _ = self.model(x_val)
+                    val_loss = self.loss_func(yhat_val, y_val)
+
+                    running_val_loss += val_loss.item()
+                    val_all_predictions.append(yhat_val.cpu().numpy())
+                    val_all_targets.append(y_val.cpu().numpy())
+
+            val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+            val_all_targets = np.concatenate(val_all_targets, axis=0)
+            val_loss = running_val_loss / len(self.valid_loader)
+
+            # Calculate and populate metrics
+            for metric in self.metrics:
+                if metric == "loss":
+                    self.logger[metric][0].append(train_loss)
+                    self.logger[metric][1].append(val_loss)
+                else:
+                    metric_param = self.metric_params.get(metric, None)
+                    metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
+                    self.logger[metric][0].append(metric_class(train_all_predictions, train_all_targets, metric_param))
+                    self.logger[metric][1].append(metric_class(val_all_predictions, val_all_targets, metric_param))
 
             # Scheduler step
             if self.scheduler:
@@ -119,11 +157,12 @@ class LSTMTrainer(NNTrainer):
 
             # Print progress
             if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
-                print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, "
-                      f"Val Loss: {val_loss:.4f}, Correlation: {correlation[0]:.4f}, {correlation[1]:.4f}")
-
-            if self.print_results:
-                print("*** Training Complete ***")
+                print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+                for metric in self.logger:
+                    train_metric = self.logger[metric][0][-1]
+                    val_metric = self.logger[metric][1][-1]
+                    print(f"    {metric}: train={train_metric},")
+                    print(f"              val={val_metric}")
 
         return self.model, self.logger
 

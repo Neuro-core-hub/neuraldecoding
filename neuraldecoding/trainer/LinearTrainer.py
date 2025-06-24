@@ -9,8 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from neuraldecoding.utils import data_split_trial, load_one_nwb
 from neuraldecoding.model.Model import Model
 from neuraldecoding.trainer.Trainer import Trainer
-from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
-from neuraldecoding.model.neural_network_models.LSTM import LSTM
+import neuraldecoding.model.linear_models
 from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression, KalmanFilter
 import os
 
@@ -37,8 +36,8 @@ class LinearTrainer(Trainer):
     
     def create_model(self, config):
         """Creates and returns a loss function based on the configuration."""
-        model_class = globals()[config['type']]  
-        model = model_class(config['parameters']) 
+        model_class = getattr(neuraldecoding.model.linear_models, config.type)
+        model = model_class(config.parameters)
         return model
     
     def train_model(self):
