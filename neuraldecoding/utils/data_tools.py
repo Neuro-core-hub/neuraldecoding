@@ -173,6 +173,18 @@ def prep_data_and_split(data_dict, seq_len, num_train_trials):
     else:
         raise Exception('not enough trials')
     
+def prep_data_no_split(data_dict, seq_len):
+    neural = data_dict['sbp'][:]
+    
+    finger = data_dict['finger_kinematics'][:]
+
+    # add history
+    if seq_len > 0:
+        neural_hist = add_history(neural, seq_len)
+        return neural_hist, torch.tensor(finger)
+    else:
+        return torch.tensor(neural), torch.tensor(finger)
+    
 def add_hist(X, Y, hist=10):
     nNeu = X.shape[1]
 

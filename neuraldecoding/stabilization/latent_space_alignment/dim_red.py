@@ -7,7 +7,7 @@ from sklearn.decomposition import PCA as PrincipalComponentAnalyisis
 import adaptive_latents.prosvd as psvd
 
 # sys.path.append('fa_stable_manifolds_python')
-import factor_analysis as fa_stable
+from . import factor_analysis as fa_stable
 
 class DimRed(ABC):
     def __init__(self, ndims = None):

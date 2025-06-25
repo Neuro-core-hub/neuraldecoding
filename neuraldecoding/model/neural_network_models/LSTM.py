@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import numpy as np
+import os
 
 class LSTM(nn.Module, NeuralNetworkModel):
     def __init__(self, model_params):
@@ -158,6 +159,9 @@ class LSTM(nn.Module, NeuralNetworkModel):
             },
             "model_type": "LSTM"
         }
+        folder = os.path.dirname(filepath)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
         torch.save(checkpoint_dict, filepath)
 
 

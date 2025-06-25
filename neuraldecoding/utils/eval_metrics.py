@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 def correlation(y1,y2,params=None):
     """Calculates the correlation between y1 and y2 (tensors)"""
@@ -7,3 +8,5 @@ def correlation(y1,y2,params=None):
         corr.append(np.corrcoef(y1[:, i], y2[:, i])[1, 0])
     return corr
 
+def accuracy(y1, y2, params=None):
+    raise NotImplementedError("Accuracy is not implemented yet.")

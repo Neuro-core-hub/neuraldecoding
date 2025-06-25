@@ -37,6 +37,7 @@ class LatentSpaceAlignment(Stabilization):
 
         return latent_ds
     
+    
     def extract_latent_space(self, data):
         """Extract and align a latent space
 
