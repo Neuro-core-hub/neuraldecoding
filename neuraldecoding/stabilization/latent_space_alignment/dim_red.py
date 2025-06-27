@@ -50,14 +50,14 @@ class FactorAnalysis(LoadingMatrixDimRed):
     def reduce(self, data, lm, args = None):
         if args is not None: 
             warnings.warn("Warning: Args passed to FactorAnalysis.reduce() when they are not needed")
-        data_means = np.mean(data.neural, axis = 0)
-        reduced_data = (data.neural - data_means) @ lm
+        data_means = np.mean(data, axis = 0)
+        reduced_data = (data - data_means) @ lm
         return reduced_data
     
 class PCA(LoadingMatrixDimRed):
     def calc_lm(self, ds):
         pca = PrincipalComponentAnalyisis(n_components=self.ndims)
-        pca.fit(ds.neural)
+        pca.fit(ds)
         lm = pca.components_.T
         
         return lm, None
@@ -65,13 +65,13 @@ class PCA(LoadingMatrixDimRed):
     def reduce(self, data, lm, args = None):
         if args is not None: 
             warnings.warn("Warning: Args passed to PCA.reduce() when they are not needed")
-        data_means = np.mean(data.neural, axis = 0)
-        ls = (data.neural - data_means) @ lm
+        data_means = np.mean(data, axis = 0)
+        ls = (data - data_means) @ lm
         return ls
     
 class NoDimRed(LoadingMatrixDimRed):
     def calc_lm(self, data):
-        return np.eye(data.neural.shape[1]), None
+        return np.eye(data.shape[1]), None
     
     def reduce(self, data, lm, args):
         return data
@@ -92,12 +92,12 @@ class ProSVD(DimRed):
     def get_lm(self, data):
         pro = psvd.BaseProSVD(self.ndims)
 
-        n_init = int(data.neural.shape[0]*self.l1)
-        A_init = data.neural[:n_init, :].T
+        n_init = int(data.shape[0]*self.l1)
+        A_init = data[:n_init, :].T
         pro.initialize(A_init)
 
         if self.l == -1:
-            l = data.neural.shape[0] - n_init
+            l = data.shape[0] - n_init
         else:
             l = self.l
 
@@ -105,12 +105,12 @@ class ProSVD(DimRed):
             num_updates = 0
 
         else:
-            num_updates = math.ceil((data.neural.shape[0] - n_init) / l)
+            num_updates = math.ceil((data.shape[0] - n_init) / l)
             
         for i in range(num_updates):
             start_idx = (i * l)+n_init
             end_idx = start_idx + l 
-            pro.updateSVD(data.neural[start_idx:end_idx, :].T)
+            pro.updateSVD(data[start_idx:end_idx, :].T)
  
         return pro.Q
      

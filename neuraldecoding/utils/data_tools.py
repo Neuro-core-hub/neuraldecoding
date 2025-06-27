@@ -151,16 +151,21 @@ def add_history(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
 
-def prep_data_and_split(data_dict, seq_len, num_train_trials):
+def prep_data_and_split(data_dict, seq_len, num_train_trials, stabilization=None):
     trial_index = data_dict['trial_index']
     if len(trial_index) > num_train_trials:
         test_len = np.min((len(trial_index)-1, 399)) #TODO: split by trials as done in data_split_trial
-
-        neural_training = data_dict['sbp'][:trial_index[num_train_trials]]
-        neural_testing = data_dict['sbp'][trial_index[num_train_trials]:trial_index[test_len]]
+        if stabilization is not None:
+            neural = stabilization.fit(data_dict['sbp'])
+            finger = data_dict['finger_kinematics']
+        else:
+            neural = data_dict['sbp']
+            finger = data_dict['finger_kinematics']
+        neural_training = neural[:trial_index[num_train_trials]]
+        neural_testing = neural[trial_index[num_train_trials]:trial_index[test_len]]
         
-        finger_training = data_dict['finger_kinematics'][:trial_index[num_train_trials]]
-        finger_testing = data_dict['finger_kinematics'][trial_index[num_train_trials]:trial_index[test_len]]
+        finger_training = finger[:trial_index[num_train_trials]]
+        finger_testing = finger[trial_index[num_train_trials]:trial_index[test_len]]
 
         # add history
         if seq_len > 0:
@@ -173,17 +178,18 @@ def prep_data_and_split(data_dict, seq_len, num_train_trials):
     else:
         raise Exception('not enough trials')
     
-def prep_data_no_split(data_dict, seq_len):
-    neural = data_dict['sbp'][:]
-    
-    finger = data_dict['finger_kinematics'][:]
+def prep_data_decoder(data_dict, seq_len, stabilization=None):
+    neural = data_dict['sbp']
+    finger = data_dict['finger_kinematics']
 
+    if stabilization is not None:
+        neural = stabilization.extract_latent_space(neural)
     # add history
     if seq_len > 0:
         neural_hist = add_history(neural, seq_len)
         return neural_hist, torch.tensor(finger)
     else:
-        return torch.tensor(neural), torch.tensor(finger)
+        return neural, torch.tensor(finger)
     
 def add_hist(X, Y, hist=10):
     nNeu = X.shape[1]

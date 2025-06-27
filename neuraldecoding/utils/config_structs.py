@@ -1,19 +1,20 @@
 from omegaconf import DictConfig, ListConfig
 
-decoder_struct = {'model': {'name': str, 
-                                 'parameters': DictConfig, 
-                                 'input_shape': ListConfig, 
-                                 'output_shape': ListConfig}, 
-                       'stabilization': {'name': str, 
-                                         'parameters': DictConfig, 
-                                         'date_0': str, 
-                                         'date_k': str},
-                       'fpath': str
-                    }
+decoder_struct = {
+    'model': {
+        'type': str,
+        'params': DictConfig
+    },
+    'stabilization': {
+        'type': str,
+        'params': DictConfig
+    },
+    'fpath': str
+}
 trainer_struct = {
         'model': {
             'type': str,
-            'parameters': DictConfig
+            'params': DictConfig
         },
         'optimizer': {
             'type': str,
@@ -39,6 +40,9 @@ trainer_struct = {
             'metrics': ListConfig,
             'params': DictConfig
         },
+        'stabilization': {'type': str, 
+                                         'params': DictConfig
+                                         },
         'data': {
             'data_path': str,
             'params': DictConfig

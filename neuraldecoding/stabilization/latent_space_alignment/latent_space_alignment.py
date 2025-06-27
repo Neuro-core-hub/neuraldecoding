@@ -1,8 +1,11 @@
 from abc import ABC, abstractmethod
+import neuraldecoding.stabilization.latent_space_alignment.dim_red
+import neuraldecoding.stabilization.latent_space_alignment.alignment
 from neuraldecoding.stabilization import Stabilization
+import pickle
 
 class LatentSpaceAlignment(Stabilization):
-    def __init__(self, dim_red_method, alignment_method, ndims = None): 
+    def __init__(self, cfg): 
         """ Initialize latent space alignment
 
         Inputs:
@@ -10,10 +13,11 @@ class LatentSpaceAlignment(Stabilization):
             alignment_method ('Alignment' class): Latent space alignemnt aethod
             ndims (int, optional): Number of dims to reduce to. Defaults to None.
         """        
-        self.ndims = ndims
-        self.dim_red_method = dim_red_method
-        self.alignment_method = alignment_method
-    
+        self.ndims = cfg.ndims
+        self.dim_red_method = getattr(neuraldecoding.stabilization.latent_space_alignment.dim_red, cfg.dim_red_method.type)(**cfg.dim_red_method.params)
+        self.alignment_method = getattr(neuraldecoding.stabilization.latent_space_alignment.alignment, cfg.alignment_method.type)(**cfg.dim_red_method.params)
+        self.fpath = cfg.fpath
+
     def fit(self, data):
         """Train the LatentSpaceAlignment. Sets day_0 lm and returns latent space
 
@@ -58,6 +62,21 @@ class LatentSpaceAlignment(Stabilization):
     def stabilize(self, data):
         data = self.extract_latent_space(data)
         return data
+    
+    def save_alignment(self):
+        with open(self.fpath, 'wb') as f:
+            pickle.dump({
+                'dim_red_method': self.dim_red_method,
+                'alignment_method': self.alignment_method,
+                'ndims': self.ndims
+            }, f)
+
+    def load_alignment(self):
+        with open(self.fpath, 'rb') as f:
+            data = pickle.load(f)
+            self.dim_red_method = data['dim_red_method']
+            self.alignment_method = data['alignment_method']
+            self.ndims = data['ndims']
     
 class PAF(LatentSpaceAlignment):
     def fit(self, data):

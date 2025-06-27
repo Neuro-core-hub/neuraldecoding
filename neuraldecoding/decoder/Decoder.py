@@ -8,7 +8,10 @@ import torch
 from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression
 from neuraldecoding.model.neural_network_models import LSTM
 
+import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.stabilization.latent_space_alignment import LatentSpaceAlignment
+
+from neuraldecoding.utils.data_tools import prep_data_decoder
 
 model_reg = {
     "KalmanFilter": KalmanFilter,
@@ -29,28 +32,26 @@ class Decoder(ABC):
         Args:
             cfg: config dictionary
         """
-        # Stabilization implementation, not verified commented out for now
-        # # Get stabilization stuff
-        # if cfg["stabilization"]["name"] in model_reg:
-        #     self.stabilization = stabilization_reg[cfg["stabilization"]["name"]](**cfg["stabilization"]["parameters"])
-        # else:
-        #     raise ValueError(f"Model {cfg['stabilization']['name']} is not registered in stabilization_reg.")
-
+        stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, cfg["stabilization"]["type"])
+        self.stabilization = stabilization_method(cfg["stabilization"]["params"])
+        self.stabilization.load_alignment()
         # Get model stuff
-        if cfg["model"]["name"] in model_reg:
-            self.model = model_reg[cfg["model"]["name"]](cfg["model"]["parameters"])
+        if cfg["model"]["type"] in model_reg:
+            self.model = model_reg[cfg["model"]["type"]](cfg["model"]["params"])
         else:
-            raise ValueError(f"Model {cfg['model']['name']} is not registered in model_reg.")
-        
+            raise ValueError(f"Model {cfg['model']['type']} is not registered in model_reg.")
+        self.device = cfg["model"]["params"].get("device", "cpu")
+
         # Get model path
         self.fpath = cfg["fpath"]
 
         # Get model i/o shape
-        self.input_shape = cfg["model"]["input_shape"]
-        self.output_shape = cfg["model"]["output_shape"]
+        self.input_shape = cfg["model"]["params"]["input_size"]
+        self.output_shape = cfg["model"]["params"]["num_outputs"]
 
         # Load model from path
         self.load_model()
+        self.cfg = cfg
 
     def load_model(self, fpath : str = None) -> None:
         """
@@ -120,7 +121,7 @@ class LinearDecoder(Decoder):
 class NeuralNetworkDecoder(Decoder):
     def __init__(self, cfg: dict) -> None:
         super().__init__(cfg)
-    def predict(self, neural_data: np.ndarray) -> torch.Tensor:
+    def predict(self, data_dict):
         """
         Predict outputs given neural data in offline setting.
 
@@ -131,6 +132,8 @@ class NeuralNetworkDecoder(Decoder):
             prediction (torch.Tensor): Predicted output
         """
         with torch.no_grad():
-            prediction = self.model(neural_data)
+            neural_test, finger_test = prep_data_decoder(data_dict, self.cfg.model.params.sequence_length, self.stabilization)
+            neural_test, finger_test = neural_test.to(self.device), finger_test.to(self.device)
+            prediction = self.model(neural_test)
         
-        return prediction
+        return prediction, finger_test

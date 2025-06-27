@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from neuraldecoding.utils import prep_data_and_split, load_one_nwb
 import neuraldecoding.model.neural_network_models
 from neuraldecoding.trainer.Trainer import Trainer
+import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 from neuraldecoding.model.neural_network_models.LSTM import LSTM
 import neuraldecoding.utils.eval_metrics
@@ -33,6 +34,9 @@ class NNTrainer(Trainer):
         self.metrics = config.evaluation.metrics
         self.metric_params = config.evaluation.get("params", {})
         self.logger = {metric: [[], []] for metric in self.metrics}
+        # Stabilization params
+        stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, config["stabilization"]["type"])
+        self.stabilization = stabilization_method(config["stabilization"]["params"])
 
     def load_data(self):
         pass
@@ -58,7 +62,7 @@ class NNTrainer(Trainer):
     def create_model(self, model_config: DictConfig) -> torch.nn.Module:
         """Creates and returns a loss function based on the configuration."""
         model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
-        model = model_class(model_config.parameters)
+        model = model_class(model_config.params)
         return model
 
     def train_model(self, train_loader = None, valid_loader = None):
@@ -84,7 +88,7 @@ class LSTMTrainer(NNTrainer):
             raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
         """Assuming data is dictionary output of one NWB file, change later"""
         data = load_one_nwb(self.data_path)
-        train_X, valid_X, train_Y, valid_Y = prep_data_and_split(data, self.sequence_length, self.num_train_trials)
+        train_X, valid_X, train_Y, valid_Y = prep_data_and_split(data, self.sequence_length, self.num_train_trials, self.stabilization)
         return train_X, train_Y, valid_X, valid_Y
     
     def create_dataloaders(self):
