@@ -6,6 +6,7 @@ from sklearn.decomposition import PCA as PrincipalComponentAnalyisis
 # sys.path.append('AdaptiveLatents')
 import adaptive_latents.prosvd as psvd
 
+import warnings
 # sys.path.append('fa_stable_manifolds_python')
 from . import factor_analysis as fa_stable
 
@@ -44,7 +45,15 @@ class FactorAnalysis(LoadingMatrixDimRed):
         psi = fa.noise_variance_
         W = lm_partial/psi
         loading_matrix = W.T @ np.linalg.inv(np.eye(len(lm_partial))+np.dot(W, lm_partial.T))
+        
+        # warnings.warn("Warning: Debugging outputs, shouldn't occur in use, remove later")
+        # communalities = np.sum(lm_partial**2, axis=0)
 
+        # total_variance_captured = np.sum(communalities)
+        # total_original_variance = np.sum(np.var(data, axis=0))
+
+        # proportion_variance = total_variance_captured / total_original_variance
+        # print(f"Total variance captured: {proportion_variance}")
         return loading_matrix, None
     
     def reduce(self, data, lm, args = None):
@@ -59,7 +68,10 @@ class PCA(LoadingMatrixDimRed):
         pca = PrincipalComponentAnalyisis(n_components=self.ndims)
         pca.fit(ds)
         lm = pca.components_.T
-        
+
+        warnings.warn("Warning: Debugging outputs, shouldn't occur in use, remove later")
+        cumvar = np.cumsum(pca.explained_variance_ratio_)
+        print(f"Cum Var of PCA: {cumvar}")
         return lm, None
     
     def reduce(self, data, lm, args = None):
