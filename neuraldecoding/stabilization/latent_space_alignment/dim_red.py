@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.decomposition import FactorAnalysis as FA
 from sklearn.decomposition import PCA as PrincipalComponentAnalyisis
 # sys.path.append('AdaptiveLatents')
-import adaptive_latents.prosvd as psvd
+# import adaptive_latents.prosvd as psvd
 
 import warnings
 # sys.path.append('fa_stable_manifolds_python')
@@ -69,9 +69,9 @@ class PCA(LoadingMatrixDimRed):
         pca.fit(ds)
         lm = pca.components_.T
 
-        warnings.warn("Warning: Debugging outputs, shouldn't occur in use, remove later")
-        cumvar = np.cumsum(pca.explained_variance_ratio_)
-        print(f"Cum Var of PCA: {cumvar}")
+        # warnings.warn("Warning: Debugging outputs, shouldn't occur in use, remove later")
+        # cumvar = np.cumsum(pca.explained_variance_ratio_)
+        # print(f"Cum Var of PCA: {cumvar}")
         return lm, None
     
     def reduce(self, data, lm, args = None):
@@ -88,49 +88,49 @@ class NoDimRed(LoadingMatrixDimRed):
     def reduce(self, data, lm, args):
         return data
  
-class ProSVD(DimRed):   
-    ## Note: this is very much setup for offline analysis, for online it will need to be altered
-    ## I have an idea of how to do this, but wanted to keep the initial implementation simple
-    def __init__(self, l = 1, l1 = .2):
-        """initialize ProSVD
+# class ProSVD(DimRed):   
+#     ## Note: this is very much setup for offline analysis, for online it will need to be altered
+#     ## I have an idea of how to do this, but wanted to keep the initial implementation simple
+#     def __init__(self, l = 1, l1 = .2):
+#         """initialize ProSVD
 
-        Args:
-            l (int, optional): step size
-            l1 (float, optional): proportion of data to initialize on
-        """        
-        self.l = l
-        self.l1 = l1
+#         Args:
+#             l (int, optional): step size
+#             l1 (float, optional): proportion of data to initialize on
+#         """        
+#         self.l = l
+#         self.l1 = l1
 
-    def get_lm(self, data):
-        pro = psvd.BaseProSVD(self.ndims)
+#     def get_lm(self, data):
+#         pro = psvd.BaseProSVD(self.ndims)
 
-        n_init = int(data.shape[0]*self.l1)
-        A_init = data[:n_init, :].T
-        pro.initialize(A_init)
+#         n_init = int(data.shape[0]*self.l1)
+#         A_init = data[:n_init, :].T
+#         pro.initialize(A_init)
 
-        if self.l == -1:
-            l = data.shape[0] - n_init
-        else:
-            l = self.l
+#         if self.l == -1:
+#             l = data.shape[0] - n_init
+#         else:
+#             l = self.l
 
-        if l == 0:
-            num_updates = 0
+#         if l == 0:
+#             num_updates = 0
 
-        else:
-            num_updates = math.ceil((data.shape[0] - n_init) / l)
+#         else:
+#             num_updates = math.ceil((data.shape[0] - n_init) / l)
             
-        for i in range(num_updates):
-            start_idx = (i * l)+n_init
-            end_idx = start_idx + l 
-            pro.updateSVD(data[start_idx:end_idx, :].T)
+#         for i in range(num_updates):
+#             start_idx = (i * l)+n_init
+#             end_idx = start_idx + l 
+#             pro.updateSVD(data[start_idx:end_idx, :].T)
  
-        return pro.Q
+#         return pro.Q
      
-    def reduce(self, data, lm):
+#     def reduce(self, data, lm):
 
-        ls = data @ lm
+#         ls = data @ lm
 
-        return ls
+#         return ls
     
   
 class EMFactorAnalysis1(DimRed):

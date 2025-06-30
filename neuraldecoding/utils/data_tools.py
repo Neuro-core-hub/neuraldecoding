@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch.utils.data import random_split
+from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import glob
 import os
@@ -133,6 +134,30 @@ def data_split_trial(x, y, trial_idx, split=0.8, seed = 42):
     
     return (x[train_mask],y[train_mask]), (x[test_mask],y[test_mask])
 
+class SequenceScaler:
+    """
+    Wrapper around StandardScaler to handle neural data of shape (n_samples, seq_len, n_features)
+    Ensures same normalization is applied across all timesteps.
+    Fits just on the last timestep of the sequence.
+    
+    X is of shape (n_samples, seq_len, n_features)
+    """
+    def __init__(self):
+        self.scaler = StandardScaler()
+        
+    def fit(self, X):
+        self.scaler.fit(X[:, -1, :])
+        return self
+    
+    def transform(self, X):
+        # loop over each timestep and apply the scaler
+        for i in range(X.shape[1]):
+            X[:, i, :] = self.scaler.transform(X[:, i, :])
+        return X
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
+
 def add_history(neural_data, seq_len):
     """
     Add history to the neural data.
@@ -171,7 +196,18 @@ def prep_data_and_split(data_dict, seq_len, num_train_trials, stabilization=None
         if seq_len > 0:
             neural_training_hist = add_history(neural_training, seq_len)
             neural_testing_hist = add_history(neural_testing, seq_len)
-            return neural_training_hist, neural_testing_hist, torch.tensor(finger_training), torch.tensor(finger_testing)
+
+            input_scaler = SequenceScaler()
+            neural_training_scaled = input_scaler.fit_transform(neural_training_hist.numpy())
+            output_scaler = StandardScaler()
+            finger_training_scaled = output_scaler.fit_transform(finger_training)
+
+            input_scaler = SequenceScaler()
+            neural_testing_scaled = input_scaler.fit_transform(neural_testing_hist.numpy())
+            output_scaler = StandardScaler()
+            finger_testing_scaled = output_scaler.fit_transform(finger_testing)
+
+            return torch.tensor(neural_training_scaled), torch.tensor(neural_testing_scaled), torch.tensor(finger_training_scaled), torch.tensor(finger_testing_scaled)
         else:
             return torch.tensor(neural_training), torch.tensor(neural_testing), torch.tensor(finger_training), torch.tensor(finger_testing)
 
@@ -187,7 +223,11 @@ def prep_data_decoder(data_dict, seq_len, stabilization=None):
     # add history
     if seq_len > 0:
         neural_hist = add_history(neural, seq_len)
-        return neural_hist, torch.tensor(finger)
+        input_scaler = SequenceScaler()
+        neural_scaled = input_scaler.fit_transform(neural_hist.numpy())
+        output_scaler = StandardScaler()
+        finger_scaled = output_scaler.fit_transform(finger)
+        return torch.tensor(neural_scaled), torch.tensor(finger_scaled)
     else:
         return neural, torch.tensor(finger)
     
