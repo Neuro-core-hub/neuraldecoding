@@ -130,6 +130,7 @@ class NeuralNetworkDecoder(Decoder):
         Returns:
             prediction (torch.Tensor): Predicted output
         """
-        prediction = self.model(neural_data)
+        with torch.no_grad():
+            prediction = self.model(neural_data)
         
         return prediction
