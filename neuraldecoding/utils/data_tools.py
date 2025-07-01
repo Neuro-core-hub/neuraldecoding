@@ -95,6 +95,10 @@ def load_one_nwb(fp: str) -> dict:
             run_id=np.full_like(trial_number, run_id),
         )
     
+def neural_finger_from_dict(dict, neural_type):
+    neural = dict[neural_type]
+    finger = dict['finger_kinematics']
+    return (neural, finger)
 
 def data_split_direct(data_X, data_Y, ratio):
     total_len = len(data_X)
