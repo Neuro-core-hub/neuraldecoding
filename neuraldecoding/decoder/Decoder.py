@@ -121,19 +121,8 @@ class LinearDecoder(Decoder):
 class NeuralNetworkDecoder(Decoder):
     def __init__(self, cfg: dict) -> None:
         super().__init__(cfg)
-    def predict(self, data_dict):
-        """
-        Predict outputs given neural data in offline setting.
-
-        Args:
-            neural_data (numpy.ndarray): Input neural data of shape [N, numfeats]
-
-        Returns:
-            prediction (torch.Tensor): Predicted output
-        """
+    def predict(self, neural_test):
         with torch.no_grad():
-            neural_test, finger_test = prep_data_decoder(data_dict, self.cfg.model.params.sequence_length, self.stabilization)
-            neural_test, finger_test = neural_test.to(self.device), finger_test.to(self.device)
+            neural_test = neural_test.to(self.device)
             prediction = self.model(neural_test)
-        
-        return prediction, finger_test
+        return prediction
