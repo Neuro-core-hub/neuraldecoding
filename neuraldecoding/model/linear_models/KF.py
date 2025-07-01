@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import torch
 from tqdm import tqdm
-from LinearModel import LinearModel
+from .LinearModel import LinearModel
 
 
 class KalmanFilter(LinearModel):
@@ -14,14 +14,16 @@ class KalmanFilter(LinearModel):
             model_params (dict) containing three keys, 'append_ones_y' (bool) which specifies whether or not to add column of ones for bias, 
             'device' (bool) which specifies what device to train/run the model on and "return_tensor" 
             (bool) which specifies whether a tensor should be returned or not.
-
+            yhat the initial yhat
             TODO: option to zero position uncertainty
             TODO: make it store the current state (currently resets every time)
             TODO: not tested on GPU
         """
 
         self.A, self.C, self.W, self.Q = None, None, None, None
-        self.At, self.Ct = None, None
+        self.At, self.Ct = None, None#
+        self.Pt = None
+        self.yh = np.expand_dims(np.array(model_params["yhat"]), axis=0) if "yhat" in model_params else None
         self.append_ones_y = model_params["append_ones_y"]
         self.device = model_params["device"]
         self.return_tensor = model_params["return_tensor"]
@@ -83,7 +85,7 @@ class KalmanFilter(LinearModel):
         yhat = self.predict_numpy(input)
         return yhat
 
-    def predict_numpy(self, x, start_y = None):
+    def predict_numpy(self, x):
         """
         Runs a forward pass, returning a prediction for all input datapoints. If start_y is true, initial state is added.
 
@@ -95,32 +97,41 @@ class KalmanFilter(LinearModel):
             yhat (ndarray) prediction of size [n, k], where n is the number of samples/data, and k is the number of hidden state features
         """
         x = x.view((x.shape[0], -1))
-        x = x.numpy()
+        if not isinstance(x, np.ndarray):
+            x = x.numpy()
+        if not isinstance(self.A, np.ndarray):
+            self.A = self.A.numpy()
+        if not isinstance(self.W, np.ndarray):
+            self.W = self.W.numpy()
+        if not isinstance(self.C, np.ndarray):
+            self.C = self.C.numpy()
+        if not isinstance(self.Q, np.ndarray):
+            self.Q = self.Q.numpy()
 
-        self.A = self.A.numpy()
-        self.W = self.W.numpy()
-        self.C = self.C.numpy()
-        self.Q = self.Q.numpy()
+        if self.yh is None:
+            self.yh = np.zeros((1, self.A.shape[1]))
+        
+        if self.Pt is None:
+            self.Pt = self.W.copy()
 
-        yhat = np.zeros((x.shape[0], self.A.shape[1]))
-        if start_y:
-            yhat[0, :] = start_y
+        yhat = self.yh
+        all_yhat = np.zeros((x.shape[0], self.A.shape[1]))
+        for t in range(x.shape[0]):
+            yt = yhat @ self.A.T                                # predict new state
+            self.Pt = self.A @ self.Pt @ self.A.T + self.W                        # compute error covariance
+            K = np.linalg.lstsq((self.C @ self.Pt @ self.C.T + self.Q).T,
+                                (self.Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
+            yhat = yt.T + K @ (x[t, :].T.reshape(-1, 1) - self.C @ yt.T)	        # update state estimate
+            
+            self.Pt = (np.eye(self.Pt.shape[0]) - K @ self.C) @ self.Pt	            # update error covariance
+            yhat = yhat.reshape(1, self.A.shape[1])
+            all_yhat[t, :] = yhat
+        self.yh = yhat
 
-        Pt = self.W.copy()
 
-        for t in tqdm(range(1, yhat.shape[0])):
-            yt = yhat[t-1, :] @ self.A.T                                # predict new state
-            Pt = self.A @ Pt @ self.A.T + self.W                        # compute error covariance
-            K = np.linalg.lstsq((self.C @ Pt @ self.C.T + self.Q).T,
-                                (Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
-            yhat[t, :] = yt.T + K @ (x[t, :].T - self.C @ yt.T)	        # update state estimate
-            Pt = (np.eye(Pt.shape[0]) - K @ self.C) @ Pt	            # update error covariance
+        all_yhat = torch.from_numpy(all_yhat)
 
-        if self.return_tensor:
-            yhat = torch.Tensor(yhat)
-        if self.append_ones_y:
-            yhat = yhat[:, :-1]
-        return yhat
+        return all_yhat
 
     def save_model(self, fpath):
         """
@@ -158,3 +169,8 @@ class KalmanFilter(LinearModel):
         self.C = model_dict['C']
         self.W = model_dict['W']
         self.Q = model_dict['Q']
+
+    def initialize(self, yhat, Pt = None):
+        self.yh = yhat
+        if Pt is not None:
+            self.Pt = Pt
