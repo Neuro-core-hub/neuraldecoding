@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import random_split
 from sklearn.preprocessing import StandardScaler
+from neuraldecoding.dataaugmentation import SequenceScaler
 import pandas as pd
 import glob
 import os
@@ -98,7 +99,8 @@ def load_one_nwb(fp: str) -> dict:
 def neural_finger_from_dict(dict, neural_type):
     neural = dict[neural_type]
     finger = dict['finger_kinematics']
-    return (neural, finger)
+    trial_idx = dict['trial_index']
+    return (neural, finger), trial_idx
 
 def data_split_direct(data_X, data_Y, ratio):
     total_len = len(data_X)
@@ -114,13 +116,13 @@ def data_split_direct(data_X, data_Y, ratio):
 
     return split1, split2
 
-def data_split_trial(x, y, trial_idx, split=0.8, seed = 42):
+def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     boundaries = np.concatenate([trial_idx, [len(x)]])
     n_trials = len(trial_idx)
     
     g = torch.Generator().manual_seed(seed)
     perm = torch.randperm(n_trials, generator=g)
-    n_test = int(n_trials * (1.-split))
+    n_test = int(n_trials * (1.-split_ratio))
     
     test_trials = perm[:n_test]
     train_trials = perm[n_test:]
@@ -137,30 +139,6 @@ def data_split_trial(x, y, trial_idx, split=0.8, seed = 42):
         test_mask[start:end] = True
     
     return (x[train_mask],y[train_mask]), (x[test_mask],y[test_mask])
-
-class SequenceScaler:
-    """
-    Wrapper around StandardScaler to handle neural data of shape (n_samples, seq_len, n_features)
-    Ensures same normalization is applied across all timesteps.
-    Fits just on the last timestep of the sequence.
-    
-    X is of shape (n_samples, seq_len, n_features)
-    """
-    def __init__(self):
-        self.scaler = StandardScaler()
-        
-    def fit(self, X):
-        self.scaler.fit(X[:, -1, :])
-        return self
-    
-    def transform(self, X):
-        # loop over each timestep and apply the scaler
-        for i in range(X.shape[1]):
-            X[:, i, :] = self.scaler.transform(X[:, i, :])
-        return X
-    
-    def fit_transform(self, X):
-        return self.fit(X).transform(X)
 
 def add_history(neural_data, seq_len):
     """
@@ -179,6 +157,24 @@ def add_history(neural_data, seq_len):
 
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
+
+def add_history_numpy(neural_data, seq_len):
+    """
+    Add history to the neural data.
+    neural_data is of shape (n_samples, n_channels)
+    the output is of shape (n_samples, seq_len, n_channels)
+    """
+    Xtrain1 = torch.zeros((int(neural_data.shape[0]), int(neural_data.shape[1]), seq_len))
+    Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
+    for k1 in range(seq_len - 1):
+        k = k1 + 1
+        Xtrain1[k:, :, k] = torch.from_numpy(neural_data[0:-k, :])
+
+    # for RNNs, we want the last timestep to be the most recent data
+    Xtrain1 = torch.flip(Xtrain1, (2,))
+
+    #  (n_samples, n_channels, seq_len)
+    return Xtrain1.numpy()
 
 def prep_data_and_split(data_dict, seq_len, num_train_trials, stabilization=None):
     trial_index = data_dict['trial_index']

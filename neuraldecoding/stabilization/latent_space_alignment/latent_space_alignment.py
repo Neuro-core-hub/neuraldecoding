@@ -4,6 +4,8 @@ import neuraldecoding.stabilization.latent_space_alignment.alignment
 from neuraldecoding.stabilization import Stabilization
 import pickle
 
+import time
+
 class LatentSpaceAlignment(Stabilization):
     def __init__(self, cfg): 
         """ Initialize latent space alignment
@@ -52,7 +54,7 @@ class LatentSpaceAlignment(Stabilization):
             ls (numpy array of shape [ndims x timepoints]): aligned latent space
         """        
         lm, args = self.dim_red_method.calc_lm(data)
-
+        
         aligned_lm = self.alignment_method.get_aligned_lm(lm)
 
         latent_ds = self.dim_red_method.reduce(data, aligned_lm, args)

@@ -49,3 +49,11 @@ trainer_struct = {
             'params': DictConfig
         }
     }
+preprocessing_struct = {
+    'preprocessing_trainer':{
+        'order': ListConfig,
+        'content': DictConfig},
+    'preprocessing_decoder': {
+        'order': ListConfig,
+        'content': DictConfig}
+}

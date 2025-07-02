@@ -3,12 +3,7 @@ import torch
 
 import neuraldecoding.preprocessing.wrapper
 
-
-method_reg = {
-    "normalization": neuraldecoding.utils.data_tools.normalize,
-    "add_history": neuraldecoding.utils.data_tools.add_history,
-    "stabilization": neuraldecoding.utils.data_tools.stabilization,
-}
+import time
 
 class Preprocessing:
     def __init__(self, config):
@@ -26,10 +21,7 @@ class Preprocessing:
             step_type = step_config['type']
             step_params = step_config.get('params', {})
             
-            if step_type not in method_reg: #To be changed to wrapper
-                raise ValueError(f"Unknown preprocessing type: {step_type}")
-            
-            preprocessing_class = method_reg[step_type] #To be changed to wrapper
+            preprocessing_class = getattr(neuraldecoding.preprocessing.wrapper, step_type)
             preprocessing_instance = preprocessing_class(**step_params)
             
             self.pipeline.append({
@@ -38,11 +30,18 @@ class Preprocessing:
                 'instance': preprocessing_instance
             })
     
-    def preprocess(self, data, params = {'is_train': True}):
+    def preprocess_pipeline(self, data, params = {'is_train': True}):
         current_data = data.copy()
-        
-        for step in self.pipeline_steps:
+        inter_pipeline_data = {}
+        for step in self.pipeline:
             step_instance = step['instance']
-            current_data = step_instance.transform(current_data, **params)
-        
+            current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data, params)
         return current_data
+
+    def preprocess_step(self, data, step_name, inter_pipeline_data = {}, params = {'is_train': True}):
+        for step in self.pipeline:
+            if step['name'] == step_name:
+                step_instance = step['instance']
+                return step_instance.transform(data, inter_pipeline_data, **params)
+        
+        raise ValueError(f"Step '{step_name}' not found in preprocessing pipeline")

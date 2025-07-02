@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import KDTree
 from sklearn.base import BaseEstimator
+from sklearn.preprocessing import StandardScaler
 import sys
 import warnings
 
@@ -12,81 +13,29 @@ EPSILON = sys.float_info.epsilon
 # --- Classes ---
 # ---------------
 
-class StandardScaler:
-    """A copy of the scikit learn StandardScaler, but works with PyTorch tensors and can export/load params."""
-    def __init__(self, forward_transform_normalizes=True):
-        self.forward_transform_normalizes = forward_transform_normalizes
-        # True: transform() does raw -> normalized      (like for neural input scaling)
-        # False: transform() does normalized -> raw     (like for output prediction scaling)
-
-        self.mean_ = None
-        self.std_ = None
-        self.mean_np_ = None
-        self.std_np_ = None
-
+class SequenceScaler:
+    """
+    Wrapper around StandardScaler to handle neural data of shape (n_samples, seq_len, n_features)
+    Ensures same normalization is applied across all timesteps.
+    Fits just on the last timestep of the sequence.
+    
+    X is of shape (n_samples, seq_len, n_features)
+    """
+    def __init__(self):
+        self.scaler = StandardScaler()
+        
     def fit(self, X):
-        """Compute the mean and std to be used for later scaling."""
-        if isinstance(X, torch.Tensor):
-            self.mean_ = torch.mean(X, dim=0, keepdim=True)
-            self.std_ = torch.std(X, dim=0, unbiased=False, keepdim=True) + 1e-8
-            self.mean_np_ = self.mean_.cpu().numpy()
-            self.std_np_ = self.std_.cpu().numpy()
-        elif isinstance(X, np.ndarray):
-            self.mean_np_ = np.mean(X, axis=0)
-            self.std_np_ = np.std(X, axis=0) + 1e-8
-            self.mean_ = torch.tensor(self.mean_np_)
-            self.std_ = torch.tensor(self.std_np_)
-        else:
-            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
+        self.scaler.fit(X[:, -1, :])
         return self
-
-    def _normalize(self, X):
-        if isinstance(X, torch.Tensor):
-            return (X - self.mean_) / self.std_
-        elif isinstance(X, np.ndarray):
-            return (X - self.mean_np_) / self.std_np_
-        else:
-            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
-
-    def _unnormalize(self, X):
-        if isinstance(X, torch.Tensor):
-            return X * self.std_ + self.mean_
-        elif isinstance(X, np.ndarray):
-            return X * self.std_np_ + self.mean_np_
-        else:
-            raise TypeError("Input should be a NumPy array or a PyTorch tensor.")
-
+    
     def transform(self, X):
-        if (self.mean_ is None) or (self.std_ is None):
-            warnings.warn("Using an untrained scaler... not scaling X")
-            return X
-
-        if self.forward_transform_normalizes:
-            return self._normalize(X)
-        else:
-            return self._unnormalize(X)
-
-    def inverse_transform(self, X):
-        if (self.mean_ is None) or (self.std_ is None):
-            warnings.warn("Using an untrained scaler... not scaling X")
-            return X
-
-        if self.forward_transform_normalizes:
-            return self._unnormalize(X)
-        else:
-            return self._normalize(X)
-
-    def export_params(self):
-        """Export the mean and std as a dictionary."""
-        return {'mean': self.mean_, 'std': self.std_}
-
-    def load_params(self, params):
-        """Load the mean and std from a dictionary."""
-        self.mean_ = params['mean']
-        self.std_ = params['std']
-        self.mean_np_ = self.mean_.cpu().numpy()
-        self.std_np_ = self.std_.cpu().numpy()
-        return self
+        # loop over each timestep and apply the scaler
+        for i in range(X.shape[1]):
+            X[:, i, :] = self.scaler.transform(X[:, i, :])
+        return X
+    
+    def fit_transform(self, X):
+        return self.fit(X).transform(X)
 
 
 # ------------------------
@@ -283,6 +232,20 @@ def normalize_scaler(X,
     normalize_X = normalizer.transform(X)
     return normalize_X, normalizer
 
+def normalize_sequence(X):
+    """
+        Normalizes data using Sequence Scaler,
+
+        Args:
+            X (ndarray): numpy array of size [N, numfeats]
+        
+        Returns:
+            normalize_X: Normalized input data
+    """
+    scaler = SequenceScaler()
+    normalize_X = scaler.fit_transform(X)
+    return normalize_X, scaler
+
 # ----------------------
 # --- Util Functions ---
 # ----------------------
@@ -451,7 +414,7 @@ def normalize(X,
 
         Args:
             X (ndarray): numpy array of size [N, numfeats]
-            method (string): Method to use for normalization. Options includes 'moving_average', 'sklearn'.
+            method (string): Method to use for normalization. Options includes 'moving_average', 'sklearn', 'sequence_scaler'.
             **kwargs: additional parameters. For moving average, it includes 'win_size', and 'axis'. For sklearn, it includes 'normalizer'. N.B. Normalizer should contain predefined parameters (e.g. sklearn.preprocessing.StandardScaler(with_mean=True, with_std=True))
 
         Returns:
@@ -471,6 +434,9 @@ def normalize(X,
         if normalizer is None:
             raise ValueError("sklearn method requires 'normalizer'")
         normalize_X, normalizer = normalize_scaler(X, normalizer)
+        return normalize_X, normalizer
+    elif(method == "sequence_scaler"):
+        normalize_X, normalizer = normalize_sequence(X)
         return normalize_X, normalizer
 
 def resample(Y,
