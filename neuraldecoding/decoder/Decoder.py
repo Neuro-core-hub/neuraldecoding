@@ -32,9 +32,6 @@ class Decoder(ABC):
         Args:
             cfg: config dictionary
         """
-        stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, cfg["stabilization"]["type"])
-        self.stabilization = stabilization_method(cfg["stabilization"]["params"])
-        self.stabilization.load_alignment()
         # Get model stuff
         if cfg["model"]["type"] in model_reg:
             self.model = model_reg[cfg["model"]["type"]](cfg["model"]["params"])

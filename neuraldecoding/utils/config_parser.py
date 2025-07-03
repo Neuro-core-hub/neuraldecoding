@@ -53,9 +53,11 @@ def parse_verify_config(config: DictConfig, section_name: str) -> dict:
         if not isValid:
             raise ValueError(f"Invalid trainer configuration in the config file, Error: {error}")
     elif section_name == 'preprocessing':
-        isValid, error = verify_structure(section_content, preprocessing_struct)
-        if not isValid:
-            raise ValueError(f"Invalid preprocessor configuration in the config file, Error: {error}")
+        for key in section_content:
+            content = section_content[key]
+            isValid, error = verify_structure(content, preprocessing_struct)
+            if not isValid:
+                raise ValueError(f"Invalid preprocessor configuration in the config file, Error: {error}")
     else:
         raise ValueError(f"Unsupported section '{section_name}' in the config file.")
     

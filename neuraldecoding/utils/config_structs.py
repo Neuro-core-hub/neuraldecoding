@@ -5,10 +5,6 @@ decoder_struct = {
             'type': str,
             'params': DictConfig
         },
-        'stabilization': {
-            'type': str,
-            'params': DictConfig
-        },
         'fpath': str
 }
 trainer_struct = {
@@ -40,20 +36,12 @@ trainer_struct = {
             'metrics': ListConfig,
             'params': DictConfig
         },
-        'stabilization': {
-            'type': str, 
-            'params': DictConfig
-        },
         'data': {
             'data_path': str,
             'params': DictConfig
         }
     }
 preprocessing_struct = {
-    'preprocessing_trainer':{
         'order': ListConfig,
-        'content': DictConfig},
-    'preprocessing_decoder': {
-        'order': ListConfig,
-        'content': DictConfig}
+        'content': DictConfig
 }

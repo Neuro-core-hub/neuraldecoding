@@ -19,7 +19,7 @@ class PreprocessingWrapper(ABC):
         pass
 
 # Wrappers that Modifies Data Format
-class Dict2DataWrapper(PreprocessingWrapper):
+class Dict2DataDictWrapper(PreprocessingWrapper):
     """
     Converts a dictionary (from nwb) to a neural and finger data in dictionary format.
     neural data type can be specified by the user.
@@ -65,7 +65,7 @@ class Dict2TupleWrapper(PreprocessingWrapper):
 
     def transform(self, data, interpipe, params=None):
         if len(data) == 2:
-            data_out = (data['neural'], data['finger'])
+            data_out = (data['neural'] , data['finger'])
         elif len(data) == 4:
             data_out = (data['neural_train'], data['neural_test'], data['finger_train'], data['finger_test'])
         else:
