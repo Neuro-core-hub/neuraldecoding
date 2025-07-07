@@ -5,7 +5,7 @@ from typing import Self
 import numpy as np
 import torch
 
-from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression
+from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA
 from neuraldecoding.model.neural_network_models import LSTM
 
 import neuraldecoding.stabilization.latent_space_alignment
@@ -17,6 +17,7 @@ model_reg = {
     "KalmanFilter": KalmanFilter,
     "LinearRegression": LinearRegression,
     "RidgeRegression": RidgeRegression,
+    "LDA":LDA,
     "LSTM": LSTM
     }
 
@@ -42,9 +43,12 @@ class Decoder(ABC):
         # Get model path
         self.fpath = cfg["fpath"]
 
-        # Get model i/o shape
-        self.input_shape = cfg["model"]["params"]["input_size"]
-        self.output_shape = cfg["model"]["params"]["num_outputs"]
+        # # Get model i/o shape
+        # self.input_shape = cfg["model"]["params"]["input_size"]
+        # self.output_shape = cfg["model"]["params"]["num_outputs"]
+
+        self.input_shape = 0
+        self.output_shape = 0
 
         # Load model from path
         self.load_model()

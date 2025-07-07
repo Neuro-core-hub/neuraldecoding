@@ -7,7 +7,7 @@ decoder_struct = {
         },
         'fpath': str
 }
-trainer_struct = {
+trainer_struct_nn = {
         'model': {
             'type': str,
             'params': DictConfig
@@ -34,6 +34,17 @@ trainer_struct = {
         },
         'evaluation': {
             'metrics': ListConfig,
+            'params': DictConfig
+        },
+        'data': {
+            'data_path': str,
+            'params': DictConfig
+        }
+    }
+
+trainer_struct_linear = {
+        'model': {
+            'type': str,
             'params': DictConfig
         },
         'data': {

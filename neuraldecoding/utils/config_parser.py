@@ -1,5 +1,5 @@
 from omegaconf import DictConfig, ListConfig
-from .config_structs import decoder_struct, trainer_struct, preprocessing_struct
+from .config_structs import decoder_struct, trainer_struct_nn, trainer_struct_linear, preprocessing_struct
 
 def verify_structure(content: DictConfig, struct: dict) -> tuple[bool, str]:
     """
@@ -49,9 +49,10 @@ def parse_verify_config(config: DictConfig, section_name: str) -> dict:
         if not isValid:
             raise ValueError(f"Invalid decoder configuration in the config file, Error: {error}")
     elif section_name == 'trainer':
-        isValid, error = verify_structure(section_content, trainer_struct)
-        if not isValid:
-            raise ValueError(f"Invalid trainer configuration in the config file, Error: {error}")
+        isValid_nn, error_nn = verify_structure(section_content, trainer_struct_nn)
+        isValid_linear, error_linear = verify_structure(section_content, trainer_struct_linear)
+        if not (isValid_nn or isValid_linear):
+            raise ValueError(f"Invalid trainer configuration in the config file, Error: {error_nn, error_linear}")
     elif section_name == 'preprocessing':
         for key in section_content:
             content = section_content[key]

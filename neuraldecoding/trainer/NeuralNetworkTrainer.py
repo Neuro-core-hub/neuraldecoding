@@ -79,16 +79,14 @@ class NNTrainer(Trainer):
         model = model_class(model_config.params)
         return model
 
-    def train_model(self, train_loader = None, valid_loader = None):
-        pass
+#     def train_model(self, train_loader = None, valid_loader = None):
+#         pass
 
 
-class LSTMTrainer(NNTrainer):
-    def __init__(self, preprocessor, config):
-        super().__init__(preprocessor, config)
-        # LSTM specific params
-        self.sequence_length = config.data.params.sequence_length
-        
+# class LSTMTrainer(NNTrainer):
+#     def __init__(self, preprocessor, config):
+#         super().__init__(preprocessor, config)
+
     def train_model(self, train_loader = None, valid_loader = None):
         # Override loaders if provided
         if(train_loader is not None):
@@ -126,7 +124,7 @@ class LSTMTrainer(NNTrainer):
                 for x_val, y_val in self.valid_loader:
                     x_val = x_val.to(self.device)
                     y_val = y_val.to(self.device)
-                    yhat_val, _ = self.model(x_val)
+                    yhat_val = self.model(x_val)
                     val_loss = self.loss_func(yhat_val, y_val)
 
                     running_val_loss += val_loss.item()

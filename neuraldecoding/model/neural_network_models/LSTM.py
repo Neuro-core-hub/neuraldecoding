@@ -69,7 +69,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
     
 
 
-    def forward(self, x, h=None, return_all_tsteps=False):
+    def forward(self, x, h=None, return_all_tsteps=False, return_h = False):
         """
         Runs forward pass of LSTM Model
 
@@ -103,8 +103,10 @@ class LSTM(nn.Module, NeuralNetworkModel):
             out = self.fc(out)  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
         else:
             out = self.fc(out[:, -1])  # out now has shape (batch_size, num_outs) like (64, 2)
-
-        return out, h
+        if return_h:
+            return out, h
+        else:
+            return out
     
 
     def init_hidden(self, batch_size):
@@ -132,7 +134,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         """
         Trains LSTM Model
         """
-        yhat, _ = model(x)
+        yhat = model(x)
 
         loss = loss_func(yhat, y)
 
