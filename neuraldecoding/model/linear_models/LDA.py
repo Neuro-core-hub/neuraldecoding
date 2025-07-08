@@ -13,6 +13,9 @@ class LDA(LinearModel):
     def __call__(self, data: Any) -> Any:
         return self.forward(data)
 
+    def get_likelihood():
+        raise NotImplementedError("LDA does not support likelihood estimation directly.")
+
     def train_step(self, input_data: Any) -> None:
         X, y = input_data
         self.model.fit(X, y)

@@ -10,16 +10,33 @@ from abc import ABC, abstractmethod
 
 import time
 
-class PreprocessingWrapper(ABC):
+class PreprocessingBlock(ABC):
 	def __init__(self):
 		pass
 
 	@abstractmethod
-	def transform(self, data, interpipe, params = None):
+	def transform(self, data, interpipe):
 		pass
 
+class DataFormattingBlock(PreprocessingBlock):
+	def __init__(self):
+		pass
+
+	@abstractmethod
+	def transform(self, data, interpipe):
+		pass
+
+class DataProcessingBlock(PreprocessingBlock):
+	def __init__(self):
+		pass
+
+	@abstractmethod
+	def transform(self, data, interpipe):
+		pass
+
+
 # Wrappers that Modifies Data Format
-class Dict2DataDictWrapper(PreprocessingWrapper):
+class Dict2DataDictBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary (from nwb) to a neural and finger data in dictionary format.
 	neural data type can be specified by the user.
@@ -29,37 +46,37 @@ class Dict2DataDictWrapper(PreprocessingWrapper):
 		super().__init__()
 		self.neural_type = neural_type
 
-	def transform(self, data: dict, interpipe, params = None):
+	def transform(self, data: dict, interpipe):
 		(neural, finger), trial_idx = neuraldecoding.utils.neural_finger_from_dict(data, self.neural_type)
 		interpipe['trial_idx'] = trial_idx
 
 		data_out = {'neural': neural, 'finger': finger}
 		return data_out, interpipe
 
-class LDADict2TupleWrapper(PreprocessingWrapper):
+class LDADict2TupleBlock(DataFormattingBlock):
 	def __init__(self):
 		super().__init__()
-	def transform(self, data: dict, interpipe, params = None):
-		if 'is_train' not in params:
-			raise ValueError("The 'params' dictionary for StabilizationWrapper must contain an 'is_train' key.")
+	def transform(self, data: dict, interpipe):
+		if 'is_train' not in interpipe:
+			raise ValueError("LDADict2TupleBlock requires 'is_train' in interpipe.")
 
-		if params['is_train']:
+		if interpipe['is_train']:
 			neural, finger = (data['X_train'], data['y_train'].flatten())
 		else:
 			neural, finger = (data['X_test'], data['y_test'].flatten())
 		data_out = (neural, finger)
 		return data_out, interpipe
 
-class DataSplitWrapper(PreprocessingWrapper):
+class DataSplitBlock(DataFormattingBlock):
 	def __init__(self, split_ratio: 0.8, split_seed: 42):
 		super().__init__()
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
 
-	def transform(self, data, interpipe, params=None):
+	def transform(self, data, interpipe):
 		if 'trial_idx' not in interpipe:
-			raise ValueError("DataSplitWrapper requires 'trial_idx' in interpipe from other wrappers (Dict2DataWrapper).")
-		
+			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataBlock).")
+
 		split_data = neuraldecoding.utils.data_split_trial(data['neural'], 
 														   data['finger'], 
 														   interpipe['trial_idx'], 
@@ -73,11 +90,11 @@ class DataSplitWrapper(PreprocessingWrapper):
 					'finger_test': finger_test}
 		return data_out, interpipe
 
-class Dict2TupleWrapper(PreprocessingWrapper):
+class Dict2TupleBlock(DataFormattingBlock):
 	def __init__(self):
 		super().__init__()
 
-	def transform(self, data, interpipe, params=None):
+	def transform(self, data, interpipe):
 		if len(data) == 2:
 			data_out = (data['neural'] , data['finger'])
 		elif len(data) == 4:
@@ -87,18 +104,18 @@ class Dict2TupleWrapper(PreprocessingWrapper):
 		return data_out, interpipe
 
 # Wrappers that Modify Data
-class StabilizationWrapper(PreprocessingWrapper):
+class StabilizationBlock(DataProcessingBlock):
 	def __init__(self, location, stabilization_config):
 		super().__init__()
 		stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, stabilization_config["type"])
 		self.stabilization = stabilization_method(stabilization_config["params"])
 		self.location = location
 
-	def transform(self, data, interpipe, params):
-		if 'is_train' not in params:
-			raise ValueError("The 'params' dictionary for StabilizationWrapper must contain an 'is_train' key.")
+	def transform(self, data, interpipe):
+		if 'is_train' not in interpipe:
+			raise ValueError("The 'interpipe' dictionary for StabilizationBlock must contain an 'is_train' key.")
 
-		if params['is_train']:
+		if interpipe['is_train']:
 			data[self.location] = self.stabilization.fit(data[self.location])
 			self.stabilization.save_alignment()
 		else:
@@ -106,13 +123,13 @@ class StabilizationWrapper(PreprocessingWrapper):
 			data[self.location] = self.stabilization.extract_latent_space(data[self.location])
 		return data, interpipe
 
-class AddHistoryWrapper(PreprocessingWrapper):
+class AddHistoryBlock(DataProcessingBlock):
 	def __init__(self, location, seq_length = 10):
 		super().__init__()
 		self.location = location
 		self.seq_length = seq_length
 
-	def transform(self, data, interpipe, params=None):
+	def transform(self, data, interpipe):
 		if isinstance(self.location, str):
 			self.location = [self.location]
 
@@ -120,15 +137,15 @@ class AddHistoryWrapper(PreprocessingWrapper):
 			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
-	
-class NormalizationWraper(PreprocessingWrapper):
+
+class NormalizationBlock(DataProcessingBlock):
 	def __init__(self, location, method, normalizer_params):
 		super().__init__()
 		self.location = location
 		self.normalizer_method = method
 		self.normalizer_params = normalizer_params
 
-	def transform(self, data, interpipe, params=None):
+	def transform(self, data, interpipe):
 		if self.normalizer_method == 'moving_average':
 			p = self.normalizer_params['params']
 		elif self.normalizer_method == 'sklearn':
@@ -141,14 +158,14 @@ class NormalizationWraper(PreprocessingWrapper):
 																				   method = self.normalizer_method,
 																				   **p)
 		return data, interpipe
-															  
-class EnforceTensorWrapper(PreprocessingWrapper):
+
+class EnforceTensorBlock(DataProcessingBlock):
 	def __init__(self, device='cpu', dtype=torch.float32):
 		super().__init__()
 		self.device = device
 		self.dtype = getattr(torch, dtype)
 
-	def transform(self, data, interpipe, params=None):
+	def transform(self, data, interpipe):
 		for key in data:
 			if isinstance(data[key], torch.Tensor):
 				data[key] = data[key].to(self.device, dtype=self.dtype)
