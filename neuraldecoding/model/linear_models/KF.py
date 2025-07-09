@@ -1,7 +1,6 @@
 import numpy as np
 import pickle
 import torch
-from tqdm import tqdm
 from neuraldecoding.model.linear_models.LinearModel import LinearModel
 
 class KalmanFilter(LinearModel):
