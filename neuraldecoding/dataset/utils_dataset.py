@@ -35,7 +35,6 @@ def calc_bins_sbp(sbp_data, sample_width, bins_start_digit, bins_stop_digit):
 
     return bins_sbp
 
-
 def calc_bins_fingers_kinematics(fingers_pos_data, bins_start, bins_stop, num_fingers):
     """
     Calculate the bins fingers kinematics for binned fingers kinematics data

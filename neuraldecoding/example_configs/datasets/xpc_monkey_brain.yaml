@@ -1,0 +1,10 @@
+dataset_type: zstruct
+autoload: True
+save_path: None
+dataset_parameters:
+  experiment_type: monkey_brain
+  server_dir: Z:\Data\Monkeys
+  alt_filepath: None
+  subject: Joker
+  date: 2020-01-27
+  runs: 3

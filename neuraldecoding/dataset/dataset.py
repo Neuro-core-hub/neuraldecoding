@@ -2,11 +2,7 @@ import os
 from pynwb import NWBHDF5IO, NWBFile
 from datetime import datetime
 from dateutil.tz import tzlocal
-
-from .utils_zstruct import (
-    get_server_data_path,
-    get_nwb_from_run,
-)
+from . import zstruct_loader
 
 from omegaconf import DictConfig
 
@@ -20,8 +16,7 @@ class Dataset:
         ----------
         cfg : DictConfig
             Configuration object containing at least the following dataset parameters:
-            - type: str - Dataset type ('zstruct', 'nwb')
-            - is_monkey: bool - Whether data is from monkey (True) or human (False)
+            - dataset_type: str - Dataset type ('zstruct', 'nwb') - config layout will depend on this
             - subject: str - Subject identifier
             - date: str - Recording date
             - data_path: str - Alternative path to data
@@ -32,6 +27,7 @@ class Dataset:
             Whether to print status messages during processing
         """
         self.cfg: DictConfig = cfg
+        self.dataset_parameters: DictConfig = self.cfg.dataset_parameters
         self.verbose: bool = verbose
         # Initialize empty NWB file
         self.dataset: NWBFile = NWBFile(
@@ -40,28 +36,15 @@ class Dataset:
             session_start_time=datetime.now(tzlocal()),
         )
 
-        if self.cfg.type == "zstruct":
+        if self.cfg.dataset_type == "zstruct":
             self._initialize_zstruct()
-        elif self.cfg.type == "nwb":
+        elif self.cfg.dataset_type == "nwb":
             self._initialize_nwb()
         else:
-            raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.type}")
-
-    def _initialize_zstruct(self):
-        """
-        Initialize dataset for zstruct type data.
-        Sets up the server directory path based on configuration.
-        """
-        # self.institution, self.lab = get_creator_details()
-        # self.device, self.electrode_group = get_device_and_electrode_group(data_type)
-        self.server_dir = get_server_data_path(is_monkey=self.cfg.is_monkey)
-
-    def _initialize_nwb(self):
-        """
-        Initialize dataset for NWB type data.
-        Currently a placeholder for future implementation.
-        """
-        pass
+            raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
+        
+        if self.cfg.autoload:
+            self.load_data()
 
     def load_data(self):
         """
@@ -73,12 +56,32 @@ class Dataset:
         NotImplementedError
             If the dataset type is not supported
         """
-        if self.cfg.type == "zstruct":
+        if self.cfg.dataset_type == "zstruct":
+            print('reached')
             self._load_data_zstruct()
-        elif self.cfg.type == "nwb":
+        elif self.cfg.dataset_type == "nwb":
             self.load_data_nwb()
         else:
-            raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.type}")
+            raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
+        
+    def _initialize_zstruct(self):
+        """
+        Initialize dataset for zstruct type data.
+        Sets up the server directory path based on configuration.
+        """
+        # self.institution, self.lab = get_creator_details()
+        # self.device, self.electrode_group = get_device_and_electrode_group(data_type)
+        # if self.dataset_parameters.alt_filepath is not None:
+        #     self.data_dir = os.path.join(self.dataset_parameters.server_dir, self.dataset_parameters.subject, self.dataset_parameters.date, self.dataset_parameters.runs)
+        # else:
+        #     self.data_dir = self.dataset_parameters.alt_filepath
+
+    def _initialize_nwb(self):
+        """
+        Initialize dataset for NWB type data.
+        Currently a placeholder for future implementation.
+        """
+        pass
 
     def _load_data_zstruct(self):
         """
@@ -94,43 +97,26 @@ class Dataset:
         NotImplementedError
             If multiple runs are provided (current limitation)
         """
-        if (
-            self.cfg.subject is None or self.cfg.date is None
-        ) and self.cfg.data_path is None:
-            raise ValueError(
-                "Either ('subject' and 'date') or 'data_path' must be specified"
-            )
-
-        if self.cfg.runs is None:
-            raise ValueError("Parameter 'runs' must be specified")
-
-        if self.verbose:
-            print(
-                f"Loading data for {self.cfg.subject} at {self.cfg.date}, runs {', '.join(map(str, self.cfg.runs))}"
-            )
+        
+        # if self.verbose:
+        #     print(
+        #         f"Loading data for {self.dataset_parameters.subject} at {self.dataset_parameters.date}, runs {', '.join(map(str, self.dataset_parameters.runs))}"
+        #     )
 
         # loading each run
         # FIXME: for now, failing if provided with more than one run
-        if len(self.cfg.runs) > 1:
-            raise NotImplementedError(
-                "For now, failing if provided with more than one run"
-            )
+        # if len(self.cfg.runs) > 1:
+        #     raise NotImplementedError(
+        #         "Multi-run Datasets not supported (yet)"
+        #     )
 
         # TODO: figure out a way of combining the runs into a single NWB file
-        for run in self.cfg.runs:
-            # TODO: Check if run is already saved as nwb file and if it is just load it
-            if self.verbose:
-                print(f"\t+ Loading run {run}")
+        # for run in self.cfg.runs:
+        #     # TODO: Check if run is already saved as nwb file and if it is just load it
+        #     if self.verbose:
+        #         print(f"\t+ Loading run {run}")
 
-            self.dataset = get_nwb_from_run(
-                subject=self.cfg.subject,
-                date=self.cfg.date,
-                data_path=self.cfg.data_path,
-                run=run,
-                xpc_dict=self.cfg.xpc,
-                nwb_dict=self.cfg.nwb,
-                is_monkey=self.cfg.is_monkey,
-            )
+        self.dataset = zstruct_loader.load_xpc_run(self.cfg.dataset_parameters)
 
     def save_data(self, custom_path=None):
         """
@@ -150,9 +136,9 @@ class Dataset:
             If no path can be determined
         """
         path = custom_path if custom_path is not None else None
-        if path is None and self.cfg.type == "zstruct":
+        if path is None and self.cfg.dataset_type == "zstruct":
             path = self._get_save_path_zstruct()
-        elif path is None and self.cfg.type == "nwb":
+        elif path is None and self.cfg.dataset_type == "nwb":
             raise NotImplementedError("Saving NWB files is not implemented yet")
         elif path is None:
             raise ValueError("Path must be specified")
