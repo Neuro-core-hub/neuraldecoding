@@ -18,7 +18,6 @@ class KalmanFilter(LinearModel):
         """
 
         self.A, self.C, self.W, self.Q = None, None, None, None
-        self.At, self.Ct = None, None#
         self.Pt = None
         self.append_ones_y = model_params.get("append_ones_y", True)
         self.device = model_params.get("device", "cpu")
