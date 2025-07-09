@@ -3,7 +3,6 @@ import pickle
 import torch
 from tqdm import tqdm
 from neuraldecoding.model.linear_models.LinearModel import LinearModel
-from typing import Union
 
 class KalmanFilter(LinearModel):
     def __init__(self, model_params):
