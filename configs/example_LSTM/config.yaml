@@ -1,4 +1,0 @@
-defaults:
-  - decoder/exampleLSTM
-  - trainer/testTrainer
-  - _self_
