@@ -15,6 +15,10 @@ from pynwb.ecephys import (
     ElectricalSeries,
     EventDetection,
 )
+from pynwb.behavior import (
+    BehavioralTimeSeries,
+    SpatialSeries
+)
 from pynwb.base import TimeSeries
 from hdmf.backends.hdf5.h5_utils import H5DataIO
 from datetime import datetime
@@ -106,7 +110,7 @@ def load_z_script(direc):
             "zScript.txt file not found. Make sure you're passing the right folder path."
         )
 
-def read_xpc_data(direc, xpc_dict, nwb_dict, verbose=False):
+def read_xpc_data(direc, exp_cfg, verbose=False):
     """
     Parse the zScript contents and binary data files to create a structured dictionary of experimental data.
 
@@ -230,7 +234,7 @@ def read_xpc_data(direc, xpc_dict, nwb_dict, verbose=False):
 
     # Initialize the dictionary with correct field names
     channel_structure = (
-        [{"SpikeTimes": []} for _ in range(xpc_dict["num_channels"])]
+        [{"SpikeTimes": []} for _ in range(exp_cfg.electrode_group.num_channels)]
         if spikeformat
         else None
     )
@@ -239,7 +243,7 @@ def read_xpc_data(direc, xpc_dict, nwb_dict, verbose=False):
         **{name: None for name in fnames[::2]},
         "TrialNumber": None,
         **(
-            {nwb_dict["signal_name"]: [], xpc_dict["spikes_field"]: channel_structure}
+            {exp_cfg.xpc_parameters.neural_data: [], exp_cfg.units.units_name: channel_structure}
             if spikeformat
             else {}
         ),
@@ -390,7 +394,7 @@ def read_xpc_data(direc, xpc_dict, nwb_dict, verbose=False):
                         spikenums[chan_idx, t] += 1
 
             # Process each channel once
-            channel_data = dict_data[i][xpc_dict["spikes_field"]]
+            channel_data = dict_data[i][exp_cfg.units.field]
             for c in range(xpc_dict["num_channels"]):
                 # Only process channels with spikes
                 spike_mask = spikenums[c, :] == 1
@@ -648,26 +652,56 @@ def add_run_data(
 
         start_idx = end_idx
 
-    # Set times to milliseconds
+    # Set times to seconds
     times /= 1000
 
     # adding behavior data
-    behavior_ts = TimeSeries(
-        name=nwb_dict["behavior_name"],
-        data=H5DataIO(
+    b_metadata = nwb_dict["behavior"]
+    behavior_module = nwb_file.create_processing_module(name=b_metadata["module_name"], description=b_metadata["module_description"])
+    behavior = TimeSeries(
+        name=b_metadata["behavior_name"],
+        description=b_metadata["behavior_description"],
+        data = H5DataIO(
             behavior_data,
             compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"],
+            compression_opts=nwb_dict["compression"]["options"]
         ),
-        unit=nwb_dict["behavior_unit"],  # From 0 to 1
-        timestamps=times,
-        description=nwb_dict["behavior_description"],
-        comments=nwb_dict["behavior_comments"],
+        timestamps = times,
+        reference_frame = b_metadata["behavior_reference_frame"]
     )
 
-    # Add finger position as acquisition
-    nwb_file.add_acquisition(behavior_ts)
-    # nwb_modules["behavior"].add_data_interface(fingers_position_ts)
+    raw_behavior = TimeSeries(
+        name="raw_input_vals",
+        description="Raw Values from the flex sensors",
+        data = H5DataIO(
+            time_series_dict["RawInputVals"],
+            compression=nwb_dict["compression"]["type"],
+            compression_opts=nwb_dict["compression"]["options"]
+        ),
+        timestamps = times,
+        reference_frame = b_metadata["behavior_reference_frame"]
+    )
+
+    decode = TimeSeries(
+        name="decode",
+        description="decode_field",
+        data=H5DataIO(
+            time_series_dict['Decode'],
+            compression=nwb_dict["compression"]["type"],
+            compression_opts=nwb_dict["compression"]["options"]
+        ),
+        timestamps = times,
+        reference_frame = b_metadata["behavior_reference_frame"]
+    )
+    
+    behavior_module.add(raw_behavior)
+    behavior_module.add(behavior)
+    behavior_module.add(decode)
+
+    ecephys_module = nwb_file.create_processing_module(
+        name="ecephys",
+        description="processed ephys data"
+    )
 
     # adding neural data
     neural_data_ts = ElectricalSeries(
@@ -689,29 +723,27 @@ def add_run_data(
         ),
     )
 
-    # Add neural data as acquisition
-    nwb_file.add_acquisition(neural_data_ts)
-    # nwb_modules["neural_data"].add_data_interface(neural_data_ts)
+    # add samplewidth for continuous data
+    sample_widths = TimeSeries(
+        name="Sample Widths for continuous data",
+        unit="",
+        data=H5DataIO(
+            time_series_dict["SampleWidth"],
+            compression=nwb_dict["compression"]["type"],
+            compression_opts=nwb_dict["compression"]["options"],
+        ),
+        timestamps=times,
+        description=f"{key}",
+        conversion=1.0
+    )
 
-    # adding all the other time-series data as acquisition data
-    for key in time_series_dict.keys():
-        nwb_file.add_acquisition(
-            TimeSeries(
-                name=key,
-                unit="",
-                data=H5DataIO(
-                    time_series_dict[key],
-                    compression=nwb_dict["compression"]["type"],
-                    compression_opts=nwb_dict["compression"]["options"],
-                ),
-                timestamps=times,
-                description=f"{key}",
-                conversion=1.0,
-            )
-        )
+    # Add neural data as acquisition
+    ecephys_module.add(neural_data_ts)
+    ecephys_module.add(sample_widths)
 
     # Add spike series
     # pdb.set_trace()
+    nwb_file.add_unit_column(name="channel", description="channel_id")
     if xpc_dict["spikes_exist"]:
         all_events = []
         for ch_idx in range(xpc_dict["num_channels"]):
@@ -725,53 +757,9 @@ def add_run_data(
                     cross_trial_spike_times.append(trial_spike_times)
 
             # pdb.set_trace()
-            spike_times = np.concat(cross_trial_spike_times).reshape(-1,1)
+            spike_times = np.concat(cross_trial_spike_times)
             channel = np.ones_like(spike_times).reshape(-1,1) * ch_idx
-            all_events.append(np.concat((spike_times, channel), axis=1))
-        all_events = np.concat(all_events, axis=0)
-        spikes_formatted = EventDetection(detection_method='-4.5 RMS', source_idx=all_events, name='threshold crossings')
-            
-        #     spike_series = SpikeEventSeries(name=f'{ch_idx}_{nwb_dict["spikes_name"]}',
-        #                                     data = spike_happened, 
-        #                                     electrodes = nwb_file.create_electrode_table_region(region=[ch_idx], description='channel'),
-        #                                     timestamps = spike_times,
-        #                                     description="Threshold Crossings for one channel. No snippets, just marking crossings occurring or not.")
-        #     nwb_file.add_acquisition(spike_series)
-
-        # spike_times = [[] for _ in range(xpc_dict["num_channels"])]
-        # for trial in data_dict:
-        #     for ch_idx in range(xpc_dict["num_channels"]):
-        #         spike_times[ch_idx].extend(
-        #             [trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]]
-        #             if type(trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"])
-        #             is int
-        #             else trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]
-        #         )
-        #     # Pop spikes field from data_dict
-        #     trial.pop(xpc_dict["spikes_field"], None)
-        # all_spike_times = list(heapq.merge(*spike_times))
-        # spikes = np.zeros((len(all_spike_times), xpc_dict["num_channels"]))
-        # for ch_idx in range(xpc_dict["num_channels"]):
-        #     # Find indices for each spike time
-        #     spikes[
-        #         np.searchsorted(all_spike_times, np.array(spike_times[ch_idx])), ch_idx
-        #     ] = 1
-        # # Add spike series
-        # electrode_table = nwb_file.create_electrode_table_region(
-        #     region=list(range(xpc_dict["num_channels"])),
-        #     description=nwb_dict["electrode_group"]["description"],
-        # )
-        # spike_series = SpikeEventSeries(
-        #     name=nwb_dict["spikes_name"],
-        #     data=H5DataIO(
-        #         spikes,
-        #         compression=nwb_dict["compression"]["type"],
-        #         compression_opts=nwb_dict["compression"]["options"],
-        #     ),
-        #     electrodes=electrode_table,
-        #     timestamps=np.array(all_spike_times, dtype=float),
-        # )
-        # nwb_file.add_acquisition(spike_series)
+            nwb_file.add_unit(spike_times=spike_times, channel=ch_idx)
 
     # looping through the trials for adding the trials and all the other non-timeseries data to the NWB file
     # base structure of each trial
@@ -841,7 +829,6 @@ def load_xpc_run(cfg):
     config_path = os.path.join(os.path.join(config_dir, f'{cfg.experiment_type}.yaml'))
 
     exp_cfg = OmegaConf.load(config_path)
-    xpc_parameters = exp_cfg.xpc_parameters
     nwb_parameters = exp_cfg.nwb_parameters
 
     # TODO: loading multiple runs
@@ -855,7 +842,7 @@ def load_xpc_run(cfg):
     run_path = os.path.join(data_path, f"Run-{cfg.runs:03d}")
 
     # Initialize the NWB file
-    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.runs, xpc_parameters.num_channels, nwb_parameters)
+    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.runs, exp_cfg.num_channels, nwb_parameters)
 
     # Read in the binary files
     data_dict = read_xpc_data(run_path, xpc_parameters, nwb_parameters)

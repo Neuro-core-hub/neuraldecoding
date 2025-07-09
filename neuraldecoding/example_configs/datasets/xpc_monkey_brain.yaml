@@ -6,5 +6,6 @@ dataset_parameters:
   server_dir: Z:\Data\Monkeys
   alt_filepath: None
   subject: Joker
+  subject_id: "Monkey N"
   date: 2020-01-27
   runs: 3
