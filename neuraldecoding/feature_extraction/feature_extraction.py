@@ -1,25 +1,17 @@
 import numpy as np
-import threading
 from typing import Dict, List, Optional, Tuple, Union
 
 class MultiModalFeatureExtractor:
     """
     Multi-modal feature extractor for neural data and kinematics.
     
-    This class handles high-rate neural data and lower-rate kinematic data,
-    binning them using the same time windows and extracting features from each modality.
+    This class processes batches of neural and kinematic data for time bins,
+    extracting features from each modality.
     
     Attributes:
         bin_size_ms: Size of the time bin in milliseconds
         neural_config: Configuration for neural data processing
         kinematic_config: Configuration for kinematic data processing
-        max_samples_per_bin: Maximum expected samples per bin (for buffer sizing)
-        
-    Performance optimizations:
-        - Ring buffers to avoid memory allocations
-        - Vectorized NumPy operations
-        - Pre-computed indices for fast lookups
-        - Thread-safe operations with minimal locking
     """
     
     def __init__(self, config: Dict):
@@ -48,7 +40,6 @@ class MultiModalFeatureExtractor:
         
         # Pre-compute for performance
         self.bin_size_sec = self.bin_size_ms / 1000.0
-        self.inv_bin_size_ms = 1.0 / self.bin_size_ms
         
         # Neural configuration
         self.neural_feature_type = self.neural_config.get('feature', 'mav')
@@ -61,42 +52,24 @@ class MultiModalFeatureExtractor:
         self.kinematic_rate_hz = self.kinematic_config.get('expected_rate_hz', 200)
         
         # Create DOF name to index mapping for fast lookups
-        self.dof_to_index = {name: idx for idx, name in enumerate(self.dof_names)}
         self.n_dofs = len(self.dof_names)
         
-        # Calculate buffer sizes (generous sizing to handle bursts)
-        neural_samples_per_bin = int(self.neural_rate_hz * self.bin_size_sec * 1.5)  # 50% buffer
-        kinematic_samples_per_bin = int(self.kinematic_rate_hz * self.bin_size_sec * 1.5)
+        # Pre-allocate working arrays for performance (generous sizing for bursts)
+        max_neural_samples = int(self.neural_rate_hz * self.bin_size_sec * 2.0)  # 2x buffer
+        max_kinematic_samples = int(self.kinematic_rate_hz * self.bin_size_sec * 2.0)
         
-        # Use the larger of the two for unified timestamp handling
-        self.max_samples_per_bin = max(neural_samples_per_bin, kinematic_samples_per_bin, 100)
-        
-        # Ring buffers - pre-allocated for performance
         if self.n_neural_channels > 0:
-            self.neural_buffer = np.zeros((self.max_samples_per_bin, self.n_neural_channels), dtype=np.float32)
-            self.neural_timestamps = np.zeros(self.max_samples_per_bin, dtype=np.float64)
-            self.neural_write_idx = 0
-            self.neural_count = 0
+            self.neural_work_buffer = np.zeros((max_neural_samples, self.n_neural_channels), dtype=np.float32)
         
         if self.n_dofs > 0:
-            self.kinematic_buffer = np.zeros((self.max_samples_per_bin, self.n_dofs), dtype=np.float32)
-            self.kinematic_timestamps = np.zeros(self.max_samples_per_bin, dtype=np.float64)
-            self.kinematic_write_idx = 0
-            self.kinematic_count = 0
-        
-        # Bin tracking
-        self.current_bin_start = None
-        self.last_bin_end = None
-        
-        # Thread safety
-        self._lock = threading.Lock()
+            self.kinematic_work_buffer = np.zeros((max_kinematic_samples, self.n_dofs), dtype=np.float32)
         
         # Validate configuration
         self._validate_config()
     
     def _validate_config(self):
         """Validate the configuration parameters."""
-        valid_features = ['mav', 'power', 'mean', 'var']
+        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel']
         
         if self.neural_feature_type not in valid_features:
             raise ValueError(f"Invalid neural feature type: {self.neural_feature_type}")
@@ -110,196 +83,148 @@ class MultiModalFeatureExtractor:
         if self.n_neural_channels == 0 and self.n_dofs == 0:
             raise ValueError("Must have at least neural channels or DOFs configured")
     
-    
-    def push_neural(self, samples: np.ndarray, timestamp: float) -> Optional[Dict[str, float]]:
+    def extract_features_per_bin(self,
+                                neural: Optional[np.ndarray] = None,
+                                neural_timestamps_ms: Optional[np.ndarray] = None,
+                                kinematics: Optional[Dict[str, np.ndarray]] = None,
+                                kinematics_timestamps_ms: Optional[np.ndarray] = None) -> List[Dict]:
         """
-        Add neural data sample to the buffer.
+        Extract features per bin from timestamped neural and kinematic data.
         
         Args:
-            samples: Neural data array of shape [samples, channels] or [channels]
-            timestamp: Timestamp in milliseconds
+            neural: Neural data array of shape [n_samples1, channels]
+            neural_timestamps_ms: Timestamps for neural data of shape [n_samples1]
+            kinematics: Dictionary of kinematic data arrays, each of shape [n_samples2]
+            kinematics_timestamps_ms: Timestamps for kinematic data of shape [n_samples2]
             
         Returns:
-            Features dict if a bin was completed, None otherwise
+            List of feature dictionaries, one per bin
         """
-        if self.n_neural_channels == 0:
-            return None
+        # Validate inputs
+        if neural is not None and neural_timestamps_ms is not None:
+            if neural.shape[0] != neural_timestamps_ms.shape[0]:
+                raise ValueError("Neural data and timestamps must have same number of samples")
         
-        with self._lock:
+        if kinematics is not None and kinematics_timestamps_ms is not None:
+            for dof_name, dof_data in kinematics.items():
+                if dof_data.shape[0] != kinematics_timestamps_ms.shape[0]:
+                    raise ValueError(f"Kinematic data for {dof_name} and timestamps must have same number of samples")
+        
+        # Determine time range
+        all_timestamps = []
+        if neural_timestamps_ms is not None:
+            all_timestamps.extend(neural_timestamps_ms)
+        if kinematics_timestamps_ms is not None:
+            all_timestamps.extend(kinematics_timestamps_ms)
+        
+        if not all_timestamps:
+            return []
+        
+        min_time = min(all_timestamps)
+        max_time = max(all_timestamps)
+        
+        # Create bins
+        bin_features = []
+        current_time = min_time
+        
+        while current_time <= max_time:
+            bin_start = current_time
+            bin_end = current_time + self.bin_size_ms
             
-            # Initialize bin tracking on first sample
-            if self.current_bin_start is None:
-                self.current_bin_start = timestamp
-                self.last_bin_end = timestamp
+            # Extract neural samples for this bin
+            neural_samples = None
+            if neural is not None and neural_timestamps_ms is not None:
+                neural_mask = (neural_timestamps_ms >= bin_start) & (neural_timestamps_ms < bin_end)
+                if np.any(neural_mask):
+                    neural_samples = neural[neural_mask]
             
-            # Handle both single sample and multiple samples
-            if samples.ndim == 1:
-                # Single sample case
-                samples_to_add = samples.reshape(1, -1)
-            else:
-                # Multiple samples case
-                samples_to_add = samples
+            # Extract kinematic samples for this bin
+            kinematic_samples = None
+            if kinematics is not None and kinematics_timestamps_ms is not None:
+                kinematic_mask = (kinematics_timestamps_ms >= bin_start) & (kinematics_timestamps_ms < bin_end)
+                if np.any(kinematic_mask):
+                    kinematic_samples = {}
+                    for dof_name, dof_data in kinematics.items():
+                        if dof_name in self.dof_names:  # Only include configured DOFs
+                            kinematic_samples[dof_name] = dof_data[kinematic_mask]
             
-            # Add samples to ring buffer efficiently
-            n_samples = samples_to_add.shape[0]
+            # Extract features for this bin using existing method
+            features = self.extract_bin_features(
+                neural_samples=neural_samples,
+                kinematic_samples=kinematic_samples,
+                bin_timestamp=bin_end  # Use bin end as timestamp
+            )
             
-            # Calculate indices for batch insertion
-            start_idx = self.neural_write_idx % self.max_samples_per_bin
-            end_idx = (self.neural_write_idx + n_samples) % self.max_samples_per_bin
+            # Add bin timing information
+            if features is not None:
+                features['bin_start_ms'] = bin_start
+                features['bin_end_ms'] = bin_end
+                features['bin_center_ms'] = (bin_start + bin_end) / 2.0
+                bin_features.append(features)
             
-            if start_idx + n_samples <= self.max_samples_per_bin:
-                # No wraparound - simple slice assignment
-                self.neural_buffer[start_idx:start_idx + n_samples] = samples_to_add.astype(np.float32)
-                self.neural_timestamps[start_idx:start_idx + n_samples] = timestamp
-            else:
-                # Handle wraparound
-                first_chunk_size = self.max_samples_per_bin - start_idx
-                self.neural_buffer[start_idx:] = samples_to_add[:first_chunk_size].astype(np.float32)
-                self.neural_timestamps[start_idx:] = timestamp
-                
-                if end_idx > 0:
-                    self.neural_buffer[:end_idx] = samples_to_add[first_chunk_size:].astype(np.float32)
-                    self.neural_timestamps[:end_idx] = timestamp
-            
-            self.neural_write_idx += n_samples
-            self.neural_count = min(self.neural_count + n_samples, self.max_samples_per_bin)
-    
-    def push_kinematic(self, dof_dict: Dict[str, float], timestamp: float) -> Optional[Dict[str, float]]:
+            current_time += self.bin_size_ms
+        
+        return bin_features
+
+    def extract_bin_features(self, 
+                           neural_samples: Optional[np.ndarray] = None,
+                           kinematic_samples: Optional[Dict[str, np.ndarray]] = None,
+                           bin_timestamp: Optional[float] = None) -> Optional[Dict]:
         """
-        Add kinematic data sample to the buffer.
+        Extract features from batches of neural and kinematic data for a single bin.
         
         Args:
-            dof_dict: Dictionary mapping DOF names to values
-            timestamp: Timestamp in milliseconds
+            neural_samples: Neural data array, each of shape [channels] or [samples, channels]
+            kinematic_samples: Dictionary of kinematic data arrays, each of shape [samples]
+            bin_timestamp: Timestamp for this bin (milliseconds)
             
         Returns:
-            Features dict if a bin was completed, None otherwise
+            Dictionary containing extracted features, or None if no data
         """
-        if self.n_dofs == 0:
-            return None
-        
-        with self._lock:
-            # Initialize bin tracking on first sample
-            if self.current_bin_start is None:
-                self.current_bin_start = timestamp
-                self.last_bin_end = timestamp
-            
-            # Write directly to buffer using pre-computed indices
-            idx = self.kinematic_write_idx % self.max_samples_per_bin
-            # Initialize buffer row to zero first
-            self.kinematic_buffer[idx] = 0.0
-            # Fill in the values for DOFs that are present
-            for dof_name, value in dof_dict.items():
-                if dof_name in self.dof_to_index:
-                    self.kinematic_buffer[idx, self.dof_to_index[dof_name]] = float(value)
-            self.kinematic_timestamps[idx] = timestamp
-            
-            self.kinematic_write_idx += 1
-            self.kinematic_count = min(self.kinematic_count + 1, self.max_samples_per_bin)
-    
-    
-    def extract_and_reset_bin(self, timestamp: float) -> Optional[Dict[str, float]]:
-        """
-        Extract features from the current bin and reset for the next bin.
-        
-        Args:
-            timestamp: Current timestamp in milliseconds (used for bin metadata)
-            
-        Returns:
-            Features dict if there's data to extract, None otherwise
-        """
-        # Initialize bin tracking on first call
-        if self.current_bin_start is None:
-            self.current_bin_start = timestamp
-            self.last_bin_end = timestamp
-            return None  # No data to extract yet
-        
-        # Check if we have any data to extract
+        features = {}
         has_data = False
-        if self.n_neural_channels > 0 and self.neural_count > 0:
-            has_data = True
-        if self.n_dofs > 0 and self.kinematic_count > 0:
-            has_data = True
+        
+        # Process neural data
+        if neural_samples is not None and self.n_neural_channels > 0:
+            # Handle both single sample and multiple samples
+            if neural_samples.ndim == 1:
+                # Single sample case - reshape to [1, channels]
+                neural_data = neural_samples.reshape(1, -1)
+            else:
+                # Multiple samples case - use as is
+                neural_data = neural_samples
             
+            # Ensure we don't exceed the configured number of channels
+            if neural_data.shape[1] > self.n_neural_channels:
+                neural_data = neural_data[:, :self.n_neural_channels]
+            
+            # Compute neural features
+            neural_features = self._compute_features(neural_data, self.neural_feature_type)
+            features["neural"] = neural_features
+            features["neural_count"] = neural_data.shape[0]
+            features["neural_feature_type"] = self.neural_feature_type
+            has_data = True
+        
+        # Process kinematic data
+        kinematic_features = {dof: None for dof in self.dof_names}
+        if kinematic_samples is not None and self.n_dofs > 0:
+            # Convert dictionary of arrays to single array format
+            for dof_name, dof_values in kinematic_samples.items():
+                feats = self._compute_features(dof_values, self.kinematic_feature_type)
+                kinematic_features[dof_name] = feats
+            
+            features["kinematics"] = kinematic_features
+            features["kinematics_count"] = kinematic_samples[self.dof_names[0]].shape[0]
+            features["kinematics_feature_type"] = self.kinematic_feature_type
+            has_data = True
+        
         if not has_data:
             return None
         
-        # Extract features from current bin
-        features = self._extract_bin_features(timestamp)
-        
-        # Reset for next bin
-        self.current_bin_start = timestamp
-        self.last_bin_end = timestamp
-        
-        # Reset counters but keep buffers (ring buffer reuse)
-        if self.n_neural_channels > 0:
-            self.neural_count = 0
-            self.neural_write_idx = 0
-        
-        if self.n_dofs > 0:
-            self.kinematic_count = 0
-            self.kinematic_write_idx = 0
-        
-        return features
-    
-    def _extract_bin_features(self, bin_end_timestamp: float) -> Dict[str, float]:
-        """
-        Extract features from the current bin data.
-        
-        Args:
-            bin_end_timestamp: Timestamp when bin was completed
-            
-        Returns:
-            Dictionary mapping feature names to values
-        """
-        features = {}
-        
-        # Extract neural features
-        if self.n_neural_channels > 0 and self.neural_count > 0:
-            # Get valid samples from ring buffer
-            if self.neural_count < self.max_samples_per_bin:
-                # Simple case - no wraparound
-                neural_data = self.neural_buffer[:self.neural_count]
-            else:
-                # Ring buffer wrapped - reconstruct proper order
-                start_idx = self.neural_write_idx % self.max_samples_per_bin
-                neural_data = np.concatenate([
-                    self.neural_buffer[start_idx:],
-                    self.neural_buffer[:start_idx]
-                ])
-            
-            # Compute features vectorized
-            neural_features = self._compute_features(neural_data, self.neural_feature_type)
-            features["neural"] = neural_features
-            features["neural_count"] = self.neural_count
-            features["neural_feature_type"] = self.neural_feature_type
-        # Extract kinematic features
-        if self.n_dofs > 0 and self.kinematic_count > 0:
-            # Get valid samples from ring buffer
-            if self.kinematic_count < self.max_samples_per_bin:
-                # Simple case - no wraparound
-                kinematic_data = self.kinematic_buffer[:self.kinematic_count]
-            else:
-                # Ring buffer wrapped - reconstruct proper order
-                start_idx = self.kinematic_write_idx % self.max_samples_per_bin
-                kinematic_data = np.concatenate([
-                    self.kinematic_buffer[start_idx:],
-                    self.kinematic_buffer[:start_idx]
-                ])
-            
-            # Compute features vectorized
-            kinematic_features = self._compute_features(kinematic_data, self.kinematic_feature_type)
-            # Convert back to dof names
-            kinematic_dict = {}
-            for dof_idx, dof_name in enumerate(self.dof_names):
-                kinematic_dict[dof_name] = kinematic_features[dof_idx]
-            features["kinematics"] = kinematic_dict
-            features["kinematics_count"] = self.kinematic_count
-            features["kinematics_feature_type"] = self.kinematic_feature_type
-        
         # Add metadata
-        features['bin_end_timestamp'] = bin_end_timestamp
-        features['bin_start_timestamp'] = self.current_bin_start
+        if bin_timestamp is not None:
+            features['bin_timestamp'] = bin_timestamp
+            features['bin_start_timestamp'] = bin_timestamp - self.bin_size_ms
         
         return features
     
@@ -329,33 +254,18 @@ class MultiModalFeatureExtractor:
         elif feature_type == 'var':
             # Variance
             return np.var(data, axis=0)
+        elif feature_type == "mean_and_vel":
+            # Mean and velocity
+            mean_pos = np.mean(data, axis=0)
+            vel = np.diff(data, axis=0).mean(axis=0) if data.shape[0] > 1 else np.zeros(data.shape[1])
+            return np.concatenate((mean_pos, vel))
         else:
             raise ValueError(f"Unsupported feature type: {feature_type}")
     
-    def reset(self):
-        """Reset the internal state of the feature extractor."""
-        with self._lock:
-            # Reset buffers
-            if self.n_neural_channels > 0:
-                self.neural_buffer.fill(0)
-                self.neural_timestamps.fill(0)
-                self.neural_write_idx = 0
-                self.neural_count = 0
-            
-            if self.n_dofs > 0:
-                self.kinematic_buffer.fill(0)
-                self.kinematic_timestamps.fill(0)
-                self.kinematic_write_idx = 0
-                self.kinematic_count = 0
-            
-            # Reset bin tracking
-            self.current_bin_start = None
-            self.last_bin_end = None
-
 
 # Example usage
 if __name__ == "__main__":
-    # Test neural-only configuration (backward compatibility)
+    # Test neural-only configuration
     neural_config = {
         'bin_size_ms': 100,
         'neural': {
@@ -367,20 +277,16 @@ if __name__ == "__main__":
     
     extractor = MultiModalFeatureExtractor(neural_config)
     
-    # Simulate neural data
+    # Simulate neural data batch
     np.random.seed(42)
-    features_list = []
+    neural_batch = np.random.randn(10, 3)  # 10 samples, 3 channels
     
-    for i in range(50):
-        timestamp = i * 10  # 10ms intervals
-        neural_data = np.random.randn(3)
-        
-        features = extractor.push_neural(neural_data, timestamp)
-        if features is not None:
-            print(f"Time: {timestamp}ms, Features: {features}")
-            features_list.append(features)
+    features = extractor.extract_bin_features(
+        neural_samples=neural_batch,
+        bin_timestamp=100.0
+    )
     
-    print(f"\nNeural-only test - Total bins: {len(features_list)}")
+    print(f"Neural-only features: {features}")
     
     # Test multi-modal configuration
     multimodal_config = {
@@ -399,32 +305,45 @@ if __name__ == "__main__":
     
     mm_extractor = MultiModalFeatureExtractor(multimodal_config)
     
-    # Simulate mixed data streams
-    features_list = []
-    np.random.seed(42)
+    # Simulate mixed data batch
+    neural_batch = np.random.randn(5, 4)  # 5 samples, 4 channels
+    kinematic_batch = {
+        'thumb': np.random.uniform(0, 1, size=3),
+        'index': np.random.uniform(0, 1, size=3),
+        'middle': np.random.uniform(0, 1, size=3)
+    }
     
-    for i in range(100):
-        timestamp = i * 5  # 5ms intervals
-        
-        # Neural data every 1ms (simulated at 5ms for demo)
-        neural_data = np.random.randn(4)
-        features = mm_extractor.push_neural(neural_data, timestamp)
-        
-        # Kinematic data every 5ms (200Hz)
-        if i % 1 == 0:  # Every sample for demo
-            kinematic_data = {
-                'thumb': np.random.uniform(0, 1),
-                'index': np.random.uniform(0, 1),
-                'middle': np.random.uniform(0, 1)
-            }
-            features = mm_extractor.push_kinematic(kinematic_data, timestamp)
-        
-        if features is not None:
-            print(f"Time: {timestamp}ms, Multimodal Features: {len(features)} features")
-            features_list.append(features)
+    features = mm_extractor.extract_bin_features(
+        neural_samples=neural_batch,
+        kinematic_samples=kinematic_batch,
+        bin_timestamp=50.0
+    )
     
-    print(f"\nMultimodal test - Total bins: {len(features_list)}")
+    print(f"Multimodal features: {features}")
     
-    # Show a sample feature vector
-    if features_list:
-        print(f"\nSample feature vector keys: {list(features_list[0].keys())}")
+    # Test timestamped data processing with extract_features_per_bin
+    print("\n--- Testing timestamped data processing ---")
+    
+    # Create timestamped neural data (1000 Hz)
+    neural_timestamps = np.arange(0, 500, 1)  # 0-500ms, 1ms intervals
+    neural_data = np.random.randn(len(neural_timestamps), 4)
+    
+    # Create timestamped kinematic data (200 Hz)  
+    kinematic_timestamps = np.arange(0, 500, 5)  # 0-500ms, 5ms intervals
+    kinematic_data = {
+        'thumb': np.random.uniform(0, 1, size=len(kinematic_timestamps)),
+        'index': np.random.uniform(0, 1, size=len(kinematic_timestamps)),
+        'middle': np.random.uniform(0, 1, size=len(kinematic_timestamps))
+    }
+    
+    # Extract features per bin
+    bin_features = mm_extractor.extract_features_per_bin(
+        neural=neural_data,
+        neural_timestamps_ms=neural_timestamps,
+        kinematics=kinematic_data,
+        kinematics_timestamps_ms=kinematic_timestamps
+    )
+    
+    print(f"Number of bins created: {len(bin_features)}")
+    print(f"First bin features: {bin_features[0] if bin_features else 'No bins created'}")
+    print(f"Last bin features: {bin_features[-1] if bin_features else 'No bins created'}")
