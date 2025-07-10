@@ -79,14 +79,6 @@ class NNTrainer(Trainer):
         model = model_class(model_config.params)
         return model
 
-#     def train_model(self, train_loader = None, valid_loader = None):
-#         pass
-
-
-# class LSTMTrainer(NNTrainer):
-#     def __init__(self, preprocessor, config):
-#         super().__init__(preprocessor, config)
-
     def train_model(self, train_loader = None, valid_loader = None):
         # Override loaders if provided
         if(train_loader is not None):
@@ -150,7 +142,10 @@ class NNTrainer(Trainer):
 
             # Scheduler step
             if self.scheduler:
-                self.scheduler.step()
+                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
 
             # Print progress
             if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
