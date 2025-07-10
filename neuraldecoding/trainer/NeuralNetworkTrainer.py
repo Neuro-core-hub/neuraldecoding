@@ -153,8 +153,8 @@ class NNTrainer(Trainer):
                 for metric in self.logger:
                     train_metric = self.logger[metric][0][-1]
                     val_metric = self.logger[metric][1][-1]
-                    print(f"    {metric}: train={train_metric},")
-                    print(f"              val={val_metric}")
+                    print(f"    {metric:>12}{': train = ':>12}{train_metric}")
+                    print(f"    {'':>12}{'  val = ':>12}{val_metric}")
 
         return self.model, self.logger
 
