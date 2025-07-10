@@ -239,7 +239,9 @@ class MultiModalFeatureExtractor:
         Returns:
             Feature array of shape [channels]
         """
-        if data is None or data.shape[0] == 0:
+        if data is None:
+            return np.zeros(self.n_neural_channels, dtype=np.float32)
+        elif data.shape[0] == 0:
             return np.zeros(data.shape[1], dtype=np.float32)
         
         if feature_type == 'mav':
