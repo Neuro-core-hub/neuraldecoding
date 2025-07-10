@@ -79,14 +79,6 @@ class NNTrainer(Trainer):
         model = model_class(model_config.params)
         return model
 
-#     def train_model(self, train_loader = None, valid_loader = None):
-#         pass
-
-
-# class LSTMTrainer(NNTrainer):
-#     def __init__(self, preprocessor, config):
-#         super().__init__(preprocessor, config)
-
     def train_model(self, train_loader = None, valid_loader = None):
         # Override loaders if provided
         if(train_loader is not None):
