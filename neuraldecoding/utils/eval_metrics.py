@@ -1,12 +1,30 @@
 import numpy as np
 import torch
+from sklearn.metrics import r2_score
 
-def correlation(y1,y2,params=None):
+def correlation(pred,target,params=None):
     """Calculates the correlation between y1 and y2 (tensors)"""
     corr = []
-    for i in range(y1.shape[1]):
-        corr.append(np.corrcoef(y1[:, i], y2[:, i])[1, 0])
+    for i in range(pred.shape[1]):
+        corr.append(np.corrcoef(pred[:, i], target[:, i])[1, 0])
     return corr
 
-def accuracy(y1, y2, params=None):
-    raise NotImplementedError("Accuracy is not implemented yet.")
+def accuracy(pred, target, params=None):
+    if len(pred) != len(target):
+        raise ValueError("pred and target must have the same length")
+    
+    if len(pred) == 0:
+        raise ValueError("Arrays cannot be empty")
+    
+    correct_predictions = (pred == target).sum()
+    total_predictions = len(pred)
+    return correct_predictions / total_predictions
+
+def r2(pred, target, params=None):
+    if len(pred) != len(target):
+        raise ValueError("pred and target must have the same length")
+
+    if len(pred) == 0:
+        raise ValueError("Arrays cannot be empty")
+
+    return r2_score(target, pred, **params) if params else r2_score(target, pred)

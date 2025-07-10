@@ -5,13 +5,9 @@ decoder_struct = {
             'type': str,
             'params': DictConfig
         },
-        'stabilization': {
-            'type': str,
-            'params': DictConfig
-        },
         'fpath': str
 }
-trainer_struct = {
+trainer_struct_nn = {
         'model': {
             'type': str,
             'params': DictConfig
@@ -40,8 +36,15 @@ trainer_struct = {
             'metrics': ListConfig,
             'params': DictConfig
         },
-        'stabilization': {
-            'type': str, 
+        'data': {
+            'data_path': str,
+            'params': DictConfig
+        }
+    }
+
+trainer_struct_linear = {
+        'model': {
+            'type': str,
             'params': DictConfig
         },
         'data': {
@@ -49,3 +52,7 @@ trainer_struct = {
             'params': DictConfig
         }
     }
+preprocessing_struct = {
+        'order': ListConfig,
+        'content': DictConfig
+}

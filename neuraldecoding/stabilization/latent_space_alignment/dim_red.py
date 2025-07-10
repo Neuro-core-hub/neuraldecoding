@@ -148,9 +148,10 @@ class EMFactorAnalysis1(DimRed):
         d, base_lm, psi, _, _ = fa_stable.fit_factor_analysis(data, self.ndims, max_n_its = self.max_n_inits, 
                                         ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var)
 
-        return base_lm, d, psi
+        return base_lm, (d, psi)
     
-    def reduce(self, data, lm, d, psi):
+    def reduce(self, data, lm, args):
+        d, psi = args
         regularized_lm, O = fa_stable.get_stabilization_matrices(lm, psi, d)
         reduced_data = data @ regularized_lm.T + np.expand_dims(O, axis = -1).T
         return reduced_data

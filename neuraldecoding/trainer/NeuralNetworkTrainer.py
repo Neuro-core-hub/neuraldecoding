@@ -17,7 +17,7 @@ from neuraldecoding.utils.eval_metrics import *
 import os
 
 class NNTrainer(Trainer):
-    def __init__(self, config):
+    def __init__(self, preprocessor, config):
         super().__init__()
         # General training params 
         self.device = torch.device(config.training.device)
@@ -34,16 +34,30 @@ class NNTrainer(Trainer):
         self.metrics = config.evaluation.metrics
         self.metric_params = config.evaluation.get("params", {})
         self.logger = {metric: [[], []] for metric in self.metrics}
-        # Stabilization params
-        stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, config["stabilization"]["type"])
-        self.stabilization = stabilization_method(config["stabilization"]["params"])
+        # Data specific params, TODO: change when dataset is finalized
+        self.preprocessor = preprocessor
+        self.data_path = config.data.data_path
+        self.train_X, self.train_Y, self.valid_X, self.valid_Y = self.load_data()
+        self.train_loader, self.valid_loader = self.create_dataloaders()
 
-    def load_data(self):
-        pass
-
-    def create_dataloaders(self):
-        pass
+    def load_data(self): # TODO, finalize this when dataset is merged to main
+        if not os.path.exists(self.data_path):
+            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
+        """Assuming data is dictionary output of one NWB file, change later"""
+        data = load_one_nwb(self.data_path)
+        train_X, valid_X, train_Y, valid_Y = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
+        return train_X, train_Y, valid_X, valid_Y
     
+    def create_dataloaders(self):
+        """Creates PyTorch DataLoaders for training and validation data."""
+        train_dataset = TensorDataset(self.train_X.detach().clone().to(torch.float32), 
+                                    self.train_Y.detach().clone().to(torch.float32))
+        valid_dataset = TensorDataset(self.valid_X.detach().clone().to(torch.float32), 
+                                    self.valid_Y.detach().clone().to(torch.float32))
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
+        return train_loader, valid_loader
+
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
         """Creates and returns an optimizer based on the configuration."""
         optimizer_class = getattr(torch.optim, optimizer_config.type)
@@ -64,42 +78,6 @@ class NNTrainer(Trainer):
         model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
         model = model_class(model_config.params)
         return model
-
-    def train_model(self, train_loader = None, valid_loader = None):
-        pass
-
-
-class LSTMTrainer(NNTrainer):
-    def __init__(self, config):
-        super().__init__(config)
-        # LSTM specific params
-        self.sequence_length = config.data.params.sequence_length
-        # Data specific params, TODO: change when dataset is finalized
-        self.split_ratio = config.data.params.split_ratio
-        self.split_seed = config.data.params.split_seed
-        self.data_path = config.data.data_path
-        self.num_train_trials = config.data.params.num_train_trials
-        self.train_X, self.train_Y, self.valid_X, self.valid_Y = self.load_data()
-        self.train_loader, self.valid_loader = self.create_dataloaders()
-        
-        
-    def load_data(self): # TODO, finalize this when dataset is merged to main
-        if not os.path.exists(self.data_path):
-            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
-        """Assuming data is dictionary output of one NWB file, change later"""
-        data = load_one_nwb(self.data_path)
-        train_X, valid_X, train_Y, valid_Y = prep_data_and_split(data, self.sequence_length, self.num_train_trials, self.stabilization)
-        return train_X, train_Y, valid_X, valid_Y
-    
-    def create_dataloaders(self):
-        """Creates PyTorch DataLoaders for training and validation data."""
-        train_dataset = TensorDataset(self.train_X.detach().clone().to(torch.float32), 
-                                    self.train_Y.detach().clone().to(torch.float32))
-        valid_dataset = TensorDataset(self.valid_X.detach().clone().to(torch.float32), 
-                                    self.valid_Y.detach().clone().to(torch.float32))
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
-        return train_loader, valid_loader
 
     def train_model(self, train_loader = None, valid_loader = None):
         # Override loaders if provided
@@ -138,7 +116,7 @@ class LSTMTrainer(NNTrainer):
                 for x_val, y_val in self.valid_loader:
                     x_val = x_val.to(self.device)
                     y_val = y_val.to(self.device)
-                    yhat_val, _ = self.model(x_val)
+                    yhat_val = self.model(x_val)
                     val_loss = self.loss_func(yhat_val, y_val)
 
                     running_val_loss += val_loss.item()
@@ -164,7 +142,10 @@ class LSTMTrainer(NNTrainer):
 
             # Scheduler step
             if self.scheduler:
-                self.scheduler.step()
+                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
 
             # Print progress
             if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):

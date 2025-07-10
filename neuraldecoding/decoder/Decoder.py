@@ -5,7 +5,7 @@ from typing import Self
 import numpy as np
 import torch
 
-from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression
+from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA
 from neuraldecoding.model.neural_network_models import LSTM
 
 import neuraldecoding.stabilization.latent_space_alignment
@@ -17,6 +17,7 @@ model_reg = {
     "KalmanFilter": KalmanFilter,
     "LinearRegression": LinearRegression,
     "RidgeRegression": RidgeRegression,
+    "LDA":LDA,
     "LSTM": LSTM
     }
 
@@ -32,9 +33,6 @@ class Decoder(ABC):
         Args:
             cfg: config dictionary
         """
-        stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, cfg["stabilization"]["type"])
-        self.stabilization = stabilization_method(cfg["stabilization"]["params"])
-        self.stabilization.load_alignment()
         # Get model stuff
         if cfg["model"]["type"] in model_reg:
             self.model = model_reg[cfg["model"]["type"]](cfg["model"]["params"])
@@ -45,9 +43,12 @@ class Decoder(ABC):
         # Get model path
         self.fpath = cfg["fpath"]
 
-        # Get model i/o shape
-        self.input_shape = cfg["model"]["params"]["input_size"]
-        self.output_shape = cfg["model"]["params"]["num_outputs"]
+        # # Get model i/o shape
+        # self.input_shape = cfg["model"]["params"]["input_size"]
+        # self.output_shape = cfg["model"]["params"]["num_outputs"]
+
+        self.input_shape = 0
+        self.output_shape = 0
 
         # Load model from path
         self.load_model()
@@ -121,19 +122,8 @@ class LinearDecoder(Decoder):
 class NeuralNetworkDecoder(Decoder):
     def __init__(self, cfg: dict) -> None:
         super().__init__(cfg)
-    def predict(self, data_dict):
-        """
-        Predict outputs given neural data in offline setting.
-
-        Args:
-            neural_data (numpy.ndarray): Input neural data of shape [N, numfeats]
-
-        Returns:
-            prediction (torch.Tensor): Predicted output
-        """
+    def predict(self, input):
         with torch.no_grad():
-            neural_test, finger_test = prep_data_decoder(data_dict, self.cfg.model.params.sequence_length, self.stabilization)
-            neural_test, finger_test = neural_test.to(self.device), finger_test.to(self.device)
-            prediction = self.model(neural_test)
-        
-        return prediction, finger_test
+            input = input.to(self.device)
+            prediction = self.model(input)
+        return prediction
