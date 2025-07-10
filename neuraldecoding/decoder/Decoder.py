@@ -122,8 +122,8 @@ class LinearDecoder(Decoder):
 class NeuralNetworkDecoder(Decoder):
     def __init__(self, cfg: dict) -> None:
         super().__init__(cfg)
-    def predict(self, neural_test):
+    def predict(self, input):
         with torch.no_grad():
-            neural_test = neural_test.to(self.device)
-            prediction = self.model(neural_test)
+            input = input.to(self.device)
+            prediction = self.model(input)
         return prediction

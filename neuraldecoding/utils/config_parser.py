@@ -1,5 +1,5 @@
 from omegaconf import DictConfig, ListConfig
-from .config_structs import decoder_struct, trainer_struct_nn, trainer_struct_linear, preprocessing_struct
+from neuraldecoding.utils.config_structs import decoder_struct, trainer_struct_nn, trainer_struct_linear, preprocessing_struct
 
 def verify_structure(content: DictConfig, struct: dict) -> tuple[bool, str]:
     """
