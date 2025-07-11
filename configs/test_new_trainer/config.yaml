@@ -1,3 +1,4 @@
 defaults:
   - trainer/testTrainer
+  - preprocessing/preprocessing_trainer
   - _self_
