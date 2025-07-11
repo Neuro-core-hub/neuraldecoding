@@ -76,8 +76,8 @@ class LDA(LinearModel):
             filepath (str): Path to the file where the model will be saved.
         """
         with open(filepath, 'wb') as f:
-            pickle.dump(self.model, f)
-    
+            pickle.dump((self.model, self.Nfeats), f)
+
     def load_model(self, filepath: str) -> None:
         """
         Load a trained LDA model from a file.
@@ -85,4 +85,4 @@ class LDA(LinearModel):
             filepath (str): Path to the file from which the model will be loaded.
         """
         with open(filepath, 'rb') as f:
-            self.model = pickle.load(f)
+            self.model, self.Nfeats = pickle.load(f)
