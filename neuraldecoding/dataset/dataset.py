@@ -14,18 +14,13 @@ class Dataset:
 
         Parameters
         ----------
-        cfg : DictConfig
-            Configuration object containing at least the following dataset parameters:
-            - dataset_type: str - Dataset type ('zstruct', 'nwb') - config layout will depend on this
-            - subject: str - Subject identifier
-            - date: str - Recording date
-            - data_path: str - Alternative path to data
-            - runs: list - List of run numbers to load
-            - xpc: dict - XPC file configuration
-            - nwb: dict - NWB file configuration
-        verbose : bool, default=True
-            Whether to print status messages during processing
+        cfg: Configuration with the following keys (usually saved as a yaml file)
+            dataset_type: str, specifies the type of dataset being loaded (and will use the corresponding loading functions)
+            autoload: book, specifies if the dataset should be automatically loaded when the dataset object is instantiated
+            save_path: str, filepath for where data should be saved (otherwise will send to a default location)
+            dataset_parameters: config block, contains all the parameters needed for the dataset_type specified above.
         """
+
         self.cfg: DictConfig = cfg
         self.dataset_parameters: DictConfig = self.cfg.dataset_parameters
         self.verbose: bool = verbose
@@ -36,12 +31,12 @@ class Dataset:
             session_start_time=datetime.now(tzlocal()),
         )
 
-        if self.cfg.dataset_type == "zstruct":
-            self._initialize_zstruct()
-        elif self.cfg.dataset_type == "nwb":
-            self._initialize_nwb()
-        else:
-            raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
+        # if self.cfg.dataset_type == "zstruct":
+        #     self._initialize_zstruct()
+        # elif self.cfg.dataset_type == "nwb":
+        #     self._initialize_nwb()
+        # else:
+        #     raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
         
         if self.cfg.autoload:
             self.load_data()
@@ -57,25 +52,12 @@ class Dataset:
             If the dataset type is not supported
         """
         if self.cfg.dataset_type == "zstruct":
-            print('reached')
             self._load_data_zstruct()
         elif self.cfg.dataset_type == "nwb":
             self.load_data_nwb()
         else:
             raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
         
-    def _initialize_zstruct(self):
-        """
-        Initialize dataset for zstruct type data.
-        Sets up the server directory path based on configuration.
-        """
-        # self.institution, self.lab = get_creator_details()
-        # self.device, self.electrode_group = get_device_and_electrode_group(data_type)
-        # if self.dataset_parameters.alt_filepath is not None:
-        #     self.data_dir = os.path.join(self.dataset_parameters.server_dir, self.dataset_parameters.subject, self.dataset_parameters.date, self.dataset_parameters.runs)
-        # else:
-        #     self.data_dir = self.dataset_parameters.alt_filepath
-
     def _initialize_nwb(self):
         """
         Initialize dataset for NWB type data.
@@ -97,12 +79,6 @@ class Dataset:
         NotImplementedError
             If multiple runs are provided (current limitation)
         """
-        
-        # if self.verbose:
-        #     print(
-        #         f"Loading data for {self.dataset_parameters.subject} at {self.dataset_parameters.date}, runs {', '.join(map(str, self.dataset_parameters.runs))}"
-        #     )
-
         # loading each run
         # FIXME: for now, failing if provided with more than one run
         # if len(self.cfg.runs) > 1:

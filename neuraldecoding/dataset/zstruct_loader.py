@@ -15,10 +15,6 @@ from pynwb.ecephys import (
     ElectricalSeries,
     EventDetection,
 )
-from pynwb.behavior import (
-    BehavioralTimeSeries,
-    SpatialSeries
-)
 from pynwb.base import TimeSeries
 from hdmf.backends.hdf5.h5_utils import H5DataIO
 from datetime import datetime
@@ -28,6 +24,12 @@ from omegaconf import OmegaConf
 
 # from ..utils import *
 from ..utils.utils_general import get_creation_path_time, int_to_string, is_collection
+
+# Registry of known types
+SERIES_CLASSES = {
+    "TimeSeries": TimeSeries,
+    "ElectricalSeries": ElectricalSeries
+}
 
 def get_server_notes_details(data_path):
     """
@@ -234,7 +236,7 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
 
     # Initialize the dictionary with correct field names
     channel_structure = (
-        [{"SpikeTimes": []} for _ in range(exp_cfg.electrode_group.num_channels)]
+        [{"SpikeTimes": []} for _ in range(exp_cfg.num_channels)]
         if spikeformat
         else None
     )
@@ -243,7 +245,7 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
         **{name: None for name in fnames[::2]},
         "TrialNumber": None,
         **(
-            {exp_cfg.xpc_parameters.neural_data: [], exp_cfg.units.units_name: channel_structure}
+            {'NeuralData': [], exp_cfg.units.field: channel_structure}
             if spikeformat
             else {}
         ),
@@ -357,11 +359,10 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
                         # Use a list comprehension instead of iterative appends
                         neural_data[m] = [ord(content[n]) for n in range(content_len)]
 
-                dict_data[i][nwb_dict["signal_name"]] = neural_data
+                dict_data[i]['NeuralData'] = neural_data
 
             except re.error:  # data is an empty cell
-                dict_data[i][nwb_dict["signal_name"]] = []
-
+                dict_data[i]['NeuralData'] = []
     # Format Specific Fields
     ############################################################################
 
@@ -372,13 +373,13 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
                 continue
 
             # Get references to avoid repeated dictionary lookups
-            neural_data = dict_data[i][nwb_dict["signal_name"]]
-            exp_time = dict_data[i][xpc_dict["experiment_time_field"]]
+            neural_data = dict_data[i]['NeuralData']
+            exp_time = dict_data[i][exp_cfg.reference_time]
             neural_data_len = len(neural_data)
 
             # Use numpy for faster operations
             spikenums = np.zeros(
-                (xpc_dict["num_channels"], neural_data_len), dtype=np.int32
+                (exp_cfg.num_channels, neural_data_len), dtype=np.int32
             )
 
             # Vectorize inner loop where possible
@@ -395,7 +396,7 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
 
             # Process each channel once
             channel_data = dict_data[i][exp_cfg.units.field]
-            for c in range(xpc_dict["num_channels"]):
+            for c in range(exp_cfg.num_channels):
                 # Only process channels with spikes
                 spike_mask = spikenums[c, :] == 1
                 if np.any(spike_mask):
@@ -422,8 +423,9 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
 
             # Remove unneeded fields (moved outside the channel loop)
             dict_data[i].pop("SpikeChans", None)
-            dict_data[i].pop(nwb_dict["signal_name"], None)
-
+            dict_data[i].pop("NeuralData", None)
+            if not exp_cfg.units.has_spikes:
+                dict_data[i].pop(exp_cfg.units.field)
     # this next one removes the skipped trials
     # must use a generator because of indexing issues if you don't
     if (
@@ -433,7 +435,7 @@ def read_xpc_data(direc, exp_cfg, verbose=False):
 
     return dict_data
 
-def initialize_nwb_columns(nwb_file, data_dict, xpc_dict):
+def initialize_nwb_columns(nwb_file, data_dict, exp_cfg):
     """
     Initialize the columns of the NWB file based on the dictionary keys and identify time series data.
 
@@ -457,35 +459,24 @@ def initialize_nwb_columns(nwb_file, data_dict, xpc_dict):
 
     num_trials = len(data_dict)
     num_times = len(
-        data_dict[-1][xpc_dict["experiment_time_field"]]
+        data_dict[-1][exp_cfg.reference_time]
     )  # num of times for last trial - used to understand if a variable is a time-series
     num_total_times = sum(
-        len(data_dict[trl_idx][xpc_dict["experiment_time_field"]])
+        len(data_dict[trl_idx][exp_cfg.reference_time])
         for trl_idx in range(num_trials)
     )
 
     for key in data_dict[0].keys():
-        if key == "ExperimentTime":
-            continue  # ExperimentTime are handled as special cases
-        elif (
-            key == xpc_dict["behavior_field"]
-            or key == xpc_dict["signal_field"]
-            or key == xpc_dict["spikes_field"]
-        ):
-            continue  # Behavior data and SBP are handled as special case (stored in the respective modules)
-        elif (
-            not is_collection(data_dict[0][key]) or len(data_dict[-1][key]) != num_times
-        ):
+        if exp_cfg.units.has_spikes and key == exp_cfg.units.field:
+            continue  # Spikes handled specially
+        elif (not is_collection(data_dict[0][key]) or len(data_dict[-1][key]) != num_times):
             nwb_file.add_trial_column(name=key, description=key)
         else:
-            time_series_dict[key] = np.empty(
-                (num_total_times, data_dict[0][key].shape[1]),
-                dtype=data_dict[0][key].dtype,
-            )
-
+            time_series_dict[key] = np.concatenate([data_dict[i][key] for i in np.arange(len(data_dict))], axis=0, dtype=data_dict[0][key].dtype)
+    
     return time_series_dict
 
-def initialize_nwb_file(data_path, subject, date, run, num_channels, nwb_parameters):
+def initialize_nwb_file(data_path, subject, date, run, exp_cfg):
     """
     Initialize an NWB file with metadata and electrode information.
 
@@ -514,8 +505,8 @@ def initialize_nwb_file(data_path, subject, date, run, num_channels, nwb_paramet
     subject, creation_time, experimenter, notes_content = get_dataset_details(data_path, subject, date)
 
     # Get the device and electrode group
-    device = Device(**dict(nwb_parameters.device))
-    electrode_group = ElectrodeGroup(device=device, **dict(nwb_parameters.electrode_group))
+    device = Device(**dict(exp_cfg.device))
+    electrode_group = ElectrodeGroup(device=device, **dict(exp_cfg.electrode_group))
 
     nwb_file = NWBFile(
         session_description=f"{data_path} | Run-{run:03d}",
@@ -523,15 +514,15 @@ def initialize_nwb_file(data_path, subject, date, run, num_channels, nwb_paramet
         session_start_time=datetime.fromtimestamp(creation_time, tz=tzlocal()),
         file_create_date=datetime.now(tzlocal()),
         experimenter=experimenter,
-        institution=nwb_parameters.institution,
+        institution=exp_cfg.institution,
         notes=notes_content,
-        lab=nwb_parameters.lab,
+        lab=exp_cfg.lab,
         subject=subject,
         devices=[device],
         electrode_groups=[electrode_group],
     )
 
-    for _ in range(num_channels):
+    for _ in range(exp_cfg.num_channels):
         nwb_file.add_electrode(group=electrode_group, location=electrode_group.location)
 
     return nwb_file
@@ -584,8 +575,7 @@ def add_run_data(
     nwb_file,
     data_dict,
     time_series_dict,
-    xpc_dict,
-    nwb_dict,
+    exp_cfg,
     verbose=False,
 ):
     """
@@ -608,157 +598,67 @@ def add_run_data(
     """
 
     num_trials = len(data_dict)
-    num_behavior_vars = data_dict[0][xpc_dict["behavior_field"]].shape[1]
 
-    total_times = sum(
-        len(data_dict[trl_idx][xpc_dict["experiment_time_field"]])
-        for trl_idx in range(num_trials)
-    )
+    # deal with time first
+    times = time_series_dict[exp_cfg.reference_time].reshape(-1)
+    times /= 1000 # set in seconds
 
-    # preallocate time-series data arrays
-    times = np.empty(
-        (total_times,), dtype=data_dict[0][xpc_dict["experiment_time_field"]].dtype
-    )
-    neural_data = np.empty(
-        (total_times, xpc_dict["num_channels"]),
-        dtype=data_dict[0][xpc_dict["signal_field"]].dtype,
-    )
-    behavior_data = np.empty(
-        (total_times, num_behavior_vars),
-        dtype=data_dict[0][xpc_dict["behavior_field"]].dtype,
-    )
+    # create modules as defined by yaml file
+    modules = {}
+    for key in exp_cfg.modules:
+        modules[key] = nwb_file.create_processing_module(name=exp_cfg.modules[key].name, description=exp_cfg.modules[key].description)
 
-    # looping through the trials and populating the times-series data
-    start_idx = 0
-
-    for trl_idx in range(num_trials):
-        times_trial_data = np.squeeze(
-            data_dict[trl_idx][xpc_dict["experiment_time_field"]]
-        )
-
-        end_idx = start_idx + len(times_trial_data)
-
-        times[start_idx:end_idx] = times_trial_data
-        neural_data[start_idx:end_idx] = data_dict[trl_idx][xpc_dict["signal_field"]][
-            :, : xpc_dict["num_channels"]
-        ]
-        behavior_data[start_idx:end_idx] = data_dict[trl_idx][
-            xpc_dict["behavior_field"]
-        ]
-
-        # add all the other time-series data
-        for key in time_series_dict.keys():
-            time_series_dict[key][start_idx:end_idx] = data_dict[trl_idx][key]
-
-        start_idx = end_idx
-
-    # Set times to seconds
-    times /= 1000
-
-    # adding behavior data
-    b_metadata = nwb_dict["behavior"]
-    behavior_module = nwb_file.create_processing_module(name=b_metadata["module_name"], description=b_metadata["module_description"])
-    behavior = TimeSeries(
-        name=b_metadata["behavior_name"],
-        description=b_metadata["behavior_description"],
-        data = H5DataIO(
-            behavior_data,
-            compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"]
-        ),
-        timestamps = times,
-        reference_frame = b_metadata["behavior_reference_frame"]
-    )
-
-    raw_behavior = TimeSeries(
-        name="raw_input_vals",
-        description="Raw Values from the flex sensors",
-        data = H5DataIO(
-            time_series_dict["RawInputVals"],
-            compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"]
-        ),
-        timestamps = times,
-        reference_frame = b_metadata["behavior_reference_frame"]
-    )
-
-    decode = TimeSeries(
-        name="decode",
-        description="decode_field",
-        data=H5DataIO(
-            time_series_dict['Decode'],
-            compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"]
-        ),
-        timestamps = times,
-        reference_frame = b_metadata["behavior_reference_frame"]
-    )
-    
-    behavior_module.add(raw_behavior)
-    behavior_module.add(behavior)
-    behavior_module.add(decode)
-
-    ecephys_module = nwb_file.create_processing_module(
-        name="ecephys",
-        description="processed ephys data"
-    )
-
-    # adding neural data
-    neural_data_ts = ElectricalSeries(
-        name=nwb_dict["signal_name"],
-        data=H5DataIO(
-            neural_data,
-            compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"],
-        ),
-        timestamps=times,
-        description=nwb_dict["signal_description"],
-        conversion=nwb_dict["signal_conversion"],
-        channel_conversion=[1.0] * xpc_dict["num_channels"],
-        filtering=nwb_dict["signal_filtering"],
-        comments=nwb_dict["signal_comments"],
-        electrodes=nwb_file.create_electrode_table_region(
-            region=list(range(xpc_dict["num_channels"])),
-            description=nwb_dict["electrode_group"]["description"],
-        ),
-    )
-
-    # add samplewidth for continuous data
-    sample_widths = TimeSeries(
-        name="Sample Widths for continuous data",
-        unit="",
-        data=H5DataIO(
-            time_series_dict["SampleWidth"],
-            compression=nwb_dict["compression"]["type"],
-            compression_opts=nwb_dict["compression"]["options"],
-        ),
-        timestamps=times,
-        description=f"{key}",
-        conversion=1.0
-    )
-
-    # Add neural data as acquisition
-    ecephys_module.add(neural_data_ts)
-    ecephys_module.add(sample_widths)
-
+    # go through the time series and assign accordingly
+    for key in time_series_dict.keys():
+        if any(named_series == key for named_series in exp_cfg.timeseries.keys()):
+            cls = SERIES_CLASSES.get(exp_cfg.timeseries[key]["nwb_type"])
+            params = dict(exp_cfg.timeseries[key]["nwb_params"])
+            if exp_cfg.timeseries[key]["nwb_type"] == 'ElectricalSeries':
+                params['electrodes'] = nwb_file.create_electrode_table_region(
+                    region=list(range(exp_cfg.num_channels),),
+                    description = exp_cfg.electrode_group.description
+                )
+            data_ts = cls(
+                data=H5DataIO(time_series_dict[key],
+                              compression=exp_cfg.compression.type,
+                              compression_opts=exp_cfg.compression.options),
+                              timestamps = times,
+                              **params)
+            modules[exp_cfg.timeseries[key]["module"]].add(data_ts)
+        elif key == exp_cfg.reference_time:
+            continue
+        else:
+            #otherwise just add to acquisition as a timeseries
+            data_ts = TimeSeries(
+                name = key,
+                description = key,
+                timestamps = times,
+                unit = "AU",
+                data = H5DataIO(time_series_dict[key],
+                              compression=exp_cfg.compression.type,
+                              compression_opts=exp_cfg.compression.options)
+            )
+            Warning(f"Timeseries {key} was not defined in config file, adding to acquisitions")
+            nwb_file.add_acquisition(data_ts)
+            # undefined acquisition throw warning
+            
     # Add spike series
     # pdb.set_trace()
-    nwb_file.add_unit_column(name="channel", description="channel_id")
-    if xpc_dict["spikes_exist"]:
+    if exp_cfg.units.has_spikes:
+        nwb_file.add_unit_column(name="channel", description="channel_id")
         all_events = []
-        for ch_idx in range(xpc_dict["num_channels"]):
+        for ch_idx in range(exp_cfg.num_channels):
             cross_trial_spike_times = []
             for trial in data_dict:
-                if type(trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]) is int:
-                    trial_spike_times = [trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]]
+                if type(trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]) is int:
+                    trial_spike_times = [trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]]
                     cross_trial_spike_times.append(trial_spike_times)
-                elif len(trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]) > 0:
-                    trial_spike_times = trial[xpc_dict["spikes_field"]][ch_idx]["SpikeTimes"]
+                elif len(trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]) > 0:
+                    trial_spike_times = trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]
                     cross_trial_spike_times.append(trial_spike_times)
 
             # pdb.set_trace()
             spike_times = np.concat(cross_trial_spike_times)
-            channel = np.ones_like(spike_times).reshape(-1,1) * ch_idx
             nwb_file.add_unit(spike_times=spike_times, channel=ch_idx)
 
     # looping through the trials for adding the trials and all the other non-timeseries data to the NWB file
@@ -768,36 +668,20 @@ def add_run_data(
     # add the trials to the NWB file
     for trl_idx in range(num_trials):
         # trial times
-        nwb_trial_dict["start_time"] = data_dict[trl_idx][
-            xpc_dict["experiment_time_field"]
-        ][0][0]
-        nwb_trial_dict["stop_time"] = data_dict[trl_idx][
-            xpc_dict["experiment_time_field"]
-        ][-1][0]
+        nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0]
+        nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0]
 
         # looping through the data frame keys for dynamically adding them
         for key in data_dict[trl_idx].keys():
-            if key == xpc_dict["experiment_time_field"]:
-                pass  # ExperimentTime is handled as a special case
-            elif (
-                key == xpc_dict["behavior_field"]
-                or key == xpc_dict["signal_field"]
-                or key == xpc_dict["spikes_field"]
-            ):
-                pass
-            elif key in time_series_dict.keys():
+            if key == exp_cfg.reference_time or key in time_series_dict.keys() or (exp_cfg.units.has_spikes and key == exp_cfg.units.field):
                 pass
             else:  # non-time series data
                 if key == "TrialNumber":
-                    data_dict[trl_idx][
-                        key
-                    ] -= (
-                        1  # subtract 1 since indexes in the matlab version start from 1
-                    )
-
+                    data_dict[trl_idx][key] -= (1)  # subtract 1 since indexes in the matlab version start from 1
                 nwb_trial_dict[key] = data_dict[trl_idx][key]
 
         nwb_file.add_trial(**nwb_trial_dict)
+
 
 def load_xpc_run(cfg):
     """
@@ -829,7 +713,6 @@ def load_xpc_run(cfg):
     config_path = os.path.join(os.path.join(config_dir, f'{cfg.experiment_type}.yaml'))
 
     exp_cfg = OmegaConf.load(config_path)
-    nwb_parameters = exp_cfg.nwb_parameters
 
     # TODO: loading multiple runs
     if cfg.alt_filepath is not None:
@@ -837,26 +720,26 @@ def load_xpc_run(cfg):
     else:
         data_path = os.path.join(cfg.alt_filepath)
 
+    print(f"Loading Run {cfg.runs} from {cfg.subject_id} on {cfg.date}")
     # normalizing the path to be OS independent
     data_path = os.path.normpath(data_path)
     run_path = os.path.join(data_path, f"Run-{cfg.runs:03d}")
 
     # Initialize the NWB file
-    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.runs, exp_cfg.num_channels, nwb_parameters)
+    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.runs, exp_cfg)
 
     # Read in the binary files
-    data_dict = read_xpc_data(run_path, xpc_parameters, nwb_parameters)
+    data_dict = read_xpc_data(run_path, exp_cfg)
 
     # initializing the nwb modules and columns
-    time_series_dict = initialize_nwb_columns(nwb_file, data_dict, xpc_parameters)
+    time_series_dict = initialize_nwb_columns(nwb_file, data_dict, exp_cfg)
 
     # populate the nwb file with the run data
     add_run_data(
         nwb_file,
         data_dict,
         time_series_dict,
-        xpc_parameters,
-        nwb_parameters,
+        exp_cfg
     )
 
     return nwb_file

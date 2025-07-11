@@ -10,9 +10,9 @@ device:
   description: "Data acquisition system"
   manufacturer: "Blackrock Neurotech"
 electrode_group:
-  name: "Utah Array"
-  description: "Utah Array"
-  location: "Motor Cortex - Hand Knob Precentral Gyrus"
+  name: "Wire Electrodes"
+  description: "Wire Electrodes"
+  location: "Forearm"
 modules:
   behavior:
     name: behavior
@@ -46,17 +46,17 @@ timeseries:
     module: ecephys
     nwb_type: ElectricalSeries
     nwb_params:
-      name: "SBP"
-      description: "Spiking Band Power of brain activity, magnitude of 300-1000Hz BP downsampled to 2khz"
+      name: "EMG"
+      description: "Mean absolute value of EMG, for each 1ms bin, 32 actual channels"
       conversion: 2.5e-7
-      filtering: "bandpass: 300-1000 Hz"
+      filtering: "bandpass: 100-500 Hz"
   SampleWidth:
     module: ecephys
     nwb_type: TimeSeries
     nwb_params:
       name: "SampleWidth"
-      description: "SBP is sampled at 2KhZ but in this setup summed into 1ms bins, so samplewidth"
+      description: "EMG is sampled at 2KhZ but in this setup summed into 1ms bins, so samplewidth"
       unit: "# of samples"
-units:
-  field: "Channel"
-  has_spikes: True
+units: # needed for code to run smoothly, but doesn't actually contain anything
+  field: 'Channel'
+  has_spikes: False

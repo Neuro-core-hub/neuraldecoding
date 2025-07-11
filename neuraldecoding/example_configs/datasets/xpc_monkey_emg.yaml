@@ -1,0 +1,11 @@
+dataset_type: zstruct
+autoload: True
+save_path: None
+dataset_parameters:
+  experiment_type: monkey_emg_16_96
+  server_dir: Z:\Data\Monkeys
+  alt_filepath: None
+  subject: Joker
+  subject_id: "Monkey N"
+  date: 2024-06-06
+  runs: 2
