@@ -354,7 +354,6 @@ class UpdateNormalizationBlock(DataProcessingBlock):
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
 		return data, interpipe
 
-
 class EnforceTensorBlock(DataProcessingBlock):
 	"""
 	A block for ensuring that all data in the dictionary is converted to PyTorch tensors with given device and dtype.
