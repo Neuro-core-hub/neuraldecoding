@@ -10,6 +10,7 @@ import torch
 from abc import ABC, abstractmethod
 
 import time
+import pickle
 
 class PreprocessingBlock(ABC):
 	"""
@@ -330,9 +331,14 @@ class NormalizationBlock(DataProcessingBlock):
 		else:
 			p = {}
 		for loc in self.location:
-			data[loc], _ = neuraldecoding.dataaugmentation.DataAugmentation.normalize(data[loc],
+			data[loc], normalizer = neuraldecoding.dataaugmentation.DataAugmentation.normalize(data[loc],
 																				   method = self.normalizer_method,
 																				   **p)
+		if self.normalizer_params['is_save']:
+			if 'save_path' not in self.normalizer_params:
+				raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
+			with open(self.normalizer_params['save_path'], 'wb') as f:
+				pickle.dump(normalizer, f)
 		return data, interpipe
 
 class UpdateNormalizationBlock(DataProcessingBlock):
@@ -352,6 +358,19 @@ class UpdateNormalizationBlock(DataProcessingBlock):
 			data[self.location[1]] = normalizer.transform(data[self.location[1]])
 		else:
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
+		return data, interpipe
+
+class LoadNormalizationBlock(DataProcessingBlock):
+	def __init__(self, location, method, normalizer_params):
+		super().__init__()
+		self.location = location
+		self.normalizer_method = method
+		self.normalizer_params = normalizer_params
+	def transform(self, data, interpipe):
+		with open(self.normalizer_params['save_path'], 'rb') as f:
+			normalizer = pickle.load(f)
+		for loc in self.location:
+			data[loc] = normalizer.transform(data[loc])
 		return data, interpipe
 
 class EnforceTensorBlock(DataProcessingBlock):
