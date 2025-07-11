@@ -347,7 +347,7 @@ class UpdateNormalizationBlock(DataProcessingBlock):
 			normalizer.fit(data[self.location[0]])
 			data[self.location[1]] = normalizer.transform(data[self.location[1]])
 		elif self.normalizer_method == 'sequence_scaler':
-			normalizer = SequenceScaler(**self.normalizer_params['params'])
+			normalizer = SequenceScaler()
 			normalizer.fit(data[self.location[0]])
 			data[self.location[1]] = normalizer.transform(data[self.location[1]])
 		else:
