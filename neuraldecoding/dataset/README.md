@@ -1,33 +1,5 @@
-# code-style to remember
-
-- function names are lower case with _ (e.g. function_name)
-- every function need the comment defining the scope of the function, the inputs, and the ouputs. For each input/output variable if possible define the type and an intelligible description. Like the following:
-```bash
-      def function_name(var_name1, var_name2, ..):
-          """
-          This function is going to do this and that...
-    
-          Inputs:
-              var_name1: str
-                  Variable description
-              var_name1: int
-                  Variable description
-              ....
-          Outputs:
-              var_name1: str
-                  Variable description
-              var_name1: int
-                  Variable description
-              ....
-          """
-```
-
-# implementation details that needs to be discussed
-
-
 # To-do list dataset package
 
-- [ ] completing the code for features_extraction function with all the possible features currently handled by pybmi.
 - [ ] after loading a run of a dataset from the binary files on the server, save the NWB file of the run into the server folder. This will allow the NWB file to be loaded directly in future requests for the same run, avoiding the need to recreate it (see below).
 - [ ] when loading a run of a dataset, add a check if for that run the NWB file was already created and stored in the server, if yes just load it instead of re-creating it
 - [ ] definition for utilities class methods like:  __str__ , __len__ , __add__ (to merge two datasets) , __sub__ (to remove the intersection between two datasets)
@@ -37,5 +9,3 @@
 - [ ] writing the code for pre_processing function: this function takes as input a dictionary of params. The params indicate which pre_processing steps needs to be applied and the values (i.e. CAR, BP, notch)
 - [ ] writing the code for synching data functions. Basically we need to convert the functions from the Matlab package (svn_repository/Utility code/SynchZNeural) (needs a bit of understanding of why the definition of synching cpd and cerebus needs to be different)
 - [ ] completing the README.md with the inclusion of a package description, list of functions, and references to examples
-- [ ] completing the examples for the different functions of the dataset package and the different ways of using them: from loading a single day data, to data normalizationa, features extraction, to creating a training/test dataset, etc..
-- [ ] moving the server path to a config file, instead of being hardcoded in the code.

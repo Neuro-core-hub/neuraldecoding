@@ -695,7 +695,6 @@ def add_run_data(
 
         nwb_file.add_trial(**nwb_trial_dict)
 
-
 def load_xpc_run(cfg):
     """
     Create and populate an NWB file from experimental run data.
