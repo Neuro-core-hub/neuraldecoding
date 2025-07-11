@@ -609,22 +609,35 @@ def add_run_data(
         modules[key] = nwb_file.create_processing_module(name=exp_cfg.modules[key].name, description=exp_cfg.modules[key].description)
 
     # go through the time series and assign accordingly
+    def create_ts(data, ts_cfg):
+        cls = SERIES_CLASSES.get(ts_cfg["nwb_type"])
+        params = dict(ts_cfg["nwb_params"])
+        if ts_cfg["nwb_type"] == 'ElectricalSeries':
+            params["electrodes"] = nwb_file.create_electrode_table_region(
+                region=list(range(exp_cfg.num_channels)),
+                description = exp_cfg.electrode_group.description
+            )
+        data_ts = cls(
+            data=H5DataIO(data,
+                          compression=exp_cfg.compression.type,
+                          compression_opts=exp_cfg.compression.options),
+            timestamps = times,
+            **params
+            )
+        return data_ts
+        
+
     for key in time_series_dict.keys():
         if any(named_series == key for named_series in exp_cfg.timeseries.keys()):
-            cls = SERIES_CLASSES.get(exp_cfg.timeseries[key]["nwb_type"])
-            params = dict(exp_cfg.timeseries[key]["nwb_params"])
-            if exp_cfg.timeseries[key]["nwb_type"] == 'ElectricalSeries':
-                params['electrodes'] = nwb_file.create_electrode_table_region(
-                    region=list(range(exp_cfg.num_channels),),
-                    description = exp_cfg.electrode_group.description
-                )
-            data_ts = cls(
-                data=H5DataIO(time_series_dict[key],
-                              compression=exp_cfg.compression.type,
-                              compression_opts=exp_cfg.compression.options),
-                              timestamps = times,
-                              **params)
-            modules[exp_cfg.timeseries[key]["module"]].add(data_ts)
+            if exp_cfg.timeseries[key]["nwb_type"] == "MultiFeature":
+                for i in np.arange(exp_cfg.timeseries[key]["num_features"]):
+                    data = time_series_dict[key][:,i*exp_cfg.num_channels:i*exp_cfg.num_channels + exp_cfg.num_channels]
+                    feature = exp_cfg.timeseries[key][f"feat{i}"]
+                    data_ts = create_ts(data, feature)
+                    modules[exp_cfg.timeseries[key]["module"]].add(data_ts)
+            else:
+                data_ts = create_ts(time_series_dict[key], exp_cfg.timeseries[key])
+                modules[exp_cfg.timeseries[key]["module"]].add(data_ts)
         elif key == exp_cfg.reference_time:
             continue
         else:

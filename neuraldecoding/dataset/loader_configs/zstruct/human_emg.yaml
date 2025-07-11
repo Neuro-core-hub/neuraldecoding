@@ -2,7 +2,7 @@ save: True
 compression:
   type: "gzip"
   options: 4
-num_channels: 32
+num_channels: 16
 institution: "University of Michigan"
 lab: "Chestek Lab"
 reference_time: "ExperimentTime"
@@ -52,12 +52,39 @@ timeseries:
       unit: "AU"
   EMGFeats:
     module: ecephys
-    nwb_type: ElectricalSeries
-    nwb_params:
-      name: "emg"
-      description: "MAV, downsampled to 1kHz"
-      conversion: 2.5e-7
-      filtering: "typically 100-500Hz BP + 60 Hz Notch"
+    nwb_type: MultiFeature
+    num_features: 5
+    feat0:
+      nwb_type: ElectricalSeries
+      nwb_params:
+        name: "MAV"
+        description: "MAV, downsampled to 1kHz"
+        conversion: 2.5e-7
+        filtering: "typically 100-500Hz BP + 60 Hz Notch"
+    feat1:
+      nwb_type: TimeSeries
+      nwb_params:
+        name: "zero_crossings"
+        description: "zero crossings"
+        unit: "# of crossings"
+    feat2:
+      nwb_type: TimeSeries
+      nwb_params:
+        name: "sign_changes"
+        description: "sign changes"
+        unit: "AU"
+    feat3:
+      nwb_type: TimeSeries
+      nwb_params:
+        name: "line_length"
+        description: "line length"
+        unit: "AU"
+    feat4:
+      nwb_type: TimeSeries
+      nwb_params:
+        name: "spike_rate"
+        description: "spike rate, usually not reliable"
+        unit: "AU"
   DecodeNum:
     module: behavior
     nwb_type: TimeSeries
@@ -68,4 +95,3 @@ timeseries:
 units: # needed for code to run smoothly, but doesn't actually contain anything (in this case does not exist)
   field: 'Channel'
   has_spikes: False
-  
