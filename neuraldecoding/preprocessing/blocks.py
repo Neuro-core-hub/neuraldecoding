@@ -1,6 +1,7 @@
 import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
 import neuraldecoding.dataaugmentation.DataAugmentation
+from neuraldecoding.dataaugmentation import SequenceScaler
 
 import sklearn.preprocessing
 
@@ -333,6 +334,26 @@ class NormalizationBlock(DataProcessingBlock):
 																				   method = self.normalizer_method,
 																				   **p)
 		return data, interpipe
+
+class UpdateNormalizationBlock(DataProcessingBlock):
+	def __init__(self, location, method, normalizer_params):
+		super().__init__()
+		self.location = location
+		self.normalizer_method = method
+		self.normalizer_params = normalizer_params
+	def transform(self, data, interpipe):
+		if self.normalizer_method == 'sklearn':
+			normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])(**self.normalizer_params['params'])
+			normalizer.fit(data[self.location[0]])
+			data[self.location[1]] = normalizer.transform(data[self.location[1]])
+		elif self.normalizer_method == 'sequence_scaler':
+			normalizer = SequenceScaler(**self.normalizer_params['params'])
+			normalizer.fit(data[self.location[0]])
+			data[self.location[1]] = normalizer.transform(data[self.location[1]])
+		else:
+			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
+		return data, interpipe
+
 
 class EnforceTensorBlock(DataProcessingBlock):
 	"""
