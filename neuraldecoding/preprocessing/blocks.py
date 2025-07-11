@@ -334,11 +334,6 @@ class NormalizationBlock(DataProcessingBlock):
 			data[loc], normalizer = neuraldecoding.dataaugmentation.DataAugmentation.normalize(data[loc],
 																				   method = self.normalizer_method,
 																				   **p)
-		if self.normalizer_params['is_save']:
-			if 'save_path' not in self.normalizer_params:
-				raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
-			with open(self.normalizer_params['save_path'], 'wb') as f:
-				pickle.dump(normalizer, f)
 		return data, interpipe
 
 class UpdateNormalizationBlock(DataProcessingBlock):
@@ -350,14 +345,19 @@ class UpdateNormalizationBlock(DataProcessingBlock):
 	def transform(self, data, interpipe):
 		if self.normalizer_method == 'sklearn':
 			normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])(**self.normalizer_params['params'])
-			normalizer.fit(data[self.location[0]])
+			data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
 			data[self.location[1]] = normalizer.transform(data[self.location[1]])
 		elif self.normalizer_method == 'sequence_scaler':
 			normalizer = SequenceScaler()
-			normalizer.fit(data[self.location[0]])
+			data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
 			data[self.location[1]] = normalizer.transform(data[self.location[1]])
 		else:
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
+		if self.normalizer_params['is_save']:
+			if 'save_path' not in self.normalizer_params:
+				raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
+			with open(self.normalizer_params['save_path'], 'wb') as f:
+				pickle.dump(normalizer, f)
 		return data, interpipe
 
 class LoadNormalizationBlock(DataProcessingBlock):
