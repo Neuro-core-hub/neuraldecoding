@@ -279,7 +279,7 @@ class AddHistoryBlock(DataProcessingBlock):
 
 	def transform(self, data, interpipe):
 		"""
-		Transform the data by adding history to the specified locations.
+		Transform the data by adding history to the specified locations of datastream.
 		Args:
 			data (dict): Input data dictionary containing the data to which history is added.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
