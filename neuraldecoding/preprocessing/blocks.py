@@ -2,6 +2,7 @@ import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
 import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
+from neuraldecoding.feature_extraction import FeatureExtractor
 
 import sklearn.preprocessing
 
@@ -403,4 +404,17 @@ class EnforceTensorBlock(DataProcessingBlock):
 				data[key] = data[key].to(self.device, dtype=self.dtype)
 			else:
 				data[key] = torch.tensor(data[key], device=self.device, dtype=self.dtype)
+		return data, interpipe
+
+class FeatureExtractionBlock(DataProcessingBlock):
+	def __init__(self, location, feature_extractor_config):
+		super().__init__()
+		self.location = location
+		self.feature_extractor = FeatureExtractor(feature_extractor_config)
+
+	def transform(self, data, interpipe):
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('timestamps_ms', None))
 		return data, interpipe
