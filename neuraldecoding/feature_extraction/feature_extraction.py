@@ -33,15 +33,6 @@ class FeatureExtractor:
         self.channels = config.get('channels', 1)
         self.expected_rate_hz = config.get('expected_rate_hz', 1000)
         
-        # Pre-compute for performance
-        self.bin_size_sec = self.bin_size_ms / 1000.0
-        
-        # Pre-allocate working arrays for performance (generous sizing for bursts)
-        max_samples_per_bin = int(self.expected_rate_hz * self.bin_size_sec * 2.0)  # 2x buffer
-        
-        if self.channels > 0:
-            self.work_buffer = np.zeros((max_samples_per_bin, self.channels), dtype=np.float32)
-        
         # Validate configuration
         self._validate_config()
     
