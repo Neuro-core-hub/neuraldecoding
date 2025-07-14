@@ -3,169 +3,244 @@ from typing import Dict, List, Optional, Tuple, Union
 
 class FeatureExtractor:
     """
-    Class for extracting features from neural data.
+    Generic feature extractor for time-series data.
+    
+    This class processes batches of multi-dimensional data for time bins,
+    extracting features from each time window.
     
     Attributes:
-        feature_type: Type of feature to extract ('mav' for mean absolute value or 'power')
-        bin_size_ms: Size of the time bin in milliseconds (default: 50ms)
-        buffer: Buffer to store samples until a bin is complete
-        buffer_timestamps: List of timestamps corresponding to samples in the buffer
-        last_bin_end: Timestamp of the end of the last completed bin
+        bin_size_ms: Size of the time bin in milliseconds
+        feature_type: Type of feature to extract ('mav', 'power', 'mean', 'var', 'mean_and_vel')
+        channels: Expected number of dimensions/channels in the data
+        expected_rate_hz: Expected sampling rate in Hz
     """
     
-    def __init__(self, params: Dict):
+    def __init__(self, config: Dict):
         """
-        Initialize the feature extractor with parameters.
+        Initialize the feature extractor.
         
         Args:
-            params: Dictionary containing parameters for feature extraction
-                   - feature_type: 'mav' for mean absolute value or 'power'
-                   - bin_size_ms: Size of the time bin in milliseconds (default: 50ms)
+            config: Configuration dictionary with structure:
+                {
+                    "bin_size_ms": 50,
+                    "feature_type": "mav",  # 'mav', 'power', 'mean', 'var', 'mean_and_vel'
+                    "channels": 96,  # number of channels/features
+                    "expected_rate_hz": 1000
+                }
         """
-        self.feature_type = params.get('feature_type', 'mav')
-        self.bin_size_ms = params.get('bin_size_ms', 50)
+        self.bin_size_ms = config.get('bin_size_ms', 50)
+        self.feature_type = config.get('feature_type', 'mav')
+        self.channels = config.get('channels', 1)
+        self.expected_rate_hz = config.get('expected_rate_hz', 1000)
         
-        # Initialize buffer and time tracking
-        self.buffer = []
-        self.buffer_timestamps = []
-        self.last_bin_end = None
+        # Validate configuration
+        self._validate_config()
     
-    def extract_feature(self, samples: np.ndarray) -> np.ndarray:
+    def _validate_config(self):
+        """Validate the configuration parameters."""
+        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel']
+        
+        if self.feature_type not in valid_features:
+            raise ValueError(f"Invalid feature type: {self.feature_type}. Must be one of {valid_features}")
+        
+        if self.bin_size_ms <= 0:
+            raise ValueError("bin_size_ms must be positive")
+        
+        if self.channels <= 0:
+            raise ValueError("channels must be positive")
+    
+    def extract_binned_features(self,
+                               data: np.ndarray,
+                               timestamps_ms: np.ndarray) -> List[Dict]:
         """
-        Extract features from a complete bin of samples.
+        Extract features from timestamped data by dividing it into time bins.
         
         Args:
-            samples: Numpy array containing a complete bin of samples [samples, channels]
+            data: Data array of shape [n_samples, dimensions]
+            timestamps_ms: Timestamps for data of shape [n_samples]
             
         Returns:
-            Extracted features as a numpy array
+            List of feature dictionaries, one per bin
         """
-        if self.feature_type == 'mav':
-            # Mean Absolute Value (MAV)
-            return np.mean(np.abs(samples), axis=0)
-        elif self.feature_type == 'power':
-            # Power (mean of squared values)
-            return np.mean(np.square(samples), axis=0)
-        else:
-            raise ValueError(f"Unsupported feature type: {self.feature_type}")
-    
-    def apply(self, data: np.ndarray, timestamp: float) -> Optional[np.ndarray]:
-        """
-        Apply feature extraction to incoming data.
+        # Validate inputs
+        if data.shape[0] != timestamps_ms.shape[0]:
+            raise ValueError("Data and timestamps must have same number of samples")
         
-        Args:
-            data: Numpy array of shape [channels] containing samples for all channels
-            timestamp: Time value in milliseconds
+        if len(timestamps_ms) == 0:
+            return []
+        
+        # Determine time range
+        min_time = timestamps_ms.min()
+        max_time = timestamps_ms.max()
+        
+        # Create bins
+        bin_features = []
+        current_time = min_time
+        
+        while current_time <= max_time:
+            bin_start = current_time
+            bin_end = current_time + self.bin_size_ms
             
-        Returns:
-            Extracted features when a bin is complete, None otherwise
-        """
-        # Initialize last_bin_end if this is the first call
-        if self.last_bin_end is None:
-            self.last_bin_end = timestamp
-        
-        # Add data and timestamp to the buffer
-        self.buffer.append(data)
-        self.buffer_timestamps.append(timestamp)
-        
-        # Check if we have collected enough time for a complete bin
-        elapsed_time = timestamp - self.last_bin_end
-        
-        if elapsed_time >= self.bin_size_ms:
-            # Convert buffer to numpy array
-            bin_data = np.array(self.buffer)
+            # Extract samples for this bin
+            bin_mask = (timestamps_ms >= bin_start) & (timestamps_ms < bin_end)
             
-            # Extract features from the bin
-            features = self.extract_feature(bin_data)
+            if np.any(bin_mask):
+                bin_data = data[bin_mask]
+                
+                # Extract features for this bin
+                features = self.compute_bin_features(
+                    data=bin_data,
+                    bin_end_timestamp_ms=bin_end
+                )
+                
+                # Add bin timing information
+                if features is not None:
+                    features['bin_start_ms'] = bin_start
+                    features['bin_end_ms'] = bin_end
+                    features['bin_center_ms'] = (bin_start + bin_end) / 2.0
+                    bin_features.append(features)
             
-            # Update the last bin end time
-            self.last_bin_end = timestamp
-            
-            # Reset buffer
-            self.buffer = []
-            self.buffer_timestamps = []
-            
-            return features
+            current_time += self.bin_size_ms
         
-        return None
-    
-    def reset(self):
-        """Reset the internal state of the feature extractor."""
-        self.buffer = []
-        self.buffer_timestamps = []
-        self.last_bin_end = None
-        
-    def get_description(self) -> str:
-        """
-        Get a formatted description of the feature extractor for logging.
-        
-        Returns:
-            A string describing the feature extractor configuration
-        """
-        feature_name = {
-            'mav': 'Mean Absolute Value',
-            'power': 'Power'
-        }.get(self.feature_type, self.feature_type)
-        
-        return (f"FeatureExtractor: {feature_name} | "
-                f"Bin Size: {self.bin_size_ms}ms")
+        return bin_features
 
+    def compute_bin_features(self, 
+                            data: np.ndarray,
+                            bin_end_timestamp_ms: Optional[float] = None) -> Optional[Dict]:
+        """
+        Extract features from a single bin of data.
+        
+        Args:
+            data: Data array of shape [n_samples, dimensions] or [dimensions] for single sample
+            bin_end_timestamp_ms: Timestamp at the end of this bin (milliseconds)
+            
+        Returns:
+            Dictionary containing extracted features, or None if no data
+        """
+        if data is None or data.size == 0:
+            return None
+        
+        # Handle both single sample and multiple samples
+        if data.ndim == 1:
+            # Single sample case - reshape to [1, dimensions]
+            processed_data = data.reshape(1, -1)
+        else:
+            # Multiple samples case - use as is
+            processed_data = data
+        
+        # Throw warning if the number of channels is greater than the expected number of channels
+        if processed_data.shape[1] > self.channels:
+            self.logger.warning(f"Number of channels in data ({processed_data.shape[1]}) is greater than the expected number of channels ({self.channels})")
+            processed_data = processed_data[:, :self.channels]
+        
+        # Compute features
+        features_array = self._compute_features(processed_data, self.feature_type)
+        
+        # Create result dictionary
+        features = {
+            "features": features_array,
+            "sample_count": processed_data.shape[0],
+            "feature_type": self.feature_type,
+            "dimensions": processed_data.shape[1]
+        }
+        
+        # Add metadata
+        if bin_end_timestamp_ms is not None:
+            features['bin_end_timestamp_ms'] = bin_end_timestamp_ms
+            features['bin_start_timestamp_ms'] = bin_end_timestamp_ms - self.bin_size_ms
+        
+        return features
+    
+    def _compute_features(self, data: np.ndarray, feature_type: str) -> np.ndarray:
+        """
+        Compute features from data using vectorized operations.
+        
+        Args:
+            data: Input data of shape [samples, channels]
+            feature_type: Type of feature to compute
+            
+        Returns:
+            Feature array of shape [channels] or [2*channels] for mean_and_vel
+        """
+        if data.shape[0] == 0:
+            return np.zeros(data.shape[1], dtype=np.float32)
+        
+        if feature_type == 'mav':
+            # Mean Absolute Value
+            return np.mean(np.abs(data), axis=0)
+        elif feature_type == 'power':
+            # Power (mean of squared values)
+            return np.mean(np.square(data), axis=0)
+        elif feature_type == 'mean':
+            # Arithmetic mean
+            return np.mean(data, axis=0)
+        elif feature_type == 'var':
+            # Variance
+            return np.var(data, axis=0)
+        elif feature_type == "mean_and_vel":
+            # Mean and velocity
+            mean_pos = np.mean(data, axis=0)
+            vel = np.diff(data, axis=0).mean(axis=0) if data.shape[0] > 1 else np.zeros(data.shape[1])
+            return np.concatenate((mean_pos, vel))
+        else:
+            raise ValueError(f"Unsupported feature type: {feature_type}")
+    
 
 # Example usage
 if __name__ == "__main__":
-    # Create a feature extractor for MAV with a 100ms bin size
-    feature_params = {
+    # Test basic configuration
+    config = {
+        'bin_size_ms': 100,
         'feature_type': 'mav',
-        'bin_size_ms': 100
+        'channels': 3,
+        'expected_rate_hz': 1000
     }
-    extractor = FeatureExtractor(feature_params)
     
-    # Print the extractor description
-    print(extractor.get_description())
+    extractor = FeatureExtractor(config)
     
-    # Simulate incoming neural data (3 channels)
-    # In a real application, this would come from a neural recording device
+    # Simulate data batch
     np.random.seed(42)
+    data_batch = np.random.randn(10, 3)  # 10 samples, 3 dimensions
     
-    # Process 500ms of data with samples every 10ms
-    features_list = []
-    for i in range(50):
-        # Generate random neural data with 3 channels
-        timestamp = i * 10  # Timestamp in ms
-        neural_data = np.random.randn(3)  # 3 channels of neural data
+    features = extractor.compute_bin_features(
+        data=data_batch,
+        bin_end_timestamp_ms=100.0
+    )
+    
+    print(f"Single bin features: {features}")
+    
+    # Test timestamped data processing
+    print("\n--- Testing timestamped data processing ---")
+    
+    # Create timestamped data (1000 Hz)
+    timestamps = np.arange(0, 500, 1)  # 0-500ms, 1ms intervals
+    data = np.random.randn(len(timestamps), 4)  # 4 dimensions
+    
+    # Update config for 4 dimensions
+    config['channels'] = 4
+    extractor = FeatureExtractor(config)
+    
+    # Extract features per bin
+    bin_features = extractor.extract_binned_features(
+        data=data,
+        timestamps_ms=timestamps
+    )
+    
+    print(f"Number of bins created: {len(bin_features)}")
+    print(f"First bin features: {bin_features[0] if bin_features else 'No bins created'}")
+    print(f"Last bin features: {bin_features[-1] if bin_features else 'No bins created'}")
+    
+    # Test different feature types
+    print("\n--- Testing different feature types ---")
+    feature_types = ['mav', 'power', 'mean', 'var', 'mean_and_vel']
+    
+    for ft in feature_types:
+        config['feature_type'] = ft
+        extractor = FeatureExtractor(config)
         
-        # Apply feature extraction
-        features = extractor.apply(neural_data, timestamp)
+        features = extractor.compute_bin_features(
+            data=data_batch,
+            bin_end_timestamp_ms=100.0
+        )
         
-        # If features were extracted (a bin was completed), print them
-        if features is not None:
-            print(f"Time: {timestamp}ms, Features: {features}")
-            features_list.append(features)
-    
-    # Print the number of feature vectors extracted
-    print(f"\nTotal number of feature vectors: {len(features_list)}")
-    
-    # Create a feature extractor for power with a 50ms bin size
-    power_params = {
-        'feature_type': 'power',
-        'bin_size_ms': 50
-    }
-    power_extractor = FeatureExtractor(power_params)
-    
-    # Print the power extractor description
-    print(power_extractor.get_description())
-    
-    # Reset feature list
-    features_list = []
-    
-    # Process the same data using power features
-    for i in range(50):
-        timestamp = i * 10
-        neural_data = np.random.randn(3)
-        
-        features = power_extractor.apply(neural_data, timestamp)
-        if features is not None:
-            print(f"Time: {timestamp}ms, Power Features: {features}")
-            features_list.append(features)
-    
-    print(f"\nTotal number of power feature vectors: {len(features_list)}")
+        print(f"{ft} features shape: {features['features'].shape}")
