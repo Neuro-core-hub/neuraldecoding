@@ -1,3 +1,0 @@
-defaults:
-  - decoder/testLinearDecoder
-  - _self_
