@@ -1,0 +1,3 @@
+type: "LinearRegression" # Names defined in model module
+params:
+  fit_intercept: True # arbitrary parameters feeding into the model

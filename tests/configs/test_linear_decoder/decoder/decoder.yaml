@@ -1,0 +1,4 @@
+defaults:
+  - /model: model
+
+fpath: "tests/decoder/models/linear_regression_model.pkl" # directory to saved model

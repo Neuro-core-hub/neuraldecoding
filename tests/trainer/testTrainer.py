@@ -12,7 +12,7 @@ from hydra import initialize, compose
 
 def load_config():
     """Loads the Hydra configuration file (train.yaml)."""
-    cfg_path = os.path.join("..","..","configs","test_new_trainer")
+    cfg_path = os.path.join("..","configs","test_new_trainer")
 
     with initialize(version_base=None, config_path=cfg_path):
         config = compose("config")

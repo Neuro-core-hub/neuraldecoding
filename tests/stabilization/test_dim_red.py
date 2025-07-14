@@ -1,6 +1,8 @@
 from sklearn.decomposition import FactorAnalysis, PCA
 import numpy as np
-from ..stabilization.latent_space_alignment import dim_red
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+from neuraldecoding.stabilization.latent_space_alignment import dim_red
 
 def test_factor_analysis():
     ## TODO: change ds to actual dataset
