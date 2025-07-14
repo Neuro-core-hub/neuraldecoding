@@ -39,10 +39,10 @@ class Preprocessing:
             current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data)
         return current_data
 
-    def preprocess_step(self, data, step_name, inter_pipeline_data = {}, params = {'is_train': True}):
+    def preprocess_step(self, data, step_name, inter_pipeline_data = {'is_train': True}):
         for step in self.pipeline:
             if step['name'] == step_name:
                 step_instance = step['instance']
-                return step_instance.transform(data, inter_pipeline_data, **params)
+                return step_instance.transform(data, inter_pipeline_data)
         
         raise ValueError(f"Step '{step_name}' not found in preprocessing pipeline")
