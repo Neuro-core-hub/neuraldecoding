@@ -85,7 +85,7 @@ class NoDimRed(LoadingMatrixDimRed):
     def calc_lm(self, data):
         return np.eye(data.shape[1]), None
     
-    def reduce(self, data, lm, args):
+    def reduce(self, data, lm, args = None):
         return data
  
 # class ProSVD(DimRed):   
