@@ -1,6 +1,0 @@
-behavior_field: "FingerAnglesTIMRL"
-signal_field: "EMGFeats"
-experiment_time_field: "ExperimentTime"
-spikes_exist: false
-spikes_field: null
-num_channels: 16
