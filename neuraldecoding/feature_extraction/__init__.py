@@ -1,3 +1,3 @@
-from neuraldecoding.feature_extraction.feature_extraction import MultiModalFeatureExtractor
+from neuraldecoding.feature_extraction.feature_extraction import FeatureExtractor
 
-__all__ = ['MultiModalFeatureExtractor'] 
+__all__ = ['FeatureExtractor'] 
