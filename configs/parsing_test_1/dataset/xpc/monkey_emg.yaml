@@ -1,6 +1,0 @@
-behavior_field: "FingerAnglesTIMRL"
-signal_field: "NeuralFeature"
-experiment_time_field: "ExperimentTime"
-spikes_exist: false
-spikes_field: "Channel"
-num_channels: 16
