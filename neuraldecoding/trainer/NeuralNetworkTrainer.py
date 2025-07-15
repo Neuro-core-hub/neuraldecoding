@@ -93,7 +93,7 @@ class NNTrainer(Trainer):
             train_all_predictions = []
             train_all_targets = []
             for x,y in self.train_loader:
-                x = neuraldecoding.utils.add_training_noise(x, 0.1, 0,2, device='cuda') #bad practice! just for validation for now
+                x = neuraldecoding.utils.add_training_noise(x, 0.1, 0.2, device='cuda') #bad practice! just for validation for now
                 self.optimizer.zero_grad()
 
                 loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
