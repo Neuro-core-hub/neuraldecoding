@@ -338,9 +338,6 @@ class AddNoiseBlock(DataProcessingBlock):
 			biases = torch.normal(torch.zeros((x.shape[0], 1, 1)), bias_allchans_neural_std).repeat(1, x.shape[1], x.shape[2])
 			x = x + biases.to(device=device)
 
-		# Transpose back to [batch_size x seq_len x num_chans]
-		x = x.transpose(1, 2)
-		
 		return x
 
 	def transform(self, data, interpipe):
