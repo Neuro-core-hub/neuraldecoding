@@ -295,6 +295,76 @@ class AddHistoryBlock(DataProcessingBlock):
 
 		return data, interpipe
 
+class AddNoiseBlock(DataProcessingBlock):
+	def __init__(self, location, noise_params):
+		super().__init__()
+		self.location = location
+		self.noise_params = noise_params
+
+	def add_training_noise(self, x,
+                       bias_neural_std=None,
+                       noise_neural_std=None,
+                       noise_neural_walk_std=None,
+                       bias_allchans_neural_std=None,
+                       device='cpu'):
+		"""Function to add different types of noise to training input data to make models more robust.
+		Identical to the methods in Willet 2021.
+		Args:
+			x (tensor):                     neural data of shape [batch_size x seq_len x num_chans]
+			bias_neural_std (float):        std of bias noise
+			noise_neural_std (float):       std of white noise
+			noise_neural_walk_std (float):  std of random walk noise
+			bias_allchans_neural_std (float): std of bias noise, bias is same across all channels
+			device (device):                torch device (cpu or cuda)
+		"""
+		# Transpose x to [batch_size x num_chans x seq_len] to match original function's expectation
+		x = x.transpose(1, 2)
+		
+		if bias_neural_std:
+			# bias is constant across time (i.e. the 3 conv inputs), but different for each channel & batch
+			biases = torch.normal(torch.zeros(x.shape[:2]), bias_neural_std).unsqueeze(2).repeat(1, 1, x.shape[2])
+			x = x + biases.to(device=device)
+
+		if noise_neural_std:
+			# adds white noise to each channel and timepoint (independent)
+			noise = torch.normal(torch.zeros_like(x), noise_neural_std)
+			x = x + noise.to(device=device)
+
+		if noise_neural_walk_std:
+			# adds a random walk to each channel (noise is summed across time)
+			noise = torch.normal(torch.zeros_like(x), noise_neural_walk_std).cumsum(dim=2)
+			x = x + noise.to(device=device)
+
+		if bias_allchans_neural_std:
+			# bias is constant across time (i.e. the 3 conv inputs), and same for each channel
+			biases = torch.normal(torch.zeros((x.shape[0], 1, 1)), bias_allchans_neural_std).repeat(1, x.shape[1], x.shape[2])
+			x = x + biases.to(device=device)
+
+		# Transpose back to [batch_size x seq_len x num_chans]
+		x = x.transpose(1, 2)
+		
+		return x
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding noise to the specified locations.
+		Args:
+			data (dict): Input data dictionary containing the data to which noise is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with noise added at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+
+		for loc in self.location:
+			data[loc] = self.add_training_noise(data[loc], **self.noise_params)
+
+		return data, interpipe
+
+
+
 class NormalizationBlock(DataProcessingBlock):
 	"""
 	A block for normalizing data using specified methods.
