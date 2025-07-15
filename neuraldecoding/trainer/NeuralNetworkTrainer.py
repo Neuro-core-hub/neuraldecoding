@@ -185,14 +185,18 @@ class NNTrainer(Trainer):
 
                 # Validate
                 self.model.eval()
+                total_loss = 0.0
+                num_batches = 0
                 with torch.no_grad():
                     for x_val, y_val in self.valid_loader:
                         x_val = x_val.to(self.device)
                         y_val = y_val.to(self.device)
                         yhat_val = self.model(x_val)
                         val_loss = self.loss_func(yhat_val, y_val)
+                        total_loss += val_loss.item()
+                        num_batches += 1
 
-                print(f"Epoch {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}")
+                print(f"Epoch {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {(total_loss / num_batches).item():.4f}")
 
                 # Scheduler step
                 if self.scheduler:
