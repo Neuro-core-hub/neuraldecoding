@@ -86,13 +86,17 @@ class NNTrainer(Trainer):
         if(valid_loader is not None):
             self.valid_loader = valid_loader
 
-        for epoch in range(self.num_epochs):
+        #for epoch in range(self.num_epochs):
+        iteration = 0
+        while iteration < self.num_epochs:
             # Train
             self.model.train()
             running_loss = 0.0
             train_all_predictions = []
             train_all_targets = []
             for x,y in self.train_loader:
+                if iteration >= self.num_epochs:
+                    break
                 self.optimizer.zero_grad()
 
                 loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
@@ -148,13 +152,21 @@ class NNTrainer(Trainer):
                     self.scheduler.step()
 
             # Print progress
-            if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
-                print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            # if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
+            #     print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            #     for metric in self.logger:
+            #         train_metric = self.logger[metric][0][-1]
+            #         val_metric = self.logger[metric][1][-1]
+            #         print(f"    {metric:>12}{': train = ':>12}{train_metric}")
+            #         print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+            if self.print_results and (iteration % self.print_every == 0 or iteration == self.num_epochs - 1):
+                print(f"Epoch {iteration}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
                 for metric in self.logger:
                     train_metric = self.logger[metric][0][-1]
                     val_metric = self.logger[metric][1][-1]
                     print(f"    {metric:>12}{': train = ':>12}{train_metric}")
                     print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+            iteration += 1
 
         return self.model, self.logger
 
