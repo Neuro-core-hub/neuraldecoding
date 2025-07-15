@@ -242,7 +242,7 @@ def add_hist(X, Y, hist=10):
     adjX = adjX.reshape(adjX.shape[0],-1)
     return adjX, adjY
 
-def add_training_noise(self, x,
+def add_training_noise(x,
                        bias_neural_std=None,
                        noise_neural_std=None,
                        noise_neural_walk_std=None,
