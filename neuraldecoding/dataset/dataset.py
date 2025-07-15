@@ -64,6 +64,13 @@ class Dataset:
         Currently a placeholder for future implementation.
         """
         pass
+    
+    def _load_data_nwb(self):
+        """
+        Load data from NWB file
+
+        """
+        pass
 
     def _load_data_zstruct(self):
         """
@@ -91,18 +98,25 @@ class Dataset:
         #     # TODO: Check if run is already saved as nwb file and if it is just load it
         #     if self.verbose:
         #         print(f"\t+ Loading run {run}")
+        # check is nwb file exists at location
+        dpars = self.dataset_parameters
+        nwb_exists = os.path.isfile(zstruct_loader.get_save_path(self.dataset_parameters))
+        if nwb_exists:
+            if dpars.overwrite:
+                print("NWB file exists but overwriting")
+                self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
+            else:
+                print("NWB file already exists, loading")
+                with NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters), mode="r") as io:
+                    self.dataset = io.read()
+                
+        else:
+            print("No existing NWB file, creating...")
+            self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
 
-        self.dataset = zstruct_loader.load_xpc_run(self.cfg.dataset_parameters)
-
-    def save_data(self, custom_path=None):
+    def save_data(self):
         """
         Save the dataset to an NWB file.
-
-        Parameters
-        ----------
-        custom_path : str, optional
-            Custom file path to save the NWB file. If None, a path will be generated
-            based on the dataset type.
 
         Raises
         ------
@@ -111,34 +125,17 @@ class Dataset:
         ValueError
             If no path can be determined
         """
-        path = custom_path if custom_path is not None else None
-        if path is None and self.cfg.dataset_type == "zstruct":
-            path = self._get_save_path_zstruct()
-        elif path is None and self.cfg.dataset_type == "nwb":
-            raise NotImplementedError("Saving NWB files is not implemented yet")
-        elif path is None:
-            raise ValueError("Path must be specified")
-
+        if self.cfg.save_path == None:
+            # if no custom location specified, save in default location according to dataset_type
+            if self.cfg.dataset_type == "zstruct":
+                path = zstruct_loader.get_save_path(self.dataset_parameters)
+                print(path)
+            elif self.cfg.dataset_type == "nwb":
+                raise NotImplementedError("Saving NWB files is not implemented yet")
+            else:
+                raise NotImplementedError("dataset type not implemented")
+        else:
+            path = self.cfg.save_path
         print(f"Saving NWB file to {path}...")
         with NWBHDF5IO(path, mode="w") as io:
             io.write(self.dataset)
-
-    def _get_save_path_zstruct(self):
-        """
-        Generate a file path for saving zstruct data as NWB.
-
-        Returns
-        -------
-        str
-            Full path to save the NWB file, including directory structure and filename
-            based on subject, date, and run information
-        """
-        # Create a string representation of the runs
-        runs_str = "_".join([f"Run-{run:03d}" for run in sorted(self.cfg.runs)])
-
-        return os.path.join(
-            self.server_dir,
-            self.cfg.subject,
-            self.cfg.date,
-            f"{self.cfg.subject}_{self.cfg.date}_{runs_str}.nwb",
-        )

@@ -727,18 +727,18 @@ def load_xpc_run(cfg):
     exp_cfg = OmegaConf.load(config_path)
 
     # TODO: loading multiple runs
-    if cfg.alt_filepath is not None:
+    if cfg.alt_filepath == None:
         data_path = os.path.join(cfg.server_dir, cfg.subject, cfg.date)
     else:
         data_path = os.path.join(cfg.alt_filepath)
 
-    print(f"Loading Run {cfg.runs} from {cfg.subject_id} on {cfg.date}")
+    print(f"Loading Run {cfg.run} from {cfg.subject_id} on {cfg.date}")
     # normalizing the path to be OS independent
     data_path = os.path.normpath(data_path)
-    run_path = os.path.join(data_path, f"Run-{cfg.runs:03d}")
+    run_path = os.path.join(data_path, f"Run-{cfg.run:03d}")
 
     # Initialize the NWB file
-    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.runs, exp_cfg)
+    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.run, exp_cfg)
 
     # Read in the binary files
     data_dict = read_xpc_data(run_path, exp_cfg)
@@ -755,3 +755,24 @@ def load_xpc_run(cfg):
     )
 
     return nwb_file
+
+def get_save_path(cfg):
+    """
+    Generate a file path for saving zstruct data as NWB.
+
+    Returns
+    -------
+    str
+        Full path to save the NWB file, including directory structure and filename
+        based on subject, date, and run information
+    """
+    # # Create a string representation of the runs
+    # runs_str = "_".join([f"Run-{run:03d}" for run in sorted(cfg.run)])\
+    runs_str = f"Run-{cfg.run:03d}"
+    return os.path.join(
+        cfg.server_dir,
+        cfg.subject,
+        cfg.date,
+        runs_str,
+        f"{cfg.subject}_{cfg.date}_{runs_str}.nwb",
+    )
