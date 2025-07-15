@@ -196,7 +196,7 @@ class NNTrainer(Trainer):
                         total_loss += val_loss.item()
                         num_batches += 1
 
-                print(f"Epoch {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {(total_loss / num_batches).item():.4f}")
+                print(f"Epoch {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {(total_loss / num_batches):.4f}")
 
                 # Scheduler step
                 if self.scheduler:
