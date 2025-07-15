@@ -357,6 +357,7 @@ class AddNoiseBlock(DataProcessingBlock):
 			self.location = [self.location]
 
 		for loc in self.location:
+			print(loc)
 			data[loc] = self.add_training_noise(data[loc], **self.noise_params)
 
 		return data, interpipe
