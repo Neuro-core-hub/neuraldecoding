@@ -317,7 +317,6 @@ class AddNoiseBlock(DataProcessingBlock):
 			bias_allchans_neural_std (float): std of bias noise, bias is same across all channels
 			device (device):                torch device (cpu or cuda)
 		"""
-		print(x.shape)
 		if bias_neural_std:
 			# bias is constant across time (i.e. the 3 conv inputs), but different for each channel & batch
 			biases = torch.normal(torch.zeros(x.shape[:2]), bias_neural_std).unsqueeze(2).repeat(1, 1, x.shape[2])
@@ -354,7 +353,6 @@ class AddNoiseBlock(DataProcessingBlock):
 			self.location = [self.location]
 
 		for loc in self.location:
-			print(loc)
 			data[loc] = self.add_training_noise(data[loc], **self.noise_params)
 
 		return data, interpipe
