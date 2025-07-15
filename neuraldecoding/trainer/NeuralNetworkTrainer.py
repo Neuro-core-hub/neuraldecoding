@@ -106,6 +106,7 @@ class NNTrainer(Trainer):
                 train_all_targets.append(y.detach().cpu().numpy())
                 if(self.clear_cache):
                     del y, yhat
+                iteration += 1
 
             train_all_predictions = np.concatenate(train_all_predictions, axis=0)
             train_all_targets = np.concatenate(train_all_targets, axis=0)
@@ -166,7 +167,7 @@ class NNTrainer(Trainer):
                     val_metric = self.logger[metric][1][-1]
                     print(f"    {metric:>12}{': train = ':>12}{train_metric}")
                     print(f"    {'':>12}{'  val = ':>12}{val_metric}")
-            iteration += 1
+            
 
         return self.model, self.logger
 
