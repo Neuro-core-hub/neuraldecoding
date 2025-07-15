@@ -79,7 +79,7 @@ class NNTrainer(Trainer):
         model = model_class(model_config.params)
         return model
 
-    def train_model(self, train_loader = None, valid_loader = None):
+    def train_model_archive(self, train_loader = None, valid_loader = None):
         # Override loaders if provided
         if(train_loader is not None):
             self.train_loader = train_loader
@@ -156,6 +156,49 @@ class NNTrainer(Trainer):
                     val_metric = self.logger[metric][1][-1]
                     print(f"    {metric:>12}{': train = ':>12}{train_metric}")
                     print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+
+        return self.model, self.logger
+    
+    def train_model(self, train_loader = None, valid_loader = None):
+        # Override loaders if provided
+        if(train_loader is not None):
+            self.train_loader = train_loader
+        if(valid_loader is not None):
+            self.valid_loader = valid_loader
+        iteration = 0
+
+        while iteration < self.num_epochs:
+            # Train
+            self.model.train()
+
+            for x,y in self.train_loader:
+                if iteration >= self.num_epochs:
+                    break
+                x = neuraldecoding.utils.add_training_noise(x, 0.2, 0.1, device='cuda') #bad practice! just for validation for now
+                self.optimizer.zero_grad()
+
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+
+                if(self.clear_cache):
+                    del y, yhat
+
+                # Validate
+                self.model.eval()
+                with torch.no_grad():
+                    for x_val, y_val in self.valid_loader:
+                        x_val = x_val.to(self.device)
+                        y_val = y_val.to(self.device)
+                        yhat_val = self.model(x_val)
+                        val_loss = self.loss_func(yhat_val, y_val)
+
+                print(f"Epoch {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {val_loss.item():.4f}")
+
+                # Scheduler step
+                if self.scheduler:
+                    if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        self.scheduler.step(val_loss)
+                    else:
+                        self.scheduler.step()
 
         return self.model, self.logger
 
