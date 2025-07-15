@@ -200,7 +200,7 @@ class NNTrainer(Trainer):
                         self.scheduler.step(val_loss)
                     else:
                         self.scheduler.step()
-
+                iteration += 1
         return self.model, self.logger
 
 
