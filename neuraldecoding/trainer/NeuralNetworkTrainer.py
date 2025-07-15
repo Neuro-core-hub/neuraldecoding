@@ -169,9 +169,10 @@ class NNTrainer(Trainer):
 
         while iteration < self.num_epochs:
             # Train
-            self.model.train()
+            
 
             for x,y in self.train_loader:
+                self.model.train()
                 if iteration >= self.num_epochs:
                     break
                 x = neuraldecoding.utils.add_training_noise(x, 0.2, 0.1, device='cuda') #bad practice! just for validation for now
