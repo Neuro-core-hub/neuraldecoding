@@ -221,6 +221,35 @@ class Dict2TupleBlock(DataFormattingBlock):
 			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
 		return data_out, interpipe
 
+class Dataset2DictBlock(DataFormattingBlock):
+	"""
+	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
+	Add 'trial_idx' to interpipe.
+	"""
+	def __init__(self):
+		"""
+		Initializes the Dict2DataDictBlock.
+		Args:
+			neural_type (str): Type of neural data to extract from the dictionary. Default is "sbp". Can be "sbp" or "tcfr"
+		"""
+		super().__init__()
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data from a dictionary to neural and finger data in dictionary format.
+		Args:
+			data (dict): Input dataset class.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data_out (dict): A dictionary containing 'neural' and 'finger' data.
+			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
+		"""
+		(neural, finger), time_stamps = (data.processing["ecephys"]["EMG"], data.processing["behavior"]["finger_angles"]), data.processing["behavior"]["timestamps"]
+		interpipe['time_stamps'] = time_stamps
+
+		data_out = {'neural': neural, 'finger': finger}
+		return data_out, interpipe
+
 # Wrappers that Modify Data
 class StabilizationBlock(DataProcessingBlock):
 	"""
@@ -416,5 +445,6 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		for loc in self.location:
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
-			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('timestamps_ms', None))
+			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('time_stamps', None))
 		return data, interpipe
+	
