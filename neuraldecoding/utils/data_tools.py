@@ -119,7 +119,16 @@ def data_split_direct(data_X, data_Y, ratio):
 def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     boundaries = np.concatenate([trial_idx, [len(x)]])
     n_trials = len(trial_idx)
-    
+    if seed<0:
+        n_samples = x.shape[0]
+        n_val = int(n_samples * (1.0-split_ratio))
+
+        # Take the last n_val samples for validation
+        train_neural_split = x[:-n_val]
+        train_kinematics_split = y[:-n_val]
+        val_neural = x[-n_val:]
+        val_kinematics = y[-n_val:]
+        return (train_neural_split, train_kinematics_split), (val_neural, val_kinematics)
     g = torch.Generator().manual_seed(seed)
     perm = torch.randperm(n_trials, generator=g)
     n_test = int(n_trials * (1.-split_ratio))
