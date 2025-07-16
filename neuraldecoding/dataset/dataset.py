@@ -30,6 +30,7 @@ class Dataset:
             identifier="",
             session_start_time=datetime.now(tzlocal()),
         )
+        self.io = None # Added file handle storage
 
         # if self.cfg.dataset_type == "zstruct":
         #     self._initialize_zstruct()
@@ -107,8 +108,8 @@ class Dataset:
                 self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
             else:
                 print("NWB file already exists, loading")
-                with NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters), mode="r") as io:
-                    self.dataset = io.read()
+                self.io = NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters), mode="r")
+                self.dataset = self.io.read()
                 
         else:
             print("No existing NWB file, creating...")
@@ -139,3 +140,17 @@ class Dataset:
         print(f"Saving NWB file to {path}...")
         with NWBHDF5IO(path, mode="w") as io:
             io.write(self.dataset)
+
+    def close(self):
+        """
+        Close the NWB file if it was opened.
+        """
+        if self.io:
+            self.io.close()
+            self.io = None
+
+    def __del__(self):
+        """
+        Ensure the NWB file is closed when the object is destroyed.
+        """
+        self.close()
