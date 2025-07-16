@@ -47,3 +47,23 @@ def is_collection(obj):
     Check if the object is a collection (list, tuple, or numpy array)
     """
     return isinstance(obj, (list, tuple, np.ndarray))
+
+def resolve_path(obj, path):
+    """
+    given a string that resembles a class structure, access the attribute from obj
+    ex: obj has attribute 'processing' that has attribute 'ecephys', path is 'processing.ecephys'
+    this function will return obj.processing.ecephys
+
+    Parameters:
+    obj: the object we would like to access
+    str: the path leading to the part of the object we'd like to access (not including the object itself)
+    """
+    for key in path.split('.'):
+        try:
+            obj = getattr(obj,key)
+        except AttributeError:
+            try:
+                obj = obj[key]
+            except (KeyError, TypeError):
+                raise ValueError(f"Cannot resolve path segment: {key}")
+    return obj
