@@ -12,7 +12,6 @@ class FeatureExtractor:
         bin_size_ms: Size of the time bin in milliseconds
         feature_type: Type of feature to extract ('mav', 'power', 'mean', 'var', 'mean_and_vel')
         channels: Expected number of dimensions/channels in the data
-        expected_rate_hz: Expected sampling rate in Hz
     """
     
     def __init__(self, config: Dict):
@@ -25,13 +24,11 @@ class FeatureExtractor:
                     "bin_size_ms": 50,
                     "feature_type": "mav",  # 'mav', 'power', 'mean', 'var', 'mean_and_vel'
                     "channels": 96,  # number of channels/features
-                    "expected_rate_hz": 1000
                 }
         """
         self.bin_size_ms = config.get('bin_size_ms', 50)
         self.feature_type = config.get('feature_type', 'mav')
         self.channels = config.get('channels', 1)
-        self.expected_rate_hz = config.get('expected_rate_hz', 1000)
         
         # Validate configuration
         self._validate_config()
@@ -193,7 +190,6 @@ if __name__ == "__main__":
         'bin_size_ms': 100,
         'feature_type': 'mav',
         'channels': 3,
-        'expected_rate_hz': 1000
     }
     
     extractor = FeatureExtractor(config)
