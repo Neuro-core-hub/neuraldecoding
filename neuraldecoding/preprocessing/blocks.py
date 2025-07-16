@@ -244,7 +244,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 			data_out (dict): A dictionary containing 'neural' and 'finger' data.
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
-		(neural, finger), time_stamps = (data.processing["ecephys"]["EMG"], data.processing["behavior"]["finger_angles"]), data.processing["behavior"]["timestamps"]
+		neural, finger = data.processing["ecephys"]["EMG"], data.processing["behavior"]["finger_angles"]
+		time_stamps = data.processing["behavior"]["timestamps"]
 		interpipe['time_stamps'] = time_stamps
 
 		data_out = {'neural': neural, 'finger': finger}
