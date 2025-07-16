@@ -16,7 +16,7 @@ class Dataset:
         ----------
         cfg: Configuration with the following keys (usually saved as a yaml file)
             dataset_type: str, specifies the type of dataset being loaded (and will use the corresponding loading functions)
-            autoload: book, specifies if the dataset should be automatically loaded when the dataset object is instantiated
+            autoload: bool, specifies if the dataset should be automatically loaded when the dataset object is instantiated
             save_path: str, filepath for where data should be saved (otherwise will send to a default location)
             dataset_parameters: config block, contains all the parameters needed for the dataset_type specified above.
         """
@@ -58,13 +58,6 @@ class Dataset:
             self.load_data_nwb()
         else:
             raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
-        
-    def _initialize_nwb(self):
-        """
-        Initialize dataset for NWB type data.
-        Currently a placeholder for future implementation.
-        """
-        pass
     
     def _load_data_nwb(self):
         """
