@@ -250,8 +250,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 		"""
 		#TODO: Implement trial filtering (have an apply trial filters feature)
 		
-		neural, finger = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
-		time_stamps = resolve_path(data.dataset, self.time_nwb_loc)
+		neural, finger = resolve_path(data.dataset, self.neural_nwb_loc)[:], resolve_path(data.dataset, self.behavior_nwb_loc)[:]
+		time_stamps = resolve_path(data.dataset, self.time_nwb_loc)[:]
 		
 		try:
 			assert(len(neural) == len(time_stamps) == len(finger))
