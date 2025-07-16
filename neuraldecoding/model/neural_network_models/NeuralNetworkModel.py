@@ -1,12 +1,16 @@
 from typing import Any
-from Model import Model
+from neuraldecoding.model.Model import Model
+import torch
+import numpy as np
 
 class NeuralNetworkModel(Model):
-
     def __call__(self, data: Any) -> Any:
         pass
 
-    def train_step(self, input_data: Any) -> None:
+    def _train_one_epoch(self, train_data, model, optimizer, loss_func, device):
+        pass
+    
+    def _validate_one_epoch(self, valid_data, model, loss_func, device):
         pass
 
     def forward(self, input: Any) -> Any:

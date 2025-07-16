@@ -1,0 +1,3 @@
+defaults:
+  - trainer/testTrainer
+  - _self_
