@@ -10,8 +10,8 @@ class Preprocessing:
         self.config = config
         self.pipeline = []
 
-        order = self.config['order']
-        content = self.config['content']
+        order = self.config.get('order', [])
+        content = self.config.get('content', {})
         
         for step_name in order:
             if step_name not in content:

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pickle
 import torch
@@ -75,6 +76,8 @@ class LDA(LinearModel):
         Args:
             filepath (str): Path to the file where the model will be saved.
         """
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'wb') as f:
             pickle.dump((self.model, self.Nfeats), f)
 

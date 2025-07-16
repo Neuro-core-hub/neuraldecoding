@@ -41,7 +41,7 @@ class Decoder(ABC):
         self.device = cfg["model"]["params"].get("device", "cpu")
 
         # Get model path
-        self.fpath = cfg["fpath"]
+        self.fpath = cfg["model"]["fpath"]
 
         # # Get model i/o shape
         # self.input_shape = cfg["model"]["params"]["input_size"]
