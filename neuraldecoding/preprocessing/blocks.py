@@ -2,7 +2,8 @@ import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
 import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
-
+from neuraldecoding.feature_extraction import FeatureExtractor
+from neuraldecoding.utils.utils_general import resolve_path
 import sklearn.preprocessing
 
 import torch
@@ -220,6 +221,52 @@ class Dict2TupleBlock(DataFormattingBlock):
 			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
 		return data_out, interpipe
 
+class Dataset2DictBlock(DataFormattingBlock):
+	"""
+	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
+	Add 'trial_idx' to interpipe.
+	"""
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, time_nwb_loc, apply_trial_filtering = True):
+		"""
+		Initializes the Dict2DataDictBlock.
+		Args:
+			neural_type (str): Type of neural data to extract from the dictionary. Default is "sbp". Can be "sbp" or "tcfr"
+		"""
+		self.neural_nwb_loc = neural_nwb_loc
+		self.behavior_nwb_loc = behavior_nwb_loc
+		self.time_nwb_loc = time_nwb_loc
+		self.apply_trial_filtering = apply_trial_filtering
+		super().__init__()
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data from a dictionary to neural and finger data in dictionary format.
+		Args:
+			data (dict): Input dataset class.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data_out (dict): A dictionary containing 'neural' and 'finger' data.
+			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
+		"""
+		#TODO: Implement trial filtering (have an apply trial filters feature)
+		
+		neural, finger = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
+		time_stamps = resolve_path(data.dataset, self.time_nwb_loc)
+		
+		try:
+			assert(len(neural) == len(time_stamps) == len(finger))
+		except:
+			ValueError("Dimension mismatch")
+	
+		if self.apply_trial_filtering:
+			UserWarning("Trial Filtering coming soon to a dataset near you")
+		
+		interpipe['time_stamps'] = time_stamps
+
+		data_out = {'neural': neural, 'finger': finger}
+		return data_out, interpipe
+
+
 # Wrappers that Modify Data
 class StabilizationBlock(DataProcessingBlock):
 	"""
@@ -404,3 +451,17 @@ class EnforceTensorBlock(DataProcessingBlock):
 			else:
 				data[key] = torch.tensor(data[key], device=self.device, dtype=self.dtype)
 		return data, interpipe
+
+class FeatureExtractionBlock(DataProcessingBlock):
+	def __init__(self, location, feature_extractor_config):
+		super().__init__()
+		self.location = location
+		self.feature_extractor = FeatureExtractor(feature_extractor_config)
+
+	def transform(self, data, interpipe):
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('time_stamps', None))
+		return data, interpipe
+	
