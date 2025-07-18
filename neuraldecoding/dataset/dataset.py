@@ -64,7 +64,8 @@ class Dataset:
         Load data from NWB file
 
         """
-        pass
+        self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
+        self.dataset = self.io.read()
 
     def _load_data_zstruct(self):
         """
