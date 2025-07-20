@@ -20,7 +20,7 @@ MODEL_REGISTRY = {
     "RidgeRegression": RidgeRegression,
     "LDA":LDA,
     "LSTM": LSTM,
-    "dummy": DummyModel
+    "DummyModel": DummyModel
     }
 
 STABILIZATION_REGISTRY = {
@@ -37,22 +37,14 @@ class Decoder(ABC):
         """
         # Get model stuff
         self.cfg = cfg
-        if self.cfg.model_type in MODEL_REGISTRY:
-            self.model = MODEL_REGISTRY[self.cfg.model_type](self.cfg.model_params)
+        if self.cfg['model']['type'] in MODEL_REGISTRY:
+            self.model = MODEL_REGISTRY[self.cfg['model']['type']](self.cfg['model']['params'])
         else:
-            raise ValueError(f"Model {cfg.model_type} either does not exist or is not registered in the model registry (in Decoder module).")
-        self.device = self.cfg.model_params.get("device", "cpu")
+            raise ValueError(f"Model {cfg['model']['type']} either does not exist or is not registered in the model registry (in Decoder module).")
+        self.device = self.cfg['model']['params'].get("device", "cpu")
 
         # Get model path
-        self.fpath = self.cfg.get('model_path')
-
-        # # Get model i/o shape
-        # self.input_shape = cfg["model"]["params"]["input_size"]
-        # self.output_shape = cfg["model"]["params"]["num_outputs"]
-
-        self.input_shape = 0
-        self.output_shape = 0
-
+        self.fpath = self.cfg['model']['fpath']
         # Load model from path
         self.load_model()
 
@@ -85,24 +77,6 @@ class Decoder(ABC):
         Predict outputs given neural data.
         """
         pass
-
-    def get_input_shape(self) -> np.ndarray:
-        """
-        Returns the input shape of the decoder's model.
-
-        Returns:
-            np.ndarray: Input shape of the model
-        """
-        return np.array(self.input_shape)
-
-    def get_output_shape(self) -> np.ndarray:
-        """
-        Returns the output shape of the decoder's model.
-
-        Returns:
-            np.ndarray: Output shape of the model
-        """
-        return np.array(self.output_shape)
     
 class LinearDecoder(Decoder):
     def __init__(self, cfg: dict) -> None:
@@ -129,11 +103,3 @@ class NeuralNetworkDecoder(Decoder):
             input = input.to(self.device)
             prediction = self.model(input)
         return prediction
-    
-class DummyDecoder(Decoder):
-    def __init__(self, cfg: dict) -> None:
-        super().__init__(cfg)
-
-    def predict(self, neural_data):
-        self.model(neural_data)
-    

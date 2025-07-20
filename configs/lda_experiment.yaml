@@ -1,0 +1,67 @@
+defaults:
+  - model/lda
+
+date: ${now:%Y-%m-%d}
+subject: Monkeys/Test
+subject_id: Test
+run: "001"
+# subject: Humans/RPNI/C-P2
+dataset:
+  dataset_type: nwb
+  autoload: True
+  save_path: null
+  dataset_parameters:
+    # nwb_file: ${oc.env:SERVER_PATH}/${subject}/${date}/Run-${run}/${subject_id}_${date}_Run-${run}.nwb
+    nwb_file: /mnt/z/Data/Monkeys/Test/2025-07-20/classification_example_session.nwb
+metrics:
+  - accuracy
+model:
+  fpath: ${oc.env:SERVER_PATH}/${subject}/${date}/lda_model.pkl
+  save: True
+
+
+preprocessing:
+  order:
+    - dataset2dict
+    - one_hot_to_class_number
+    # - index_selector_neural
+    - feature_extraction
+    - round_to_integer
+    - split_data
+  content:
+    dataset2dict:
+      type: Dataset2DictBlock
+      params:
+        neural_nwb_loc: "acquisition.neural_series"
+        behavior_nwb_loc: "acquisition.pattern_detection_series"
+
+    one_hot_to_class_number:
+      type: OneHotToClassNumberBlock
+      params:
+        location: ["behavior"]
+    # index_selector_neural:
+    #   type: IndexSelectorBlock
+    #   params:
+    #     location: ["neural"]
+    #     indices: ${range:0,8}
+    feature_extraction:
+      type: FeatureExtractionBlock
+      params:
+        location_data: ["neural","behavior"]
+        location_ts: ["neural_ts","behavior_ts"]
+        feature_extractor_config:
+          channels: 8
+          feature_type: [["mav","history"],["mean"]]
+          feature_params: [{'hist': 15}, {}]
+          bin_size_ms: 32
+    round_to_integer:
+      type: RoundToIntegerBlock
+      params:
+        location: ["behavior"]
+    split_data:
+      type: DataSplitBlock
+      params:
+        location: ["neural","behavior"]
+        split_ratio: 0.75
+        split_seed: 42
+        shuffle: true
