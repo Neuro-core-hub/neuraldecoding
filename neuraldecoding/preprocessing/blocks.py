@@ -279,7 +279,7 @@ class IndexSelectorBlock(DataFormattingBlock):
 	"""
 	A block for selecting data from a dictionary based on indices.
 	"""
-	def __init__(self, location: list[str], indices: Union[int, list]):
+	def __init__(self, location: List[str], indices: Union[int, list]):
 		super().__init__()
 		self.location = location
 		self.indices = indices
