@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 
 import time
 import pickle
+from typing import Union, List
+import numpy as np
 
 class PreprocessingBlock(ABC):
 	"""
@@ -144,51 +146,64 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 
 class DataSplitBlock(DataFormattingBlock):
 	"""
-	A block for splitting data into training and testing sets based on trial indices.
-	Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx'.
-	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
+	A block for splitting data into training and testing sets using sklearn's train_test_split.
+	Splits multiple data arrays using the same train/test indices.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42):
+	def __init__(self, location: List[str] = ['neural', 'finger'], 
+				 split_ratio: float = 0.8, split_seed: int = 42, shuffle: bool = True):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
+			location (List[str]): List of keys for data arrays in the data dictionary. Default is ['neural', 'finger'].
 			split_ratio (float): The ratio of training data to total data. Default is 0.8.
 			split_seed (int): Seed for random number generator to ensure reproducibility. Default is 42.
+			shuffle (bool): Whether to shuffle the data before splitting. Default is True.
 		"""
 		super().__init__()
+		self.location = location
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
+		self.shuffle = shuffle
 
 	def transform(self, data, interpipe):
 		"""
-		Transform the data by splitting it into training and testing sets based on trial indices.
-		Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx'.
-		It uses `neuraldecoding.utils.data_split_trial` to perform the split.
+		Transform the data by splitting it into training and testing sets using sklearn's train_test_split.
+		All data arrays are split using the same train/test indices.
 		Args:
-			data (dict): Input data dictionary containing 'neural' and 'finger' keys.
+			data (dict): Input data dictionary containing the specified data keys.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
 			data_out (dict): A dictionary containing:
-				- 'neural_train': Training neural data
-				- 'neural_test': Testing neural data
-				- 'finger_train': Training finger data
-				- 'finger_test': Testing finger data
+				- '{key}_train': Training data for each key
+				- '{key}_test': Testing data for each key
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		if 'trial_idx' not in interpipe:
-			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataBlock).")
-
-		split_data = neuraldecoding.utils.data_split_trial(data['neural'], 
-														   data['finger'], 
-														   interpipe['trial_idx'], 
-														   split_ratio=self.split_ratio, 
-														   seed=self.split_seed)
+		from sklearn.model_selection import train_test_split
 		
-		(neural_train, finger_train), (neural_test, finger_test) = split_data
-		data_out = {'neural_train': neural_train, 
-					'neural_test': neural_test, 
-					'finger_train': finger_train, 
-					'finger_test': finger_test}
+		# Validate that all required keys exist
+		for key in self.location:
+			if key not in data:
+				raise ValueError(f"DataSplitBlock requires '{key}' key in data dictionary.")
+		
+		# Collect all data arrays
+		data_arrays = [data[key] for key in self.location]
+		
+		# Split all arrays using the same indices
+		split_results = train_test_split(
+			*data_arrays,
+			train_size=self.split_ratio,
+			random_state=self.split_seed,
+			shuffle=self.shuffle
+		)
+		
+		# Organize results into train/test pairs
+		data_out = {}
+		for i, key in enumerate(self.location):
+			train_idx = i * 2
+			test_idx = i * 2 + 1
+			data_out[f'{key}_train'] = split_results[train_idx]
+			data_out[f'{key}_test'] = split_results[test_idx]
+		
 		return data_out, interpipe
 
 class Dict2TupleBlock(DataFormattingBlock):
@@ -226,15 +241,16 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, time_nwb_loc, apply_trial_filtering = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True):
 		"""
-		Initializes the Dict2DataDictBlock.
+		Initializes the Dataset2DictBlock.
 		Args:
-			neural_type (str): Type of neural data to extract from the dictionary. Default is "sbp". Can be "sbp" or "tcfr"
+			neural_nwb_loc (str): Location path for neural data in the NWB file.
+			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
+			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
 		"""
 		self.neural_nwb_loc = neural_nwb_loc
 		self.behavior_nwb_loc = behavior_nwb_loc
-		self.time_nwb_loc = time_nwb_loc
 		self.apply_trial_filtering = apply_trial_filtering
 		super().__init__()
 
@@ -249,23 +265,72 @@ class Dataset2DictBlock(DataFormattingBlock):
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
 		#TODO: Implement trial filtering (have an apply trial filters feature)
-		
-		neural, finger = resolve_path(data.dataset, self.neural_nwb_loc)[:], resolve_path(data.dataset, self.behavior_nwb_loc)[:]
-		time_stamps = resolve_path(data.dataset, self.time_nwb_loc)[:]
-		
-		try:
-			assert(len(neural) == len(time_stamps) == len(finger))
-		except:
-			ValueError("Dimension mismatch")
-	
+		neural_nwb, behavior_nwb = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
+		neural, behavior = neural_nwb.data[:], behavior_nwb.data[:]
+		# Convert timestamps to milliseconds
+		neural_ts, behavior_ts = neural_nwb.timestamps[:] * 1000, behavior_nwb.timestamps[:] * 1000
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
-		
-		interpipe['time_stamps'] = time_stamps
 
-		data_out = {'neural': neural, 'finger': finger}
+		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behavior, 'behavior_ts': behavior_ts}
 		return data_out, interpipe
 
+class IndexSelectorBlock(DataFormattingBlock):
+	"""
+	A block for selecting data from a dictionary based on indices.
+	"""
+	def __init__(self, location: list[str], indices: Union[int, list]):
+		super().__init__()
+		self.location = location
+		self.indices = indices
+
+	def transform(self, data, interpipe):
+		data_out = data.copy()
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			# Convert data to numpy array if not already
+			if not isinstance(data[loc], np.ndarray):
+				data[loc] = np.array(data[loc])
+			if data[loc].ndim == 1:
+				# For 1D data, select indices directly
+				data_out[loc] = data[loc][self.indices]
+			elif data[loc].ndim == 2:
+				# For 2D data, select indices from the second dimension
+				data_out[loc] = data[loc][:, self.indices]
+			else:
+				raise ValueError(f"Data at location '{loc}' must be 1D or 2D, got {data[loc].ndim}D")
+		return data_out, interpipe
+
+class OneHotToClassNumberBlock(DataFormattingBlock):
+	"""
+	A block for converting one-hot encoded data to class numbers.
+	"""
+	def __init__(self, location):
+		super().__init__()
+		self.location = location
+	def transform(self, data, interpipe):
+		data_out = data.copy()
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			data_out[loc] = np.argmax(data[loc], axis=1)
+		return data_out, interpipe
+
+class RoundToIntegerBlock(DataFormattingBlock):
+	"""
+	A block for rounding data to integers.
+	"""
+	def __init__(self, location):
+		super().__init__()
+		self.location = location
+	def transform(self, data, interpipe):
+		data_out = data.copy()
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			data_out[loc] = np.round(data[loc])
+		return data_out, interpipe
 
 # Wrappers that Modify Data
 class StabilizationBlock(DataProcessingBlock):
@@ -453,15 +518,145 @@ class EnforceTensorBlock(DataProcessingBlock):
 		return data, interpipe
 
 class FeatureExtractionBlock(DataProcessingBlock):
-	def __init__(self, location, feature_extractor_config):
+	def __init__(self, location_data: list[str], location_ts: list[str], feature_extractor_config: dict):
 		super().__init__()
-		self.location = location
+		self.location_data = location_data
+		self.location_ts = location_ts
 		self.feature_extractor = FeatureExtractor(feature_extractor_config)
 
 	def transform(self, data, interpipe):
-		for loc in self.location:
+		for loc in self.location_data + self.location_ts:
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
-			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('time_stamps', None))
+		features_list = self.feature_extractor.extract_binned_features(data=[data[loc] for loc in self.location_data], timestamps_ms=[data[loc] for loc in self.location_ts], return_array=True)
+		# FIXME: for now, deleting the timestamps from the data dictionary
+		# since they're not correct anymore
+		for loc in self.location_ts:
+			del data[loc]
+		for i, loc in enumerate(self.location_data):
+			data[loc] = features_list[i]
 		return data, interpipe
+	
+
+class RegressionToClassificationBlock(DataProcessingBlock):
+	"""
+	A block for converting regression data into classification data by applying conditions to define classes.
+	Each class is defined by a list of conditions (lambda functions) that must all be true for each column.
+	Samples that don't match any defined conditions are automatically assigned to an additional "other" class.
+	"""
+	def __init__(self, location: str, conditions: List[List], output_key: str = None):
+		"""
+		Initializes the RegressionToClassificationBlock.
+		Args:
+			location (str): Key for the regression data array in the data dictionary.
+			conditions (List[List]): List of class definitions. Each inner list contains conditions
+									 for each column that define when a sample belongs to that class.
+									 Conditions can be either lambda functions or strings.
+									 String examples: "x < 0.2", "(x >= 0.2) & (x < 0.5)", "x > 0.8"
+									 Lambda examples: lambda x: x < 0.2, lambda x: (x >= 0.2) & (x < 0.5)
+									 Example: [
+									 	["x < 0.2", "x < 0.2"],  # class 0
+									 	["(x >= 0.2) & (x < 0.5)", "x < 0.2"],  # class 1
+									 ]
+									 Note: Samples not matching any conditions get assigned to an additional "other" class.
+			output_key (str): Key for the output classification data. If None, uses same location (overwrites input).
+		"""
+		super().__init__()
+		self.location = location
+		self.conditions = self._convert_conditions(conditions)
+		self.output_key = output_key if output_key is not None else location
+		self.n_classes = len(conditions)
+	
+	def _convert_conditions(self, conditions):
+		"""
+		Convert string conditions to lambda functions if needed.
+		Args:
+			conditions: List of lists containing either strings or lambda functions
+		Returns:
+			List of lists containing lambda functions
+		"""
+		converted_conditions = []
+		for class_conditions in conditions:
+			converted_class = []
+			for condition in class_conditions:
+				if isinstance(condition, str):
+					# Convert string to lambda function
+					try:
+						lambda_func = eval(f"lambda x: {condition}")
+						converted_class.append(lambda_func)
+					except Exception as e:
+						raise ValueError(f"Invalid condition string '{condition}': {e}")
+				else:
+					# Assume it's already a callable (lambda function)
+					converted_class.append(condition)
+			converted_conditions.append(converted_class)
+		return converted_conditions
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform regression data into classification labels.
+		Args:
+			data (dict): Input data dictionary containing the regression data.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks.
+		Returns:
+			data_out (dict): Copy of input data with added classification labels.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if self.location not in data:
+			raise ValueError(f"RegressionToClassificationBlock requires '{self.location}' key in data dictionary.")
+		
+		regression_data = data[self.location]
+		n_samples, n_features = regression_data.shape
+		
+		# Validate conditions don't exceed number of features
+		if self.conditions:
+			n_conditions = len(self.conditions[0])
+			if n_conditions > n_features:
+				raise ValueError(f"Number of conditions per class ({n_conditions}) cannot exceed number of features ({n_features})")
+			
+			# Use only the first n_conditions features
+			features_to_use = min(n_conditions, n_features)
+		else:
+			features_to_use = n_features
+		
+		# Initialize class labels (default to -1 for unclassified)
+		class_labels = np.full(n_samples, -1, dtype=int)
+		
+		# Apply conditions for each class
+		for class_idx, class_conditions in enumerate(self.conditions):
+			# Create boolean mask for each feature condition (only use first features_to_use features)
+			feature_masks = []
+			for feature_idx, condition in enumerate(class_conditions[:features_to_use]):
+				# Skip None conditions (no constraint on this feature)
+				if condition is not None:
+					feature_data = regression_data[:, feature_idx]
+					feature_mask = condition(feature_data)
+					feature_masks.append(feature_mask)
+			
+			# Combine all non-None feature conditions with AND logic
+			# If no conditions were specified (all None), all samples match this class
+			if feature_masks:
+				class_mask = np.all(feature_masks, axis=0)
+			else:
+				class_mask = np.ones(n_samples, dtype=bool)  # All samples match if no conditions
+			
+			# Assign class label (prioritize earlier classes in case of overlap)
+			unassigned_mask = class_labels == -1
+			final_mask = class_mask & unassigned_mask
+			class_labels[final_mask] = class_idx
+		
+		# Assign remaining unmatched samples to an "other" class
+		unmatched_mask = class_labels == -1
+		if np.any(unmatched_mask):
+			other_class_idx = len(self.conditions)  # Next available class number
+			class_labels[unmatched_mask] = other_class_idx
+			self.n_classes = len(self.conditions) + 1
+		else:
+			self.n_classes = len(self.conditions)
+		
+		# Copy input data and add classification labels
+		data_out = data.copy()
+		data_out[self.output_key] = class_labels
+		
+		return data_out, interpipe
 	
