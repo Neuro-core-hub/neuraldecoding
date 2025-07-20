@@ -273,6 +273,8 @@ class FeatureExtractor:
                     )
                     
                     if features is not None:
+                        import warnings
+                        warnings.warn("Trial Filtering coming soon to a dataset near you", UserWarning)
                         feature_list.append(features['features'])
                         combined_metadata['sample_count'].append(features['sample_count'])
                         combined_metadata['dimensions'].append(features['dimensions'])
