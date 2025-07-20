@@ -24,7 +24,7 @@ class LinearTrainer(Trainer):
         self.dataset = dataset
         self.logger = {metric: [[], []] for metric in self.cfg.metrics}
 
-    def load_data(self): # TODO, finalize this when dataset is merged to 
+    def load_data(self):
         result = self.preprocessor.preprocess_pipeline(self.dataset, params={'is_train': True})
         self.train_X = result['neural_train']
         self.train_Y = result['behavior_train']
