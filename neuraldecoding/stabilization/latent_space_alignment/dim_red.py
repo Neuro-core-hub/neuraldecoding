@@ -138,15 +138,16 @@ class EMFactorAnalysis1(DimRed):
     This is the factor analysis version used by procrustes alignment of factors (Degenhart 2022)
     """
 
-    def __init__(self, n_restarts = 5, max_n_inits = 300, ll_diff_threshold = .01, min_priv_var = .1):
+    def __init__(self, n_restarts = 5, max_n_inits = 300, ll_diff_threshold = .01, min_priv_var = .1, verbose = False):
         self.n_restarts = n_restarts
         self.max_n_inits = max_n_inits
         self.ll_diff_threshold = ll_diff_threshold
         self.min_priv_var = min_priv_var
+        self.verbose = verbose
         
     def calc_lm(self, data):
         d, base_lm, psi, _, _ = fa_stable.fit_factor_analysis(data, self.ndims, max_n_its = self.max_n_inits, 
-                                        ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var)
+                                        ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var, verbose = self.verbose)
 
         return base_lm, (d, psi)
     

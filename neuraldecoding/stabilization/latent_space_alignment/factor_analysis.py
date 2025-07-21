@@ -83,7 +83,7 @@ def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
     return loading, psi, d
 
 def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
-    min_priv_var=0.01, C_init=None, PSI_init=None):
+    min_priv_var=0.01, C_init=None, PSI_init=None, verbose = False):
     '''
     Fits a factor analysis model: 
     x_t = C * l_t + d + ep_t
@@ -151,7 +151,8 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
 
         # initialize estimates for c and psi 
         if C_init == None or PSI_init == None: 
-            print('Initializing randomly.')
+            if verbose:
+                print('Initializing randomly.')
             # initialize C 
             c_init = np.random.randn(n_obs_vars, n_latents)*10
             # initialize psi 
@@ -164,8 +165,8 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
 
         diags['cInit'] = c_init 
         diags['psiInit'] = psi_init 
-
-        print('Done with initialization. Fitting with EM.')
+        if verbose:
+            print('Done with initialization. Fitting with EM.')
 
         diags['ll'] = np.full((max_n_its+1,), np.nan)
 
@@ -207,13 +208,14 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
             else: 
                 stop_crit = stopfcn(cur_ll, prev_ll, init_ll)
             prev_ll = cur_ll
-
-            print('EM Iteration: %d LL: %f Stop Crit: %f' % (cur_it, cur_ll, stop_crit), end="\r", flush=True)
+            if verbose:
+                print('EM Iteration: %d LL: %f Stop Crit: %f' % (cur_it, cur_ll, stop_crit), end="\r", flush=True)
             
             cur_it += 1
 
         conv = stop_crit <= ll_diff_thresh
-        print('\n')
+        if verbose:
+            print('\n')
         
     return d, c, psi, conv, diags
 
