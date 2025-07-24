@@ -49,7 +49,7 @@ class LDA(LinearModel):
         if data.shape[1] != self.Nfeats:
             raise ValueError(f"Number of features in input data ({data.shape[1]}) does not match the model's trained number of features ({self.Nfeats}).")
         if isinstance(data, np.ndarray):
-            data = torch.from_numpy(data)
+            data = torch.from_numpy(data.copy())
         predictions = self.model.predict(data)
         return torch.tensor(predictions, dtype=torch.float64)
     

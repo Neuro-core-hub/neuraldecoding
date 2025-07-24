@@ -18,7 +18,7 @@ import os
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config):
-        super().__init__()
+        super().__init__(config)
         # General training params 
         self.device = torch.device(config.training.device)
         self.model = self.create_model(config.model).to(self.device)
@@ -150,11 +150,7 @@ class NNTrainer(Trainer):
             # Print progress
             if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
                 print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-                for metric in self.logger:
-                    train_metric = self.logger[metric][0][-1]
-                    val_metric = self.logger[metric][1][-1]
-                    print(f"    {metric:>12}{': train = ':>12}{train_metric}")
-                    print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+                self.print_metrics()
 
         return self.model, self.logger
 

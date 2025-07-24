@@ -37,14 +37,14 @@ class Decoder(ABC):
         """
         # Get model stuff
         self.cfg = cfg
-        if self.cfg.model_type in MODEL_REGISTRY:
-            self.model = MODEL_REGISTRY[self.cfg.model_type](self.cfg.model_params)
+        if self.cfg.model.type in MODEL_REGISTRY:
+            self.model = MODEL_REGISTRY[self.cfg.model.type](self.cfg.model.params)
         else:
-            raise ValueError(f"Model {cfg.model_type} either does not exist or is not registered in the model registry (in Decoder module).")
-        self.device = self.cfg.model_params.get("device", "cpu")
+            raise ValueError(f"Model {cfg.model.type} either does not exist or is not registered in the model registry (in Decoder module).")
+        self.device = self.cfg.model.get("device", "cpu")
 
         # Get model path
-        self.fpath = self.cfg.get('model_path')
+        self.fpath = self.cfg.model.fpath
 
         # # Get model i/o shape
         # self.input_shape = cfg["model"]["params"]["input_size"]
@@ -105,7 +105,7 @@ class Decoder(ABC):
         return np.array(self.output_shape)
     
 class LinearDecoder(Decoder):
-    def __init__(self, cfg: dict) -> None:
+    def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
     def predict(self, neural_data: np.ndarray) -> torch.Tensor:
         """
@@ -122,7 +122,7 @@ class LinearDecoder(Decoder):
         return prediction
     
 class NeuralNetworkDecoder(Decoder):
-    def __init__(self, cfg: dict) -> None:
+    def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
     def predict(self, input):
         with torch.no_grad():
@@ -131,7 +131,7 @@ class NeuralNetworkDecoder(Decoder):
         return prediction
     
 class DummyDecoder(Decoder):
-    def __init__(self, cfg: dict) -> None:
+    def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
 
     def predict(self, neural_data):

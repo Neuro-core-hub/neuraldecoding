@@ -16,7 +16,7 @@ def accuracy(pred, target, params=None):
     if len(pred) == 0:
         raise ValueError("Arrays cannot be empty")
     
-    correct_predictions = (pred == target).sum()
+    correct_predictions = (pred.squeeze() == target.squeeze()).sum()
     total_predictions = len(pred)
     return correct_predictions / total_predictions
 

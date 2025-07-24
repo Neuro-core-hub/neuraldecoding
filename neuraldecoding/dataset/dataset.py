@@ -55,7 +55,7 @@ class Dataset:
         if self.cfg.dataset_type == "zstruct":
             self._load_data_zstruct()
         elif self.cfg.dataset_type == "nwb":
-            self.load_data_nwb()
+            self._load_data_nwb()
         else:
             raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
     

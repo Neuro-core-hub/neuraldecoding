@@ -1,3 +1,4 @@
 type: LDA 
 fpath: ???
+save: true
 params: {}
