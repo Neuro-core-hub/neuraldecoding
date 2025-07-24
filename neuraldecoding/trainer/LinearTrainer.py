@@ -22,7 +22,6 @@ class LinearTrainer(Trainer):
         self.model = self.create_model(self.cfg.model)
         self.preprocessor = preprocessor
         self.dataset = dataset
-        self.logger = {metric: [[], []] for metric in self.cfg.metrics}
 
     def load_data(self):
         result = self.preprocessor.preprocess_pipeline(self.dataset, params={'is_train': True})
