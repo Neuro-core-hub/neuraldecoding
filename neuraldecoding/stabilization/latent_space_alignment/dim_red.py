@@ -65,6 +65,7 @@ class FactorAnalysis(LoadingMatrixDimRed):
     
 class PCA(LoadingMatrixDimRed):
     def calc_lm(self, ds):
+        print(ds.shape)
         pca = PrincipalComponentAnalyisis(n_components=self.ndims)
         pca.fit(ds)
         lm = pca.components_.T
@@ -72,6 +73,7 @@ class PCA(LoadingMatrixDimRed):
         # warnings.warn("Warning: Debugging outputs, shouldn't occur in use, remove later")
         # cumvar = np.cumsum(pca.explained_variance_ratio_)
         # print(f"Cum Var of PCA: {cumvar}")
+        print(lm.shape)
         return lm, None
     
     def reduce(self, data, lm, args = None):
@@ -146,9 +148,10 @@ class EMFactorAnalysis1(DimRed):
         self.verbose = verbose
         
     def calc_lm(self, data):
-        d, base_lm, psi, _, _ = fa_stable.fit_factor_analysis(data, self.ndims, max_n_its = self.max_n_inits, 
+        d, base_lm, psi, _, _ = fa_stable.get_factor_analysis_loading(data, self.ndims, max_n_its = self.max_n_inits, 
                                         ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var, verbose = self.verbose)
-
+        print(base_lm.shape)
+        print(base_lm)
         return base_lm, (d, psi)
     
     def reduce(self, data, lm, args):

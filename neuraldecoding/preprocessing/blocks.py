@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 
 import time
 import pickle
+import numpy as np
 
 class PreprocessingBlock(ABC):
 	"""
@@ -254,11 +255,11 @@ class StabilizationBlock(DataProcessingBlock):
 			raise ValueError("The 'interpipe' dictionary for StabilizationBlock must contain an 'is_train' key.")
 
 		if interpipe['is_train']:
-			data[self.location] = self.stabilization.fit(data[self.location])
+			data[self.location] = (self.stabilization.fit(data[self.location]))
 			self.stabilization.save_alignment()
 		else:
 			self.stabilization.load_alignment()
-			data[self.location] = self.stabilization.extract_latent_space(data[self.location])
+			data[self.location] = (self.stabilization.extract_latent_space(data[self.location]))
 		return data, interpipe
 
 class AddHistoryBlock(DataProcessingBlock):
@@ -266,7 +267,7 @@ class AddHistoryBlock(DataProcessingBlock):
 	A block for adding history to the data at specified locations.
 	It uses `neuraldecoding.utils.add_history_numpy` to add history.
 	"""
-	def __init__(self, location, seq_length = 10):
+	def __init__(self, location, seq_length = 10, isRR = False):
 		"""
 		Initializes the AddHistoryBlock.
 		Args:
@@ -276,6 +277,7 @@ class AddHistoryBlock(DataProcessingBlock):
 		super().__init__()
 		self.location = location
 		self.seq_length = seq_length
+		self.isRR = isRR
 
 	def transform(self, data, interpipe):
 		"""
@@ -289,9 +291,11 @@ class AddHistoryBlock(DataProcessingBlock):
 		"""
 		if isinstance(self.location, str):
 			self.location = [self.location]
-
-		for loc in self.location:
-			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
+		if self.isRR:
+			data[self.location[0]], data[self.location[1]] = neuraldecoding.utils.add_hist(data[self.location[0]], data[self.location[1]], self.seq_length)
+		else:
+			for loc in self.location:
+				data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
 
@@ -429,4 +433,40 @@ class EnforceTensorBlock(DataProcessingBlock):
 				data[key] = data[key].to(self.device, dtype=self.dtype)
 			else:
 				data[key] = torch.tensor(data[key], device=self.device, dtype=self.dtype)
+		return data, interpipe
+
+class ShuffleBlock(DataProcessingBlock):
+	"""
+	A block for shuffling the data in the dictionary.
+	Shuffles the data in place, ensuring that the order of elements is randomized.
+	"""
+	def __init__(self, location):
+		"""
+		Initializes the ShuffleBlock.
+		Args:
+			location (str or list): The key(s) in the data dictionary where shuffling is applied.
+		"""
+		super().__init__()
+		self.location = location
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by shuffling it at the specified locations.
+		Args:
+			data (dict): Input data dictionary containing the data to be shuffled.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with shuffled data at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+		
+		for loc in self.location:
+			if isinstance(data[loc], torch.Tensor):
+				data[loc] = data[loc][torch.randperm(data[loc].shape[0])]
+			else:
+				indices = np.random.permutation(data[loc].shape[0])
+				data[loc] = data[loc][indices]
+		
 		return data, interpipe

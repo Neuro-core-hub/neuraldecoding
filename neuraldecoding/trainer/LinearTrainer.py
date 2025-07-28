@@ -26,12 +26,12 @@ class LinearTrainer(Trainer):
         if not os.path.exists(self.data_path):
             raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
         """Assuming data is dictionary output of one NWB file, change later"""
-        #data = load_one_nwb(self.data_path)
-        with open(self.data_path, "rb") as f:
-            data = pickle.load(f)
+        data = load_one_nwb(self.data_path)
+        # with open(self.data_path, "rb") as f:
+        #     data = pickle.load(f)
         # (train_X, train_Y), (valid_X, valid_Y) = data_split_trial(data['sbp'], data['finger_kinematics'], data['trial_index'], self.split_ratio, self.split_seed)
         # return train_X, train_Y, valid_X, valid_Y
-        train_X, train_Y = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
+        train_X, _, train_Y,_ = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
         return train_X, train_Y
     
     def create_model(self, config):

@@ -249,6 +249,8 @@ def add_hist(X, Y, hist=10):
     adjY = Y[hist:,:]
 
     adjX = adjX.reshape(adjX.shape[0],-1)
+
+    adjX = np.column_stack([adjX, np.ones(adjX.shape[0])])
     return adjX, adjY
 
 def add_training_noise(x,

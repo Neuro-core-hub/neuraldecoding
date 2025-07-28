@@ -36,7 +36,8 @@ import warnings
 from scipy import linalg
 import numpy as np
 
-def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
+def get_factor_analysis_loading(train_data, n_components,max_n_its=100000, ll_diff_thresh=1e-8,
+    min_priv_var=0.01, C_init=None, PSI_init=None, verbose = False, n_restarts=5):
     '''
     Runs multiple Factor Analysis (FA) models and returns loading matrix of 
     model with maximum log likelihood
@@ -63,10 +64,17 @@ def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
 
     models = []
     for i in range(0, n_restarts): 
-        d, c, psi, _, diags = fit_factor_analysis(input_data, 
-                                                  n_latents=n_components,
-                                                  min_priv_var=0.1,
-                                                  ll_diff_thresh=0.00001)
+        np.random.seed(i)
+        d, c, psi, _, diags = fit_factor_analysis(
+            input_data, 
+            n_latents=n_components,
+            max_n_its=max_n_its,
+            ll_diff_thresh=ll_diff_thresh,
+            min_priv_var=min_priv_var,
+            C_init=C_init,
+            PSI_init=PSI_init,
+            verbose=verbose
+        )
 
         models.append((c, psi, d, diags))
 
@@ -80,7 +88,7 @@ def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
     psi = model_max_ll[1]
     d = model_max_ll[2]
 
-    return loading, psi, d
+    return d, loading, psi, None, None
 
 def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
     min_priv_var=0.01, C_init=None, PSI_init=None, verbose = False):
@@ -154,6 +162,7 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
             if verbose:
                 print('Initializing randomly.')
             # initialize C 
+            
             c_init = np.random.randn(n_obs_vars, n_latents)*10
             # initialize psi 
             psi_init = np.diag(np.nanvar(x, axis=0)) - np.diag(np.diag(np.matmul(c_init, c_init.T)))
