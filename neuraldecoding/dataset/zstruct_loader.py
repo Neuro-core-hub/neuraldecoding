@@ -681,8 +681,8 @@ def add_run_data(
     # add the trials to the NWB file
     for trl_idx in range(num_trials):
         # trial times
-        nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0]
-        nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0]
+        nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0] / 1000 # convert to seconds
+        nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0] / 1000 # convert to seconds
 
         # looping through the data frame keys for dynamically adding them
         for key in data_dict[trl_idx].keys():

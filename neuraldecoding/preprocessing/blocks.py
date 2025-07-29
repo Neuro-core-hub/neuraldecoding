@@ -4,12 +4,14 @@ import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
 from neuraldecoding.feature_extraction import FeatureExtractor
 from neuraldecoding.utils.utils_general import resolve_path
+from neuraldecoding.preprocessing.onset_detection import MovementOnsetDetector
 import sklearn.preprocessing
 
 import torch
 
 from abc import ABC, abstractmethod
 
+import warnings
 import time
 import pickle
 from typing import Union, List
@@ -241,7 +243,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -252,6 +254,9 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.neural_nwb_loc = neural_nwb_loc
 		self.behavior_nwb_loc = behavior_nwb_loc
 		self.apply_trial_filtering = apply_trial_filtering
+		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
+		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
+		self.nwb_targets_loc = nwb_targets_loc
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -267,12 +272,21 @@ class Dataset2DictBlock(DataFormattingBlock):
 		#TODO: Implement trial filtering (have an apply trial filters feature)
 		neural_nwb, behavior_nwb = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
 		neural, behavior = neural_nwb.data[:], behavior_nwb.data[:]
+		trial_start_times = resolve_path(data.dataset, self.nwb_trial_start_times_loc)
+		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
+		targets = resolve_path(data.dataset, self.nwb_targets_loc)
+		# Convert to milliseconds
+		trial_start_times = trial_start_times[:] * 1000
+		trial_end_times = trial_end_times[:] * 1000
 		# Convert timestamps to milliseconds
 		neural_ts, behavior_ts = neural_nwb.timestamps[:] * 1000, behavior_nwb.timestamps[:] * 1000
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
 
 		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behavior, 'behavior_ts': behavior_ts}
+		interpipe['trial_start_times'] = trial_start_times
+		interpipe['trial_end_times'] = trial_end_times
+		data_out['targets'] = targets[:]
 		return data_out, interpipe
 
 class IndexSelectorBlock(DataFormattingBlock):
@@ -660,3 +674,261 @@ class RegressionToClassificationBlock(DataProcessingBlock):
 		
 		return data_out, interpipe
 	
+ 
+class MovementOnsetDetectionBlock(DataProcessingBlock):
+	"""
+	A block for detecting movement onset in the EMG data.
+	"""
+	def __init__(self, location_emg: str, location_times:str , detection_config: dict, output_key: str = 'onset_indices'):
+		super().__init__()
+		self.location_emg = location_emg
+		self.location_times = location_times
+		self.detection_config = detection_config
+		self.output_key = output_key
+		self.movement_onset_detection = MovementOnsetDetector(detection_config)
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by detecting movement onset in the EMG data.
+		"""
+		# Grab timestamps and EMG
+		emg = data[self.location_emg]
+		times = data[self.location_times]
+		trial_start_times = interpipe['trial_start_times']
+		trial_end_times = interpipe['trial_end_times']
+
+		# Detect movement onsets
+		onsets = self.movement_onset_detection.detect_movement_onsets(emg, times, trial_start_times, trial_end_times)
+
+		# Add onsets to data dictionary
+		interpipe[self.output_key] = onsets
+
+		return data, interpipe
+
+class TemplateBehaviorReplacementBlock(DataProcessingBlock):
+	"""
+	A block for replacing the behavior data with a template behavior.
+	"""
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict):
+		super().__init__()
+		self.location_behavior = location_behavior
+		self.location_out = location_out
+		self.location_onsets = location_onsets
+		self.template_config = template_config
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by replacing the behavior data with a template behavior.
+		"""
+		# Get behavior data and timestamps
+		kinematics = data[self.location_behavior]
+		behavior_ts = data.get(f'{self.location_behavior}_ts', data.get('behavior_ts'))
+		
+		if behavior_ts is None:
+			raise ValueError(f"Could not find timestamps for behavior data. Expected '{self.location_behavior}_ts' or 'behavior_ts' in data.")
+		
+		# Get onsets from interpipe
+		movement_onsets = interpipe[self.location_onsets]
+		
+		# Get trial timing information from interpipe
+		trial_start_times = interpipe['trial_start_times']
+		trial_end_times = interpipe['trial_end_times']
+		
+		# Get targets and other parameters from template config
+		targets = data['targets']
+		template_type = self.template_config.get('template_type', 'sigmoid')
+		
+		# Convert behavior data to numpy array if not already
+		if not isinstance(kinematics, np.ndarray):
+			kinematics = np.array(kinematics, dtype=np.float32)
+		
+		# Apply template behavior
+		templated_kinematics = self._apply_template_kinematics(
+			kinematics=kinematics,
+			behavior_ts=behavior_ts,
+			trial_start_times=trial_start_times,
+			trial_end_times=trial_end_times,
+			movement_onsets=movement_onsets,
+			targets=targets,
+			template_type=template_type,
+			template_params=self.template_config.get('template_params', {})
+		)
+		
+		# Update the behavior data in the data dictionary
+		data[self.location_out] = templated_kinematics
+		
+		return data, interpipe
+	
+	def _apply_template_kinematics(
+		self,
+		kinematics: np.ndarray,
+		behavior_ts: np.ndarray,
+		trial_start_times: np.ndarray,
+		trial_end_times: np.ndarray,
+		movement_onsets: np.ndarray,
+		targets: np.ndarray,
+		template_type: str = 'sigmoid',
+		template_params: dict = None
+	) -> np.ndarray:
+		"""
+		Apply template kinematics based on movement onsets and targets.
+
+		Args:
+			kinematics: np.ndarray - Array of shape (T, N) where N is the number of position variables
+			behavior_ts: np.ndarray - Array of behavior timestamps (must be sorted)
+			trial_start_times: np.ndarray - Array of trial start times
+			trial_end_times: np.ndarray - Array of trial end times
+			movement_onsets: np.ndarray - Array of shape (n_trials,) containing onset times for each trial
+			targets: np.ndarray - Array of shape (n_trials, D) containing target positions for each trial
+			template_type: str - Type of template to apply ('sigmoid', 'linear', 'step', etc.)
+			template_params: dict - Additional parameters for the template function
+
+		Returns:
+			np.ndarray - Templated kinematics array of the same shape
+		"""
+		if template_params is None:
+			template_params = {}
+			
+		templated = kinematics.copy()
+
+		# All columns are position data
+		N = kinematics.shape[1]
+		
+		# Find trial boundaries using searchsorted
+		trial_start_indices = np.searchsorted(behavior_ts, trial_start_times, side='left')
+		trial_end_indices = np.searchsorted(behavior_ts, trial_end_times, side='right')
+
+		for trial_idx, (trial_start_idx, trial_end_idx) in enumerate(zip(trial_start_indices, trial_end_indices)):
+			# Ensure indices are within bounds
+			trial_start_idx = max(0, trial_start_idx)
+			trial_end_idx = min(len(behavior_ts), trial_end_idx)
+			
+			if trial_start_idx >= trial_end_idx:
+				continue  # Skip empty trials
+
+			for i in range(N):  # Apply to all position dimensions
+				# Check if we have an onset for this trial
+				if trial_idx >= len(movement_onsets) or movement_onsets[trial_idx] is None or np.isnan(movement_onsets[trial_idx]):
+					# If we don't know the onset, keep original kinematics in trial
+					continue
+				
+				# Find onset index within this trial using the onset time
+				onset_time = movement_onsets[trial_idx]
+				onset_idx = np.searchsorted(behavior_ts[trial_start_idx:trial_end_idx], onset_time, side='left')
+				onset_idx = trial_start_idx + onset_idx
+				onset_idx = np.clip(onset_idx, trial_start_idx, trial_end_idx - 1)
+				
+				# Get target for this trial and dimension
+				if trial_idx >= len(targets) or i >= targets.shape[1]:
+					continue
+				target = targets[trial_idx, i]
+				
+				# Set constant value before onset
+				templated[trial_start_idx:onset_idx+1, i] = (
+					templated[trial_start_idx - 1, i]
+					if trial_start_idx > 0
+					else templated[trial_start_idx, i]
+				)
+				
+				# Get initial value at onset
+				initial_value = templated[onset_idx, i]
+				
+				if trial_end_idx <= onset_idx:
+					continue  # No samples after onset
+				
+				# Apply template from onset to end of trial
+				num_samples = trial_end_idx - onset_idx
+				duration_s = (behavior_ts[trial_end_idx - 1] - behavior_ts[onset_idx]) / 1000  # Convert ms to seconds
+				
+				template_values = self._generate_template(
+					template_type=template_type,
+					num_samples=num_samples,
+					initial_value=initial_value,
+					final_value=target,
+					duration_s=duration_s,
+					**template_params
+				)
+				
+				templated[onset_idx:trial_end_idx, i] = template_values
+
+		return templated
+	
+	def _generate_template(
+		self,
+		template_type: str,
+		num_samples: int,
+		initial_value: float,
+		final_value: float,
+		duration_s: float,
+		**kwargs
+	) -> np.ndarray:
+		"""
+		Generate template values based on the specified template type.
+		
+		Args:
+			template_type: Type of template ('sigmoid', 'linear', 'step', 'exponential')
+			num_samples: Number of samples to generate
+			initial_value: Starting value
+			final_value: Target value
+			duration_s: Duration in seconds
+			**kwargs: Additional parameters specific to each template type
+		
+		Returns:
+			np.ndarray: Array of template values
+		"""
+		t = np.linspace(0, 1, num_samples)
+		
+		if template_type == 'sigmoid':
+			return self._sigmoid_template(t, initial_value, final_value, duration_s, **kwargs)
+		elif template_type == 'linear':
+			return self._linear_template(t, initial_value, final_value)
+		elif template_type == 'step':
+			return self._step_template(t, initial_value, final_value, **kwargs)
+		elif template_type == 'exponential':
+			return self._exponential_template(t, initial_value, final_value, **kwargs)
+		else:
+			raise ValueError(f"Unknown template type: {template_type}")
+	
+	def _sigmoid_template(
+		self,
+		t: np.ndarray,
+		initial_value: float,
+		final_value: float,
+		duration_s: float,
+		steepness: float = 30,
+		start_point: float = 0,
+		start_threshold_percentage: float = 0.005,
+		**kwargs
+	) -> np.ndarray:
+		"""Sigmoid template function."""
+		# Normalized steepness
+		s_norm = steepness * duration_s
+		# Amplitude
+		amplitude = final_value - initial_value
+		# Calculate the normalized time midpoint t0_norm using s_norm
+		log_arg = start_threshold_percentage / (1 - start_threshold_percentage)
+		if log_arg <= 0:
+			raise ValueError("Logarithm argument non-positive.")
+		logit_val = np.log(log_arg)
+		t0_norm = start_point - (1 / s_norm) * logit_val
+		# Calculate the sigmoid value(s) using normalized time and s_norm
+		exponent = -s_norm * (t - t0_norm)
+		sigmoid_val = 1 / (1 + np.exp(exponent))
+		return initial_value + amplitude * sigmoid_val
+	
+	def _linear_template(self, t: np.ndarray, initial_value: float, final_value: float) -> np.ndarray:
+		"""Linear template function."""
+		return initial_value + (final_value - initial_value) * t
+	
+	def _step_template(self, t: np.ndarray, initial_value: float, final_value: float, step_time: float = 0.5, **kwargs) -> np.ndarray:
+		"""Step template function."""
+		values = np.full_like(t, initial_value)
+		values[t >= step_time] = final_value
+		return values
+	
+	def _exponential_template(self, t: np.ndarray, initial_value: float, final_value: float, time_constant: float = 0.3, **kwargs) -> np.ndarray:
+		"""Exponential template function."""
+		amplitude = final_value - initial_value
+		return initial_value + amplitude * (1 - np.exp(-t / time_constant))
+
+

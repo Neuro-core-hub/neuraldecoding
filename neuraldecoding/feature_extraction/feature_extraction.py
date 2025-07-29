@@ -119,30 +119,33 @@ class FeatureExtractor:
         if len(self.feature_params) != expected_param_count:
             raise ValueError(f"feature_params length ({len(self.feature_params)}) must match feature_type structure (expected {expected_param_count})")
         
-        # Validate history feature placement and parameters
-        def validate_history_placement(ft_group):
-            """Validate that history feature is properly placed with other features."""
+        # Validate history and velocity feature placement and parameters
+        def validate_special_feature_placement(ft_group):
+            """Validate that history and velocity features are properly placed with other features."""
+            special_features = ['history', 'vel']
+            
             if isinstance(ft_group, str):
-                if ft_group == 'history':
-                    raise ValueError("'history' feature cannot be used alone. It must be combined with another feature (e.g., ['mean', 'history'])")
+                if ft_group in special_features:
+                    raise ValueError(f"'{ft_group}' feature cannot be used alone. It must be combined with another feature (e.g., ['mean', '{ft_group}'])")
                 return
             elif isinstance(ft_group, list):
-                if 'history' in ft_group and len(ft_group) == 1:
-                    raise ValueError("'history' feature cannot be used alone. It must be combined with another feature (e.g., ['mean', 'history'])")
-                if 'history' in ft_group and ft_group.index('history') == 0:
-                    raise ValueError("'history' feature must come after other features in the list (e.g., ['mean', 'history'], not ['history', 'mean'])")
+                for special_feat in special_features:
+                    if special_feat in ft_group and len(ft_group) == 1:
+                        raise ValueError(f"'{special_feat}' feature cannot be used alone. It must be combined with another feature (e.g., ['mean', '{special_feat}'])")
+                    if special_feat in ft_group and ft_group.index(special_feat) == 0:
+                        raise ValueError(f"'{special_feat}' feature must come after other features in the list (e.g., ['mean', '{special_feat}'], not ['{special_feat}', 'mean'])")
         
         # Check each feature group
         if isinstance(self.feature_type, str):
-            validate_history_placement(self.feature_type)
+            validate_special_feature_placement(self.feature_type)
         elif isinstance(self.feature_type, list):
             if len(self.feature_type) > 0 and isinstance(self.feature_type[0], list):
                 # List of lists
                 for ft_group in self.feature_type:
-                    validate_history_placement(ft_group)
+                    validate_special_feature_placement(ft_group)
             else:
                 # Simple list
-                validate_history_placement(self.feature_type)
+                validate_special_feature_placement(self.feature_type)
         
         # Validate history parameters
         for i, param in enumerate(self.feature_params):
@@ -303,6 +306,9 @@ class FeatureExtractor:
             
             current_time += self.bin_size_ms
         
+        # Post-process velocity features to use lookahead (vel_t = pos_t+1 - pos_t)
+        self._postprocess_velocity_features(bin_features, is_multistream_config)
+        
         # Return array of features if requested
         if return_array:
             if not bin_features:
@@ -373,13 +379,15 @@ class FeatureExtractor:
             # Multiple samples case - use as is
             processed_data = data
         
-        # Compute base features (non-history) and handle history separately
+        # Compute base features (non-history, non-velocity) and handle special features separately
         if isinstance(ft, list):
-            base_feature_types = [f for f in ft if f != 'history']
+            base_feature_types = [f for f in ft if f not in ['history', 'vel']]
             has_history = 'history' in ft
+            has_velocity = 'vel' in ft
         else:
-            base_feature_types = [ft] if ft != 'history' else []
+            base_feature_types = [ft] if ft not in ['history', 'vel'] else []
             has_history = ft == 'history'
+            has_velocity = ft == 'vel'
         
         # Compute base features
         if base_feature_types:
@@ -387,15 +395,30 @@ class FeatureExtractor:
         else:
             base_features = np.array([])
         
+        # Collect all features in order
+        all_features = []
+        
+        # Add base features first
+        if base_features.size > 0:
+            all_features.append(base_features)
+        
+        # Handle velocity if requested - add placeholder zeros that will be replaced during post-processing
+        if has_velocity:
+            velocity_placeholder = np.zeros_like(base_features) if base_features.size > 0 else np.array([])
+            if velocity_placeholder.size > 0:
+                all_features.append(velocity_placeholder)
+        
         # Handle history if requested
         if has_history:
             hist_bins = fp.get('hist', 0)
-            history_features = self._get_history_features(array_index, base_features.shape[0], hist_bins)
-            final_features = np.concatenate([base_features, history_features]) if base_features.size > 0 else history_features
-        else:
-            final_features = base_features
+            history_features = self._get_history_features(array_index, base_features.shape[0] if base_features.size > 0 else 0, hist_bins)
+            if history_features.size > 0:
+                all_features.append(history_features)
         
-        # Store base features for future history (only if we computed some)
+        # Concatenate all features
+        final_features = np.concatenate(all_features) if all_features else np.array([])
+        
+        # Store base features for future history and velocity (only if we computed some)
         if base_features.size > 0:
             stream_history = self.previous_bin_features.get(array_index, [])
             stream_history.append(base_features)
@@ -447,13 +470,191 @@ class FeatureExtractor:
             history_parts.append(np.zeros(feature_size_for_padding))
         return np.concatenate(history_parts) if history_parts else np.array([])
     
+    def _get_velocity_features(self, array_index: int, current_base_features: np.ndarray, next_base_features: np.ndarray) -> np.ndarray:
+        """
+        Get velocity features as the difference between next and current base features (lookahead).
+        
+        Args:
+            array_index: The index of the data stream
+            current_base_features: Current bin's base features
+            next_base_features: Next bin's base features (for lookahead velocity)
+            
+        Returns:
+            Velocity features (next - current)
+        """
+        if current_base_features.size == 0 or next_base_features.size == 0:
+            return np.array([])
+            
+        # Ensure shapes match (they should, but be safe)
+        if next_base_features.shape != current_base_features.shape:
+            return np.zeros_like(current_base_features)
+        
+        # Compute velocity as difference between next and current features (lookahead)
+        return next_base_features - current_base_features
+    
+    def _postprocess_velocity_features(self, bin_features: List[Dict], is_multistream_config: bool):
+        """
+        Post-process velocity features to use lookahead (next bin's base features).
+        
+        Args:
+            bin_features: List of feature dictionaries to modify in-place
+            is_multistream_config: Whether we have multiple data streams
+        """
+        if len(bin_features) < 2:
+            return  # Need at least 2 bins for velocity computation
+        
+        # Process all bins except the last one (no next bin available for last one)
+        for i in range(len(bin_features) - 1):
+            current_bin = bin_features[i]
+            next_bin = bin_features[i + 1]
+            
+            # Check if current bin has velocity features
+            if not self._bin_has_velocity_features(current_bin, is_multistream_config):
+                continue
+            
+            # Extract base features from next bin and recompute velocity
+            if is_multistream_config:
+                # Multiple data streams - features is a list of arrays
+                current_features_list = current_bin['features']
+                next_features_list = next_bin['features']
+                feature_types_list = current_bin['feature_type']
+                
+                for j, (curr_feats, next_feats, ft) in enumerate(zip(current_features_list, next_features_list, feature_types_list)):
+                    if self._feature_group_has_velocity(ft):
+                        # Extract base features from next bin
+                        next_base_features = self._extract_base_features_from_total(next_feats, ft, j)
+                        current_base_features = self._extract_base_features_from_total(curr_feats, ft, j)
+                        
+                        # Only compute velocity if we have valid base features from both bins
+                        if next_base_features.size > 0 and current_base_features.size > 0:
+                            new_velocity = self._get_velocity_features(j, current_base_features, next_base_features)
+                            
+                            # Replace velocity portion in current features
+                            current_bin['features'][j] = self._replace_velocity_in_features(curr_feats, new_velocity, ft, j)
+            else:
+                # Single data stream - features is a single array
+                current_features = current_bin['features']
+                next_features = next_bin['features']
+                feature_type = current_bin['feature_type']
+                
+                if self._feature_group_has_velocity(feature_type):
+                    # Extract base features from next bin
+                    next_base_features = self._extract_base_features_from_total(next_features, feature_type, 0)
+                    current_base_features = self._extract_base_features_from_total(current_features, feature_type, 0)
+                    
+                    # Only compute velocity if we have valid base features from both bins
+                    if next_base_features.size > 0 and current_base_features.size > 0:
+                        new_velocity = self._get_velocity_features(0, current_base_features, next_base_features)
+                        
+                        # Replace velocity portion in current features
+                        current_bin['features'] = self._replace_velocity_in_features(current_features, new_velocity, feature_type, 0)
+    
+    def _bin_has_velocity_features(self, bin_dict: Dict, is_multistream_config: bool) -> bool:
+        """Check if a bin has velocity features."""
+        if is_multistream_config:
+            feature_types_list = bin_dict['feature_type']
+            return any(self._feature_group_has_velocity(ft) for ft in feature_types_list)
+        else:
+            return self._feature_group_has_velocity(bin_dict['feature_type'])
+    
+    def _feature_group_has_velocity(self, feature_type: Union[str, List[str]]) -> bool:
+        """Check if a feature group contains velocity features."""
+        if isinstance(feature_type, str):
+            return feature_type == 'vel'
+        elif isinstance(feature_type, list):
+            return 'vel' in feature_type
+        return False
+    
+    def _extract_base_features_from_total(self, total_features: np.ndarray, feature_type: Union[str, List[str]], array_index: int) -> np.ndarray:
+        """Extract just the base features (non-velocity, non-history) from total features."""
+        if isinstance(feature_type, list):
+            base_feature_types = [f for f in feature_type if f not in ['history', 'vel']]
+            has_velocity = 'vel' in feature_type
+            has_history = 'history' in feature_type
+        else:
+            base_feature_types = [feature_type] if feature_type not in ['history', 'vel'] else []
+            has_velocity = feature_type == 'vel'
+            has_history = feature_type == 'history'
+        
+        if not base_feature_types:
+            return np.array([])
+        
+        # Calculate base feature size (this should match the computation in _compute_features)
+        # For simplicity, we'll use the fact that base features come first and have a predictable size
+        # based on the feature types and number of channels
+        
+        # Get feature params for size calculation
+        fp = self.feature_params[array_index] if array_index < len(self.feature_params) else {}
+        
+        # Calculate expected base feature size
+        base_feature_size = 0
+        for ft in base_feature_types:
+            if ft in ['mav', 'power', 'mean', 'var']:
+                # These produce one feature per channel
+                dimensions = self._get_dimensions_for_array(array_index)
+                base_feature_size += dimensions
+            elif ft == 'mean_and_vel':
+                # This produces 2 features per channel (mean + velocity)
+                dimensions = self._get_dimensions_for_array(array_index)
+                base_feature_size += 2 * dimensions
+        
+        # Base features are at the beginning of the total features array
+        return total_features[:base_feature_size]
+    
+    def _replace_velocity_in_features(self, total_features: np.ndarray, new_velocity: np.ndarray, feature_type: Union[str, List[str]], array_index: int) -> np.ndarray:
+        """Replace the velocity portion of the total features with new velocity values."""
+        if isinstance(feature_type, list):
+            base_feature_types = [f for f in feature_type if f not in ['history', 'vel']]
+            has_velocity = 'vel' in feature_type
+            has_history = 'history' in feature_type
+        else:
+            base_feature_types = [feature_type] if feature_type not in ['history', 'vel'] else []
+            has_velocity = feature_type == 'vel'
+            has_history = feature_type == 'history'
+        
+        if not has_velocity:
+            return total_features  # No velocity to replace
+        
+        # Calculate base feature size 
+        base_feature_size = 0
+        for ft in base_feature_types:
+            if ft in ['mav', 'power', 'mean', 'var']:
+                dimensions = self._get_dimensions_for_array(array_index)
+                base_feature_size += dimensions
+            elif ft == 'mean_and_vel':
+                dimensions = self._get_dimensions_for_array(array_index)
+                base_feature_size += 2 * dimensions
+        
+        # Velocity features come right after base features
+        velocity_start = base_feature_size
+        velocity_end = velocity_start + new_velocity.shape[0]
+        
+        # Create new feature array with replaced velocity
+        new_features = total_features.copy()
+        new_features[velocity_start:velocity_end] = new_velocity
+        
+        return new_features
+    
+    def _get_dimensions_for_array(self, array_index: int) -> int:
+        """Get the number of dimensions/channels for a specific array index."""
+        # This is a simplified approach - in practice, you might want to store this information
+        # For now, we'll try to infer it from the stored history or use a default
+        if array_index in self.previous_bin_features and self.previous_bin_features[array_index]:
+            # Infer from stored base features
+            base_features = self.previous_bin_features[array_index][-1]
+            # Assume base features are computed with simple feature types that produce 1 feature per channel
+            return base_features.shape[0]
+        
+        # Fallback - try to get from config if available
+        return getattr(self, 'channels', 1)
+    
     def _compute_features(self, data: np.ndarray, feature_types: List[str], feature_params: Optional[Dict] = None) -> np.ndarray:
         """
         Compute features from data using vectorized operations.
         
         Args:
             data: Input data of shape [samples, channels]
-            feature_types: List of feature types to compute (no 'history' allowed here)
+            feature_types: List of feature types to compute (no 'history' or 'vel' allowed here)
             feature_params: Parameters for the feature computation
             
         Returns:
@@ -500,12 +701,6 @@ class FeatureExtractor:
         elif feature_type == 'var':
             # Variance
             return np.var(data, axis=0)
-        elif feature_type == 'vel':
-            # Velocity (derivative)
-            if data.shape[0] > 1:
-                return np.diff(data, axis=0).mean(axis=0)
-            else:
-                return np.zeros(data.shape[1])
         elif feature_type == "mean_and_vel":
             # Mean and velocity (legacy feature)
             mean_pos = np.mean(data, axis=0)
