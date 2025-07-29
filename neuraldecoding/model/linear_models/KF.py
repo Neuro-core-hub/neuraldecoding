@@ -119,6 +119,7 @@ class KalmanFilter(LinearModel):
             yhat (ndarray) prediction of size [batch_size, num_outputs, sequence_length] or [sequence_length, num_outputs] or [num_outputs]
         """
         yhat = None
+        input = input.squeeze()
         if input.ndim == 1:
             yhat = np.squeeze(self.predict(np.expand_dims(input, axis=0)), axis=0)
             # Here, Pt is not reinitialized to allow for online prediction
