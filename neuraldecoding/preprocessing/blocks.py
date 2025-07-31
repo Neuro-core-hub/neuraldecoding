@@ -16,6 +16,7 @@ import time
 import pickle
 from typing import Union, List
 import numpy as np
+import matplotlib.pyplot as plt
 
 class PreprocessingBlock(ABC):
 	"""
@@ -679,11 +680,12 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 	"""
 	A block for detecting movement onset in the EMG data.
 	"""
-	def __init__(self, location_emg: str, location_times:str , detection_config: dict, output_key: str = 'onset_indices'):
+	def __init__(self, location_emg: str, location_times:str , detection_config: dict, neural_indices: list = None, output_key: str = 'onset_indices'):
 		super().__init__()
 		self.location_emg = location_emg
 		self.location_times = location_times
 		self.detection_config = detection_config
+		self.neural_indices = neural_indices
 		self.output_key = output_key
 		self.movement_onset_detection = MovementOnsetDetector(detection_config)
 
@@ -697,11 +699,44 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 		trial_start_times = interpipe['trial_start_times']
 		trial_end_times = interpipe['trial_end_times']
 
+		# Select specific neural channels if indices are provided
+		if self.neural_indices is not None:
+			emg = emg[:, self.neural_indices]
+
 		# Detect movement onsets
 		onsets = self.movement_onset_detection.detect_movement_onsets(emg, times, trial_start_times, trial_end_times)
 
 		# Add onsets to data dictionary
 		interpipe[self.output_key] = onsets
+
+		# Plot all channels together with onset markers
+		n_channels = emg.shape[1]
+		fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+		
+		# Plot all EMG channels
+		for ch in range(n_channels):
+			ax.plot(times, emg[:, ch], alpha=0.7, linewidth=0.8, label=f'Channel {ch}')
+		
+		# Add vertical lines for onsets
+		for onset_time in onsets:
+			if onset_time is not None and not np.isnan(onset_time):
+				ax.axvline(x=onset_time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time == onsets[0] else "")
+		
+		# Add trial boundaries for context
+		for i, start_time in enumerate(trial_start_times):
+			ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.5, linewidth=1.5, 
+					  label='Trial Start' if i == 0 else "")
+		for i, end_time in enumerate(trial_end_times):
+			ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.5, linewidth=1.5, 
+					  label='Trial End' if i == 0 else "")
+		
+		ax.set_xlabel('Time (ms)')
+		ax.set_ylabel('EMG Amplitude')
+		ax.set_title('EMG Channels with Movement Onsets')
+		ax.grid(True, alpha=0.3)
+		ax.legend()
+		plt.tight_layout()
+		plt.show(block=True)
 
 		return data, interpipe
 
@@ -709,12 +744,13 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing the behavior data with a template behavior.
 	"""
-	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict):
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict, kinematic_indices: list = None):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.location_out = location_out
 		self.location_onsets = location_onsets
 		self.template_config = template_config
+		self.kinematic_indices = kinematic_indices
 	
 	def transform(self, data, interpipe):
 		"""
@@ -742,6 +778,11 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		if not isinstance(kinematics, np.ndarray):
 			kinematics = np.array(kinematics, dtype=np.float32)
 		
+		# Index the second axis of kinematics if kinematic_indices is provided
+		if self.kinematic_indices is not None:
+			kinematics = kinematics[:, self.kinematic_indices]
+			targets = targets[:, self.kinematic_indices]
+		
 		# Apply template behavior
 		templated_kinematics = self._apply_template_kinematics(
 			kinematics=kinematics,
@@ -754,8 +795,27 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 			template_params=self.template_config.get('template_params', {})
 		)
 		
+		# Plot original vs templated kinematics
+		self._plot_kinematics_comparison(
+			original_kinematics=kinematics,
+			templated_kinematics=templated_kinematics,
+			behavior_ts=behavior_ts,
+			trial_start_times=trial_start_times,
+			trial_end_times=trial_end_times,
+			movement_onsets=movement_onsets,
+			kinematic_indices=self.kinematic_indices
+		)
+		
 		# Update the behavior data in the data dictionary
-		data[self.location_out] = templated_kinematics
+		if self.kinematic_indices is not None:
+			if self.location_out in data:
+				data[self.location_out][:, self.kinematic_indices] = templated_kinematics
+			else:
+				# Copy input kinematics to output location and then modify the desired indices
+				data[self.location_out] = kinematics.copy()
+				data[self.location_out][:, self.kinematic_indices] = templated_kinematics
+		else:
+			data[self.location_out] = templated_kinematics
 		
 		return data, interpipe
 	
@@ -895,7 +955,7 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		initial_value: float,
 		final_value: float,
 		duration_s: float,
-		steepness: float = 30,
+		steepness: float = 10,
 		start_point: float = 0,
 		start_threshold_percentage: float = 0.005,
 		**kwargs
@@ -930,5 +990,85 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		"""Exponential template function."""
 		amplitude = final_value - initial_value
 		return initial_value + amplitude * (1 - np.exp(-t / time_constant))
+
+	def _plot_kinematics_comparison(
+		self,
+		original_kinematics: np.ndarray,
+		templated_kinematics: np.ndarray,
+		behavior_ts: np.ndarray,
+		trial_start_times: np.ndarray,
+		trial_end_times: np.ndarray,
+		movement_onsets: np.ndarray,
+		kinematic_indices: list = None
+	):
+		"""
+		Plot comparison between original and templated kinematics.
+		
+		Args:
+			original_kinematics: Original kinematic data
+			templated_kinematics: Templated kinematic data  
+			behavior_ts: Behavior timestamps
+			trial_start_times: Trial start times
+			trial_end_times: Trial end times
+			movement_onsets: Movement onset times
+			kinematic_indices: Indices of kinematic dimensions to plot
+		"""
+		# Determine which dimensions to plot
+		# Note: original_kinematics and templated_kinematics are already sliced if kinematic_indices was provided
+		n_dims = original_kinematics.shape[1]
+		
+		if kinematic_indices is not None:
+			# Data is already sliced, so plot indices 0, 1, 2, ... but label with original indices
+			plot_indices = list(range(n_dims))
+			plot_labels = [f'Dimension {kinematic_indices[i]}' for i in range(n_dims)]
+		else:
+			# Data contains all dimensions
+			plot_indices = list(range(n_dims))
+			plot_labels = [f'Dimension {i}' for i in plot_indices]
+		
+		# Create subplots - one for each kinematic dimension
+		fig, axes = plt.subplots(n_dims, 1, figsize=(14, 4*n_dims), sharex=True)
+		if n_dims == 1:
+			axes = [axes]  # Make it iterable for single subplot
+		
+		fig.suptitle('Original vs Templated Kinematics Comparison', fontsize=16, fontweight='bold')
+		
+		for i, (dim_idx, ax, label) in enumerate(zip(plot_indices, axes, plot_labels)):
+			# Plot original kinematics
+			ax.plot(behavior_ts, original_kinematics[:, dim_idx], 
+				   color='blue', alpha=0.7, linewidth=1.5, label='Original')
+			
+			# Plot templated kinematics
+			ax.plot(behavior_ts, templated_kinematics[:, dim_idx], 
+				   color='red', alpha=0.8, linewidth=2, label='Templated')
+			
+			# Add trial boundaries
+			for j, start_time in enumerate(trial_start_times):
+				ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.6, linewidth=1,
+						  label='Trial Start' if i == 0 and j == 0 else "")
+			
+			for j, end_time in enumerate(trial_end_times):
+				ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.6, linewidth=1,
+						  label='Trial End' if i == 0 and j == 0 else "")
+			
+			# Add movement onsets
+			for j, onset_time in enumerate(movement_onsets):
+				if onset_time is not None and not np.isnan(onset_time):
+					ax.axvline(x=onset_time, color='purple', linestyle='--', alpha=0.8, linewidth=2,
+							  label='Movement Onset' if i == 0 and j == 0 else "")
+			
+			# Formatting
+			ax.set_ylabel(f'{label}\nPosition')
+			ax.grid(True, alpha=0.3)
+			ax.legend(loc='upper right')
+			
+			# Set title for each subplot
+			ax.set_title(f'{label} - Original vs Templated', fontweight='bold')
+		
+		# Set common x-label
+		axes[-1].set_xlabel('Time (ms)')
+		
+		plt.tight_layout()
+		plt.show(block=True)
 
 
