@@ -168,30 +168,30 @@ def add_history(neural_data, seq_len):
     return Xtrain1
 
 def add_trial_history(x, y, trial_ts, leadup):
-    Xtrain_temp = torch.tensor(x)
-    Ytrain_temp = torch.tensor(y)
+    X_temp = torch.tensor(x)
+    Y_temp = torch.tensor(y)
 
     # find max trial length
     unique_trials, trial_lengths = np.unique(trial_ts, return_counts=True)
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
 
-    Xtrain = torch.zeros((num_trials, int(Xtrain_temp.shape[1]), max_length + leadup))
-    Ytrain = torch.zeros((num_trials, int(Ytrain_temp.shape[1]), max_length))
+    X = torch.zeros((num_trials, int(X_temp.shape[1]), max_length + leadup))
+    Y = torch.zeros((num_trials, int(Y_temp.shape[1]), max_length))
 
     for idx, trial in enumerate(unique_trials):
         mask = trial == trial_ts
-        Ytrain[idx,:,:np.count_nonzero(mask)] = Ytrain_temp[mask,:].T
+        Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]
         if first_nonzero_idx < leadup:
             mask[:first_nonzero_idx] = 1
             start = leadup - first_nonzero_idx
-            Xtrain[idx,:,start:start + np.count_nonzero(mask)] = Xtrain_temp[mask,:].T
+            X[idx,:,start:start + np.count_nonzero(mask)] = X_temp[mask,:].T
         else:
             mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
-            Xtrain[idx,:,:np.count_nonzero(mask)] = Xtrain_temp[mask,:].T
+            X[idx,:,:np.count_nonzero(mask)] = X_temp[mask,:].T
 
-    return Xtrain, Ytrain
+    return X, Y, trial_lengths
 
 
 def add_history_numpy(neural_data, seq_len):

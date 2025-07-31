@@ -1,4 +1,5 @@
 import neuraldecoding.utils
+import neuraldecoding.utils.label_mods
 import neuraldecoding.stabilization.latent_space_alignment
 import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
@@ -348,23 +349,21 @@ class AddHistoryBlock(DataProcessingBlock):
 
 class TrialHistoryBlock(DataProcessingBlock):
 	"""
-	A block to to add history but have each sequence be the length of an entire trial, plus padding and leadup.
+	A block to add history but have each sequence be the length of an entire trial, plus padding and leadup.
 	Uses 'add_trial_history' to add history.
 	"""
-	def __init__(self, location='train', leadup = 20):
+	def __init__(self, leadup = 20):
 		"""
 		Initializes the TrialHistoryBlock.
 		Args:
-			location (str or list): Add to training ('train'), testing data ('test'), or all ('all'). Train is by default.
-				If using the 'all' option, ensure this step occurs before splitting. 
-			leadup (int): The length of the history to be added before the first bin of each trial. Default is 10.
+			leadup (int): The length of the history to be added before the first bin of each trial. Default is 20.
 		"""
-		self.location = location
+		self.set = set
 		self.leadup = leadup
 
 	def transform(self, data, interpipe):
 		"""
-		Transform the data by adding entire trial history, plus padding and leadup.
+		Transform the training data by adding entire trial history, plus padding and leadup.
 		Args:
 			data (dict): Input data dictionary containing the data to which history is added.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
@@ -372,24 +371,10 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data (dict): The data dictionary with history added at the specified locations.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		if isinstance(self.location, str):
-			self.location = [self.location]
-
-		for loc in self.location:
-			if loc == 'train':
-				input_ts = interpipe['trial_ts'][:interpipe['test_start_idx']]
-				data['neural_train'], data['finger_train'] = \
-					neuraldecoding.utils.add_trial_history(data['neural_train'], data['finger_train'], 
-											input_ts, self.leadup)
-			if loc == 'test':
-				input_ts = interpipe['trial_ts'][interpipe['test_start_idx']:]
-				data['neural_test'], data['finger_test'] = \
-					neuraldecoding.utils.add_trial_history(data['neural_test'], data['finger_test'], 
-											input_ts, self.leadup)
-			if loc == 'all':
-				data['neural_test'], data['finger_test'] = \
-					neuraldecoding.utils.add_trial_history(data['neural_test'], data['finger_test'], 
-											interpipe['trial_ts'], self.leadup)
+		trial_ts_train = interpipe['trial_ts'][:interpipe['test_start_idx']]
+		data['neural_train'], data['finger_train'], trial_lengths_train = \
+		neuraldecoding.utils.add_trial_history(data['neural_train'], data['finger_train'], trial_ts_train, self.leadup)
+		data['trial_lengths_train'] = trial_lengths_train
 
 		return data, interpipe
 
@@ -515,5 +500,48 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
 			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('time_stamps', None))
+		return data, interpipe
+	
+class LabelModificationBlock(DataProcessingBlock):
+	"""
+	A block to add label modifications to training and/or testing data.
+	"""
+
+	def __init__(self, modifications, param_dict, location):
+		"""
+		Initializes the LabelModificationBlock. Below are modification options and the required parameters in param_dict.
+		See the apply_modifications function in utils/label_mods.py function and hover over each individual modification 
+		function to get a better sense of what they do.
+		- 'shift_bins': 'shift'
+		- 'shift_by_trial': 'shift_range', 'individuate_dofs'
+		- 'warp_by_trial': 'warp_factor', 'hold_time'
+		- 'random_warp': 'hold_time, 'individuate_dofs'
+		- 'sigmoid_replacement': 'sigmoid_k', 'center'
+		- 'bias_endpoints': 'bias_range', 'individuate_dofs'
+		Args:
+			modifications (str or list): modification or modifications to add to labels
+			leadup (int): The length of the history to be added before the first bin of each trial. Default is 10.
+			location (str or list): where to apply the modifications
+		"""
+		self.modifications = modifications
+		self.param_dict = param_dict
+		self.location = location
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by modifying labels.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with labels modified at the specified locations
+			interpipe (dict): The interpipe dictionary remains unchanged
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+
+		for loc in self.location:
+			data[loc] = neuraldecoding.utils.label_mods.apply_modifications(self.modifications, data[loc], interpipe['trial_ts'], self.param_dict)
+		
 		return data, interpipe
 	
