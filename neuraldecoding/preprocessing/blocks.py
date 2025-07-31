@@ -105,8 +105,9 @@ class Dict2DataDictBlock(DataFormattingBlock):
 			data_out (dict): A dictionary containing 'neural' and 'finger' data.
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
-		(neural, finger), trial_idx = neuraldecoding.utils.neural_finger_from_dict(data, self.neural_type)
+		(neural, finger), trial_idx, trial_ts = neuraldecoding.utils.neural_finger_from_dict(data, self.neural_type)
 		interpipe['trial_idx'] = trial_idx
+		interpipe['trial_ts'] = trial_ts
 
 		data_out = {'neural': neural, 'finger': finger}
 		return data_out, interpipe
@@ -184,11 +185,14 @@ class DataSplitBlock(DataFormattingBlock):
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed)
 		
-		(neural_train, finger_train), (neural_test, finger_test) = split_data
+		(neural_train, finger_train), (neural_test, finger_test), test_start_idx = split_data
 		data_out = {'neural_train': neural_train, 
 					'neural_test': neural_test, 
 					'finger_train': finger_train, 
 					'finger_test': finger_test}
+		
+		interpipe['test_start_idx'] = test_start_idx
+
 		return data_out, interpipe
 
 class Dict2TupleBlock(DataFormattingBlock):
@@ -341,6 +345,54 @@ class AddHistoryBlock(DataProcessingBlock):
 			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
+
+class TrialHistoryBlock(DataProcessingBlock):
+	"""
+	A block to to add history but have each sequence be the length of an entire trial, plus padding and leadup.
+	Uses 'add_trial_history' to add history.
+	"""
+	def __init__(self, location='train', leadup = 20):
+		"""
+		Initializes the TrialHistoryBlock.
+		Args:
+			location (str or list): Add to training ('train'), testing data ('test'), or all ('all'). Train is by default.
+				If using the 'all' option, ensure this step occurs before splitting. 
+			leadup (int): The length of the history to be added before the first bin of each trial. Default is 10.
+		"""
+		self.location = location
+		self.leadup = leadup
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding entire trial history, plus padding and leadup.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with history added at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+
+		for loc in self.location:
+			if loc == 'train':
+				input_ts = interpipe['trial_ts'][:interpipe['test_start_idx']]
+				data['neural_train'], data['finger_train'] = \
+					neuraldecoding.utils.add_trial_history(data['neural_train'], data['finger_train'], 
+											input_ts, self.leadup)
+			if loc == 'test':
+				input_ts = interpipe['trial_ts'][interpipe['test_start_idx']:]
+				data['neural_test'], data['finger_test'] = \
+					neuraldecoding.utils.add_trial_history(data['neural_test'], data['finger_test'], 
+											input_ts, self.leadup)
+			if loc == 'all':
+				data['neural_test'], data['finger_test'] = \
+					neuraldecoding.utils.add_trial_history(data['neural_test'], data['finger_test'], 
+											interpipe['trial_ts'], self.leadup)
+
+		return data, interpipe
+
 
 class NormalizationBlock(DataProcessingBlock):
 	"""

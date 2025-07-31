@@ -100,7 +100,13 @@ def neural_finger_from_dict(dict, neural_type):
     neural = dict[neural_type]
     finger = dict['finger_kinematics']
     trial_idx = dict['trial_index']
-    return (neural, finger), trial_idx
+
+    trial_ts = np.zeros(len(neural), dtype=np.int32)
+    boundaries = np.concatenate([trial_idx, [len(neural)]])
+    for i in range(len(trial_idx)):
+        trial_ts[boundaries[i]:boundaries[i+1]] = i
+
+    return (neural, finger), trial_idx, trial_ts
 
 def data_split_direct(data_X, data_Y, ratio):
     total_len = len(data_X)
@@ -114,18 +120,19 @@ def data_split_direct(data_X, data_Y, ratio):
     split1 = (split1_X, split1_Y)
     split2 = (split2_X, split2_Y)
 
-    return split1, split2
+    test_start_idx = len1
+
+    return split1, split2, test_start_idx
 
 def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     boundaries = np.concatenate([trial_idx, [len(x)]])
     n_trials = len(trial_idx)
+    trial_list = torch.arange(trial_idx)
+
+    n_train = int(n_trials * split_ratio)
     
-    g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(n_trials, generator=g)
-    n_test = int(n_trials * (1.-split_ratio))
-    
-    test_trials = perm[:n_test]
-    train_trials = perm[n_test:]
+    train_trials = trial_list[:n_train]
+    test_trials = trial_list[n_train:]
     
     train_mask = torch.zeros(len(x), dtype=torch.bool)
     test_mask = torch.zeros(len(x), dtype=torch.bool)
@@ -137,8 +144,10 @@ def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     for trial in test_trials:
         start, end = boundaries[trial], boundaries[trial + 1]
         test_mask[start:end] = True
-    
-    return (x[train_mask],y[train_mask]), (x[test_mask],y[test_mask])
+
+    test_start_idx = boundaries[n_trials]
+
+    return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask]), test_start_idx
 
 def add_history(neural_data, seq_len):
     """
@@ -157,6 +166,33 @@ def add_history(neural_data, seq_len):
 
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
+
+def add_trial_history(x, y, trial_ts, leadup):
+    Xtrain_temp = torch.tensor(x)
+    Ytrain_temp = torch.tensor(y)
+
+    # find max trial length
+    unique_trials, trial_lengths = np.unique(trial_ts, return_counts=True)
+    max_length = np.max(trial_lengths)
+    num_trials = unique_trials.shape[0]
+
+    Xtrain = torch.zeros((num_trials, int(Xtrain_temp.shape[1]), max_length + leadup))
+    Ytrain = torch.zeros((num_trials, int(Ytrain_temp.shape[1]), max_length))
+
+    for idx, trial in enumerate(unique_trials):
+        mask = trial == trial_ts
+        Ytrain[idx,:,:np.count_nonzero(mask)] = Ytrain_temp[mask,:].T
+        first_nonzero_idx = mask.nonzero()[0][0]
+        if first_nonzero_idx < leadup:
+            mask[:first_nonzero_idx] = 1
+            start = leadup - first_nonzero_idx
+            Xtrain[idx,:,start:start + np.count_nonzero(mask)] = Xtrain_temp[mask,:].T
+        else:
+            mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
+            Xtrain[idx,:,:np.count_nonzero(mask)] = Xtrain_temp[mask,:].T
+
+    return Xtrain, Ytrain
+
 
 def add_history_numpy(neural_data, seq_len):
     """
