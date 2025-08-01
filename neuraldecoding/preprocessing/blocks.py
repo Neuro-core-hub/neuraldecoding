@@ -176,6 +176,9 @@ class DataSplitBlock(DataFormattingBlock):
 				- 'neural_test': Testing neural data
 				- 'finger_train': Training finger data
 				- 'finger_test': Testing finger data
+				if split_ratio is a tuple, also includes:
+				- 'neural_val': Validation neural data
+				- 'finger_val': Validation finger data
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
 		if 'trial_idx' not in interpipe:
@@ -370,8 +373,9 @@ class TrialHistoryBlock(DataProcessingBlock):
 		"""
 		trial_ts_train = interpipe['trial_ts'][:interpipe['test_start_idx']]
 		data['neural_train'], data['finger_train'], trial_lengths_train = \
-		neuraldecoding.utils.add_trial_history(data['neural_train'], data['finger_train'], trial_ts_train, self.leadup)
+			neuraldecoding.utils.add_trial_history(data['neural_train'], data['finger_train'], trial_ts_train, self.leadup)
 		data['trial_lengths_train'] = trial_lengths_train
+		interpipe['leadup'] = self.leadup
 
 		return data, interpipe
 
@@ -528,7 +532,7 @@ class LabelModificationBlock(DataProcessingBlock):
 		"""
 		Transform the data by modifying labels.
 		Args:
-			data (dict): Input data dictionary containing the data to which history is added.
+			data (dict): Input data dictionary containing the data without history.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
 			data (dict): The data dictionary with labels modified at the specified locations
