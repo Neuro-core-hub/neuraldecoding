@@ -108,31 +108,45 @@ def neural_finger_from_dict(dict, neural_type):
 
     return (neural, finger), trial_idx, trial_ts
 
-def data_split_direct(data_X, data_Y, ratio):
-    total_len = len(data_X)
-    len1 = int(total_len * ratio)
+def data_split_direct(x, y, ratio):
+    total_len = len(x)
+    if isinstance(ratio, float):
+        train_idx = np.arange(total_len*ratio, dtype=int)
+        test_idx = np.arange(total_len*ratio, total_len, dtype=int)
+    elif isinstance(ratio, tuple):
+        train_idx = np.arange(total_len*ratio[0], dtype=int)
+        valid_idx = np.arange(total_len*ratio[0], total_len*ratio[0]+total_len*ratio[1], dtype=int)
+        test_idx = np.arange(total_len*ratio[0]+total_len*ratio[1], total_len, dtype=int)
 
-    split1_X = data_X[:len1, :]
-    split1_Y = data_Y[:len1, :]
-    split2_X = data_X[len1:, :]
-    split2_Y = data_Y[len1:, :]
+    data = {'neural_train': x[train_idx], 
+			'neural_test': x[test_idx], 
+			'finger_train': y[train_idx], 
+			'finger_test': y[test_idx]}
 
-    split1 = (split1_X, split1_Y)
-    split2 = (split2_X, split2_Y)
+    if valid_idx is not None:
+        data['neural_val'] = x[valid_idx]
+        data['finger_val'] = y[valid_idx]
 
-    test_start_idx = len1
+    test_start_idx = len(train_idx)
 
-    return split1, split2, test_start_idx
+    return data, test_start_idx
 
 def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     boundaries = np.concatenate([trial_idx, [len(x)]])
     n_trials = len(trial_idx)
     trial_list = torch.arange(trial_idx)
 
-    n_train = int(n_trials * split_ratio)
-    
-    train_trials = trial_list[:n_train]
-    test_trials = trial_list[n_train:]
+    if isinstance(split_ratio, float):
+        n_train = int(n_trials * split_ratio)
+        train_trials = trial_list[:n_train]
+        val_trials = None
+        test_trials = trial_list[n_train:]
+    elif isinstance(split_ratio, tuple) == 3:
+        n_train = int(n_trials * split_ratio[0])
+        n_val = int(n_trials * split_ratio[1])
+        train_trials = trial_list[:n_train]
+        val_trials = trial_list[n_train:n_train+n_val]
+        test_trials = trial_list[n_train+n_val:]
     
     train_mask = torch.zeros(len(x), dtype=torch.bool)
     test_mask = torch.zeros(len(x), dtype=torch.bool)
@@ -144,10 +158,24 @@ def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     for trial in test_trials:
         start, end = boundaries[trial], boundaries[trial + 1]
         test_mask[start:end] = True
+    
+    if val_trials is not None:
+        val_mask = torch.zeros(len(x), dtype=torch.bool)
+        for trial in val_trials:
+            start, end = boundaries[trial], boundaries[trial + 1]
+            val_mask[start:end] = True
 
-    test_start_idx = boundaries[n_trials]
+    test_start_idx = boundaries[n_train]
 
-    return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask]), test_start_idx
+    data = {'neural_train': x[train_mask], 
+			'neural_test': x[test_mask], 
+			'finger_train': y[train_mask], 
+			'finger_test': y[test_mask]}
+    if val_trials is not None:
+        data['neural_val'] = x[val_mask]
+        data['finger_val'] = y[val_mask]
+
+    return data, test_start_idx
 
 def add_history(neural_data, seq_len):
     """

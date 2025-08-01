@@ -154,7 +154,8 @@ class DataSplitBlock(DataFormattingBlock):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
-			split_ratio (float): The ratio of training data to total data. Default is 0.8.
+			split_ratio (float, tuple): The ratio of training data to total data. Default is 0.8. If tuple, 
+				will be in the form of [train, validation, test] as a fraction of 1 (e.g. [0.7, 0.1, 0.2]).
 			split_seed (int): Seed for random number generator to ensure reproducibility. Default is 42.
 		"""
 		super().__init__()
@@ -186,15 +187,11 @@ class DataSplitBlock(DataFormattingBlock):
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed)
 		
-		(neural_train, finger_train), (neural_test, finger_test), test_start_idx = split_data
-		data_out = {'neural_train': neural_train, 
-					'neural_test': neural_test, 
-					'finger_train': finger_train, 
-					'finger_test': finger_test}
+		data, test_start_idx = split_data
 		
 		interpipe['test_start_idx'] = test_start_idx
 
-		return data_out, interpipe
+		return data, interpipe
 
 class Dict2TupleBlock(DataFormattingBlock):
 	"""
