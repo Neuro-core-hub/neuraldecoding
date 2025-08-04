@@ -34,6 +34,12 @@ class NNTrainer(Trainer):
         self.metrics = config.evaluation.metrics
         self.metric_params = config.evaluation.get("params", {})
         self.logger = {metric: [[], []] for metric in self.metrics}
+        self.logger_save_path = config.evaluation.get("save_path", None)
+        if self.logger_save_path:
+            os.makedirs(os.path.dirname(self.logger_save_path), exist_ok=True)
+            with open(self.logger_save_path, 'a') as f:
+                headers = ['epoch'] + [f'{metric}_train' for metric in self.metrics] + [f'{metric}_val' for metric in self.metrics]
+                f.write(','.join(headers) + '\n')
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         self.data_path = config.data.data_path
@@ -139,7 +145,12 @@ class NNTrainer(Trainer):
                     metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
                     self.logger[metric][0].append(metric_class(train_all_predictions, train_all_targets, metric_param))
                     self.logger[metric][1].append(metric_class(val_all_predictions, val_all_targets, metric_param))
-
+           
+            if self.logger_save_path:
+                with open(self.logger_save_path, 'a') as f:
+                    entries = [epoch] + [self.logger[metric][0][-1] for metric in self.metrics] + [self.logger[metric][1][-1] for metric in self.metrics]
+                    f.write(','.join(map(str, entries)) + '\n')
+            
             # Scheduler step
             if self.scheduler:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):

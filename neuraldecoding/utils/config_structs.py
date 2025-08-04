@@ -34,6 +34,7 @@ trainer_struct_nn = {
         },
         'evaluation': {
             'metrics': ListConfig,
+            'save_path': str,
             'params': DictConfig
         },
         'data': {
