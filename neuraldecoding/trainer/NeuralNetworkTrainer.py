@@ -34,7 +34,6 @@ class NNTrainer(Trainer):
         self.metrics = config.evaluation.metrics
         self.metric_params = config.evaluation.get("params", {})
         self.logger = {metric: [[], []] for metric in self.metrics}
-        # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         self.data_path = config.data.data_path
         self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders()
@@ -49,17 +48,17 @@ class NNTrainer(Trainer):
         data_tuple = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
 
         if len(data_tuple) == 2:
-            self.train_ds, self.test_ds = data_tuple
+            self.train_ds, self.valid_ds = data_tuple
         elif len(data_tuple) == 3:
             self.train_ds, self.valid_ds, self.test_ds = data_tuple
 
         train_loader = DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True)
-        test_loader = DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False)
+        valid_loader = DataLoader(self.valid_ds, batch_size=self.batch_size, shuffle=False)
 
-        if hasattr(self, 'valid_ds'):
-            valid_loader = DataLoader(self.valid_ds, batch_size=self.batch_size, shuffle=False)
+        if hasattr(self, 'test_ds'):
+            test_loader = DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False)
         else:
-            valid_loader = None
+            test_loader = None
 
         return train_loader, valid_loader, test_loader
 
