@@ -3,16 +3,12 @@ import copy
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 from omegaconf import DictConfig, ListConfig, OmegaConf
-from neuraldecoding.utils.config_structs import (
-    decoder_struct,
-    trainer_struct_nn,
-    trainer_struct_linear,
-    preprocessing_struct
-)
-from hydra import initialize, compose
-from neuraldecoding.utils.config_parser import verify_structure, parse_verify_config, compare_configs
+from hydra import initialize_config_dir, compose
+from neuraldecoding.utils import verify_structure, parse_verify_config, compare_configs
 import pandas as pd
 from datetime import datetime
+import hashlib
+import time
 
 class config:
     def __init__(self, config_path = None):
@@ -23,22 +19,26 @@ class config:
         self.first_load = True
         if config_path:
             self.load_config(config_path)
-
-    def load_config(self, config_path):
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"Configuration file not found: {config_path}")
         
-        if os.path.isdir(config_path):
-            with initialize(version_base=None, config_path=config_path):
+    def load_config(self, config_path):        
+        if not config_path.endswith('.yaml'):
+            with initialize_config_dir(version_base=None, config_dir=config_path):
                 cfg = compose("config")
         else:
             cfg = OmegaConf.load(config_path)
         
         self.config = cfg
+        if self.config["hash_id"] is None:
+            self.hash = hashlib.md5(datetime.now().strftime("%Y%m%d%H%M%S").encode('ascii')).hexdigest()
+            self.config["hash_id"] = self.hash
+        else:
+            self.hash = self.config["hash_id"]
         if self.first_load:
             self.original_config = copy.deepcopy(cfg)
             self.first_load = False
         self.config_path = config_path
+        
+        # TODO: figure out what to do with hash if the config is updated, right now hash stays the same as the original one
 
     def __call__(self, section_name = None):
         if section_name is None:
@@ -46,18 +46,12 @@ class config:
         return self.parse_section(section_name, {})
     
     def validate_config(self):
+        # validate the structure of the whole config, not implemented yet due to configs are being changed frequently
+        # TODO: impmlement this when the config structure is finalized
         raise NotImplementedError("Not implemented yet")
 
     def parse_section(self, section_name):
-        if section_name not in self.config:
-            raise KeyError(f"Section '{section_name}' not found in configuration")
         return parse_verify_config(self.config, section_name)
-    
-    def get_value(self, key_path: str) -> Any:
-        try:
-            return OmegaConf.select(self.config, key_path)
-        except:
-            return KeyError(f"Key '{key_path}' not found in configuration")
 
     def update_value(self, key_path: str, value: Any, merge) -> None:
         '''
@@ -90,7 +84,13 @@ class config:
             file_name = f"{config_name}_{timestamp}.yaml"
             
         if file_path is None and file_name is not None:
-            file_path = os.path.dirname(self.config_path)
+            if not file_name.endswith('.yaml'):
+                file_name += '.yaml'
+
+            if self.config_path.endswith('.yaml'):
+                file_path = os.path.dirname(self.config_path)
+            else:
+                file_path = self.config_path
 
         if file_path is not None and file_name is None:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -101,7 +101,6 @@ class config:
 
         os.makedirs(os.path.dirname(fpath), exist_ok=True)
 
-        # Save configuration
         with open(fpath, 'w') as f:
             OmegaConf.save(self.config, f)
         history = pd.DataFrame({
@@ -113,8 +112,23 @@ class config:
     def reset_to_original(self):
         self.config = copy.deepcopy(self.original_config)
     
-    def has_changes(self):
-        return self.config != self.original_config
-    
+    def has_changes(self, comparison_config = None):
+        if comparison_config is None:
+            return self.config != self.original_config
+        else:
+            return self.config != comparison_config # apparently you can do this to dicts ^_^
+
+    def get_hash(self):
+        return self.hash
+
     def get_changes(self):
         return compare_configs(self.config, self.original_config)
+
+    def get_readable(self):
+        return OmegaConf.to_yaml(self.config)
+
+    def get_value(self, key_path: str) -> Any:
+        try:
+            return OmegaConf.select(self.config, key_path)
+        except:
+            return KeyError(f"Key '{key_path}' not found in configuration")
