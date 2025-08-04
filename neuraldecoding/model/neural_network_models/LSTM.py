@@ -130,7 +130,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
                         torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
         return hidden
 
-    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False): # TODO: Change to batch
+    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False):
         """
         Trains LSTM Model
         """
