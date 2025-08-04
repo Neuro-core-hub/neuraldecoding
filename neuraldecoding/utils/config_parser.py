@@ -64,6 +64,25 @@ def parse_verify_config(config: DictConfig, section_name: str) -> dict:
     
     return section_content
 
+def compare_configs(current, original, path=""):
+    changes = {}
+    if isinstance(current, DictConfig) and isinstance(original, DictConfig):
+        for key in current:
+            current_path = f"{path}.{key}" if path else key
+            if key not in original:
+                changes[current_path] = {"action": "added", "value": current[key]}
+            elif current[key] != original[key]:
+                compare_configs(current[key], original[key], current_path)
+        
+        for key in original:
+            current_path = f"{path}.{key}" if path else key
+            if key not in current:
+                changes[current_path] = {"action": "removed", "value": original[key]}
+    else:
+        if current != original:
+            changes[path] = {"action": "modified", "old_value": original, "new_value": current}
+    return changes
+
 if __name__ == "__main__":
     from hydra import initialize, compose
 
