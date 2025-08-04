@@ -37,26 +37,31 @@ class NNTrainer(Trainer):
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         self.data_path = config.data.data_path
-        self.train_X, self.train_Y, self.valid_X, self.valid_Y = self.load_data()
-        self.train_loader, self.valid_loader = self.create_dataloaders()
+        self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders()
 
-    def load_data(self): # TODO, finalize this when dataset is merged to main
-        if not os.path.exists(self.data_path):
-            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
-        """Assuming data is dictionary output of one NWB file, change later"""
-        data = load_one_nwb(self.data_path)
-        train_X, valid_X, train_Y, valid_Y = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
-        return train_X, train_Y, valid_X, valid_Y
-    
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
-        train_dataset = TensorDataset(self.train_X.detach().clone().to(torch.float32), 
-                                    self.train_Y.detach().clone().to(torch.float32))
-        valid_dataset = TensorDataset(self.valid_X.detach().clone().to(torch.float32), 
-                                    self.valid_Y.detach().clone().to(torch.float32))
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
-        return train_loader, valid_loader
+        if not os.path.exists(self.data_path):
+            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
+        
+        """Assuming data is dictionary output of one NWB file, change later"""
+        data = load_one_nwb(self.data_path)
+        data_tuple = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
+
+        if len(data_tuple) == 2:
+            self.train_ds, self.test_ds = data_tuple
+        elif len(data_tuple) == 3:
+            self.train_ds, self.valid_ds, self.test_ds = data_tuple
+
+        train_loader = DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True)
+        test_loader = DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False)
+
+        if hasattr(self, 'valid_ds'):
+            valid_loader = DataLoader(self.valid_ds, batch_size=self.batch_size, shuffle=False)
+        else:
+            valid_loader = None
+
+        return train_loader, valid_loader, test_loader
 
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
         """Creates and returns an optimizer based on the configuration."""

@@ -6,6 +6,7 @@ from neuraldecoding.dataaugmentation import SequenceScaler
 from neuraldecoding.feature_extraction import FeatureExtractor
 from neuraldecoding.utils.utils_general import resolve_path
 import sklearn.preprocessing
+import neuraldecoding.utils.datasets
 
 import torch
 
@@ -196,35 +197,65 @@ class DataSplitBlock(DataFormattingBlock):
 
 		return data, interpipe
 
-class Dict2TupleBlock(DataFormattingBlock):
+class Dict2FingerDatasetBlock(DataFormattingBlock):
 	"""
-	Converts a dictionary to a tuple format.
-	Accepts either 2 or 4 keys in the dictionary:
-		- If 2 keys: 'neural' and 'finger'
-		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test'
+	Converts a dictionary to a FingerDataset or FingerDatasetCustom class.
 	"""
-	def __init__(self):
+	def __init__(self, otherdatakeys_list=None, otherinterpipekeys_list=None):
+		"""
+		Initializes the Dict2FingerDatasetBlock. Creates FingerDataset objects for train, validation (if included) and test. 
+		FingerDatasetCustom allows for additional data/interpipe keys to be included in the dataset. otherdatakeys_list and
+		otherinterpipekeys_list can be list of lists. Ensure that otherdatakeys_list and otherinterpipekeys_list have settings
+		in the order of [train, valid, test] or [train, test] if no validation set is used.
+		e.g. ,
+			otherdatakeys_list = ['trial_lengths_train', None], otherinterpipekeys_list = [['leadup'], None]
+		Args:
+			otherdatakeys_list (str, list, optional): Additional locations in the data dictionary to include. Must be length 2 if 
+				only train and test datasets are used, or length 3 if train, valid, and test datasets are used, or None.
+			otherinterpipekeys_list (str, list, optional): Additional keys in the interpipe dictionary to include. Must be length 2 if
+				only train and test datasets are used, or length 3 if train, valid, and test datasets are used, or None.
+		"""
 		super().__init__()
 
+		self.otherdatakeys_list = otherdatakeys_list
+		self.otherinterpipekeys_list = otherinterpipekeys_list
+	
 	def transform(self, data, interpipe):
 		"""
-		Transform the data from a dictionary to a tuple format.
+		Transform the data from a dictionary to FingerDataset or FingerDatasetCustom class.
 		Args:
-			data (dict): Input data dictionary.
+			data (dict): Input data dictionary containing the data and relevant information.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (tuple): A tuple containing either:
-				- (neural, finger) if 2 keys are present
-				- (neural_train, neural_test, finger_train, finger_test) if 4 keys are present
+			data_out (tuple): A tuple of FingerDataset or FingerDatasetCustom instances in order of [train, valid, test] or [train, test].
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		if len(data) == 2:
-			data_out = (data['neural'] , data['finger'])
-		elif len(data) == 4:
-			data_out = (data['neural_train'], data['neural_test'], data['finger_train'], data['finger_test'])
+		if 'neural_val' in data:
+			self.xkey = ['neural_train', 'neural_val', 'neural_test']
+			self.ykey = ['finger_train', 'finger_val', 'finger_test']
+			self.savekeys = ['train', 'valid', 'test']
 		else:
-			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
-		return data_out, interpipe
+			self.xkey = ['neural_train', 'neural_test']
+			self.ykey = ['finger_train', 'finger_test']
+			self.savekeys = ['train', 'test']
+
+		if self.otherdatakeys_list is None:
+			self.otherdatakeys_list = [None] * len(self.xkey)
+		if self.otherinterpipekeys_list is None:
+			self.otherinterpipekeys_list = [None] * len(self.xkey)
+		
+		if len(self.otherdatakeys_list) != len(self.xkey) or len(self.otherinterpipekeys_list) != len(self.xkey):
+			raise ValueError("otherdatakeys_list and otherinterpipekeys_list size mismatch.")
+
+		datasets = ()
+		for xkey, ykey, savekey, otherdatakeys, otherinterpipekeys in zip(self.xkey, self.ykey, self.savekeys, self.otherdatakeys_list, self.otherinterpipekeys_list):
+			if otherdatakeys is None and otherinterpipekeys is None:
+				dataset = neuraldecoding.utils.datasets.FingerDataset(data, xkey, ykey)
+			else:
+				dataset = neuraldecoding.utils.datasets.FingerDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys, otherinterpipekeys)
+			datasets += (dataset,)
+		
+		return datasets, interpipe
 
 class Dataset2DictBlock(DataFormattingBlock):
 	"""

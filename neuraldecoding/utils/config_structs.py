@@ -1,4 +1,10 @@
 from omegaconf import DictConfig, ListConfig
+from typing import Union
+
+SchedulerConfig = {
+    'type': str,
+    'params': DictConfig
+}
 
 decoder_struct = {
         'model': {
@@ -16,21 +22,19 @@ trainer_struct_nn = {
             'type': str,
             'params': DictConfig
         },
-        'scheduler': {
-            'type': str,
-            'params': DictConfig
-        },
         'loss_func': {
             'type': str,
             'params': DictConfig
         },
         'training': {
-            'num_epochs': int,
+            'num_epochs': Union[int, None],
+            'max_iters': Union[int, None],
             'batch_size': int,
             'device': str,
             'print_results': bool,
             'print_every': int,
-            'clear_cache': bool
+            'clear_cache': bool,
+            'scheduler': Union[SchedulerConfig, None],
         },
         'evaluation': {
             'metrics': ListConfig,
