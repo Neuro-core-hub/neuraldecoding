@@ -1,0 +1,8 @@
+defaults:
+  - decoder/decoder
+  - trainer/trainer
+  - preprocessing/preprocessing_trainer
+  - preprocessing/preprocessing_decoder
+  - _self_
+
+hash_id: null
