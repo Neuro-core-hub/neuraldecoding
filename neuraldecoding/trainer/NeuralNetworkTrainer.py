@@ -53,7 +53,7 @@ class NNTrainer(Trainer):
         data = load_one_nwb(self.data_path)
         train_X, valid_X, train_Y, valid_Y = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
         return train_X, train_Y, valid_X, valid_Y
-    
+
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
         train_dataset = TensorDataset(self.train_X.detach().clone().to(torch.float32), 
@@ -78,7 +78,7 @@ class NNTrainer(Trainer):
         """Creates and returns a loss function based on the configuration."""
         loss_class = getattr(torch.nn, loss_config.type)
         return loss_class(**loss_config.params)
-    
+
     def create_model(self, model_config: DictConfig) -> torch.nn.Module:
         """Creates and returns a loss function based on the configuration."""
         model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
@@ -98,6 +98,7 @@ class NNTrainer(Trainer):
             running_loss = 0.0
             train_all_predictions = []
             train_all_targets = []
+
             for x,y in self.train_loader:
                 self.optimizer.zero_grad()
 
@@ -113,11 +114,13 @@ class NNTrainer(Trainer):
             train_all_targets = np.concatenate(train_all_targets, axis=0)
             train_loss = running_loss / len(self.train_loader)
 
+
             # Validate
             self.model.eval()
             running_val_loss = 0.0
             val_all_predictions = []
             val_all_targets = []
+
             with torch.no_grad():
                 for x_val, y_val in self.valid_loader:
                     x_val = x_val.to(self.device)
@@ -135,6 +138,14 @@ class NNTrainer(Trainer):
             val_all_targets = np.concatenate(val_all_targets, axis=0)
             val_loss = running_val_loss / len(self.valid_loader)
 
+
+            # Scheduler step
+            if self.scheduler:
+                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
+
             # Calculate and populate metrics
             for metric in self.metrics:
                 if metric == "loss":
@@ -146,32 +157,84 @@ class NNTrainer(Trainer):
                     self.logger[metric][0].append(metric_class(train_all_predictions, train_all_targets, metric_param))
                     self.logger[metric][1].append(metric_class(val_all_predictions, val_all_targets, metric_param))
            
-            if self.logger_save_path:
-                with open(self.logger_save_path, 'a') as f:
-                    entries = [epoch] + [self.logger[metric][0][-1] for metric in self.metrics] + [self.logger[metric][1][-1] for metric in self.metrics]
-                    f.write(','.join(map(str, entries)) + '\n')
-            
-            # Scheduler step
-            if self.scheduler:
-                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss)
-                else:
-                    self.scheduler.step()
-
-            # Print progress
-            if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
-                print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-                for metric in self.logger:
-                    train_metric = self.logger[metric][0][-1]
-                    val_metric = self.logger[metric][1][-1]
-                    print(f"    {metric:>12}{': train = ':>12}{train_metric}")
-                    print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+            # Logging
+            self.save_print_log(epoch, train_loss, val_loss)
 
         return self.model, self.logger
 
+    def save_print_log(self, epoch, train_loss, val_loss):
+        # Save log
+        if self.logger_save_path:
+            with open(self.logger_save_path, 'a') as f:
+                entries = [epoch] + [self.logger[metric][0][-1] for metric in self.metrics] + [self.logger[metric][1][-1] for metric in self.metrics]
+                f.write(','.join(map(str, entries)) + '\n')
+
+        # Print log
+        if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
+            print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            for metric in self.logger:
+                train_metric = self.logger[metric][0][-1]
+                val_metric = self.logger[metric][1][-1]
+                print(f"    {metric:>12}{': train = ':>12}{train_metric}")
+                print(f"    {'':>12}{'  val = ':>12}{val_metric}")
 
     def clear_gpu_cache(self):
         self.model.cpu()
         del self.model
         del self.optimizer
         torch.cuda.empty_cache()
+
+class IterationNNTrainer(NNTrainer):
+    '''
+    The trainer used in LINK dataset multiday training. Archived here for reference.
+    Does NOT do logging.
+
+    Based on Joey's training code for LINK dataset BCI-decoding section.
+    '''
+    def __init__(self, preprocessor, config):
+        super().__init__(preprocessor, config)
+    
+    def train_model(self, train_loader=None, valid_loader=None):
+        # Override loaders if provided
+        if(train_loader is not None):
+            self.train_loader = train_loader
+        if(valid_loader is not None):
+            self.valid_loader = valid_loader
+        iteration = 0
+
+        while iteration < self.num_epochs:
+            for x,y in self.train_loader:
+                self.model.train()
+                if iteration >= self.num_epochs:
+                    break
+
+                self.optimizer.zero_grad()
+
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+
+                if(self.clear_cache):
+                    del y, yhat
+
+                # Validate
+                self.model.eval()
+                total_loss = 0.0
+                num_batches = 0
+                with torch.no_grad():
+                    for x_val, y_val in self.valid_loader:
+                        x_val = x_val.to(self.device)
+                        y_val = y_val.to(self.device)
+                        yhat_val = self.model(x_val)
+                        val_loss = self.loss_func(yhat_val, y_val)
+                        total_loss += val_loss.item()
+                        num_batches += 1
+                if self.print_results and (iteration % self.print_every == 0 or iteration == self.num_epochs - 1):
+                    print(f"Iteration {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {(total_loss / num_batches):.4f}")
+
+                # Scheduler step
+                if self.scheduler:
+                    if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        self.scheduler.step(val_loss)
+                    else:
+                        self.scheduler.step()
+                iteration += 1
+        return self.model, self.logger
