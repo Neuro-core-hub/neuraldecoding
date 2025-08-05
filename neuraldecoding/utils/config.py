@@ -3,7 +3,7 @@ import copy
 from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 from omegaconf import DictConfig, ListConfig, OmegaConf
-from hydra import initialize_config_dir, compose
+from hydra import initialize_config_dir, compose, initialize
 from neuraldecoding.utils import verify_structure, parse_verify_config, compare_configs
 import pandas as pd
 from datetime import datetime
@@ -12,6 +12,9 @@ import time
 
 class config:
     def __init__(self, config_path = None):
+        '''
+        only takes in absolute path to the config file or dir
+        '''
         self.config = DictConfig({})
         self.original_config = DictConfig({})
         self.config_path = config_path
@@ -20,7 +23,10 @@ class config:
         if config_path:
             self.load_config(config_path)
         
-    def load_config(self, config_path):        
+    def load_config(self, config_path):
+        '''
+        only takes in absolute path to the config file or dir
+        '''
         if not config_path.endswith('.yaml'):
             with initialize_config_dir(version_base=None, config_dir=config_path):
                 cfg = compose("config")
@@ -116,13 +122,20 @@ class config:
         if comparison_config is None:
             return self.config != self.original_config
         else:
+            if isinstance(comparison_config, config):
+                comparison_config = comparison_config.config
             return self.config != comparison_config # apparently you can do this to dicts ^_^
 
     def get_hash(self):
         return self.hash
 
-    def get_changes(self):
-        return compare_configs(self.config, self.original_config)
+    def get_changes(self, comparison_config = None):
+        if comparison_config is None:
+            comparison_config = self.original_config
+        else:
+            if isinstance(comparison_config, config):
+                comparison_config = comparison_config.config
+        return compare_configs(self.config, comparison_config)
 
     def get_readable(self):
         return OmegaConf.to_yaml(self.config)
