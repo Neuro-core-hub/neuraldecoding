@@ -17,7 +17,7 @@ from neuraldecoding.utils.eval_metrics import *
 import os
 
 class NNTrainer(Trainer):
-    def __init__(self, preprocessor, config):
+    def __init__(self, preprocessor, config, dataset = None):
         super().__init__()
         # General training params 
         self.device = torch.device(config.training.device)
@@ -43,23 +43,24 @@ class NNTrainer(Trainer):
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         self.data_path = config.data.data_path
-        self.train_X, self.train_Y, self.valid_X, self.valid_Y = self.load_data()
-        self.train_loader, self.valid_loader = self.create_dataloaders()
+        if dataset is not None:
+            self.data_dict = self.load_data(dataset)
+            self.train_loader, self.valid_loader = self.create_dataloaders()
 
-    def load_data(self): # TODO, finalize this when dataset is merged to main
-        if not os.path.exists(self.data_path):
-            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
-        """Assuming data is dictionary output of one NWB file, change later"""
-        data = load_one_nwb(self.data_path)
-        train_X, valid_X, train_Y, valid_Y = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
-        return train_X, train_Y, valid_X, valid_Y
+    def load_data(self, dataset): # TODO, finalize this when dataset is merged to main
+        data_dict = self.preprocessor.preprocess_pipeline(dataset.dataset, params={'is_train': True})
+        # from block Dict2TrainerBlock, outputing A dictionary containing either:
+		#                               - 'X' and 'Y' if 2 keys are present
+		#                               - 'X_train', 'X_val', 'Y_train', 'Y_val' if 4 keys are present
+        # Typically it is 4 keys for NN trainer, so it will be 'X_train', 'X_val', 'Y_train', 'Y_val'.
+        return data_dict
 
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
-        train_dataset = TensorDataset(self.train_X.detach().clone().to(torch.float32), 
-                                    self.train_Y.detach().clone().to(torch.float32))
-        valid_dataset = TensorDataset(self.valid_X.detach().clone().to(torch.float32), 
-                                    self.valid_Y.detach().clone().to(torch.float32))
+        train_dataset = TensorDataset(self.data_dict["X_train"].detach().clone().to(torch.float32), 
+                                    self.data_dict["Y_train"].detach().clone().to(torch.float32))
+        valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
+                                    self.data_dict['Y_val'].detach().clone().to(torch.float32))
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
         return train_loader, valid_loader

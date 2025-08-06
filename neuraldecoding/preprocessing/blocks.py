@@ -221,6 +221,36 @@ class Dict2TupleBlock(DataFormattingBlock):
 			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
 		return data_out, interpipe
 
+class Dict2TrainerBlock(DataFormattingBlock):
+	"""
+	Converts a dictionary to a trainer dictionary format.
+	Accepts either 2 or 4 keys in the dictionary:
+		- If 2 keys: 'neural' and 'finger'
+		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test'
+	"""
+	def __init__(self):
+		super().__init__()
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data from a dictionary to a trainer dictionary format.
+		Args:
+			data (dict): Input data dictionary.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data_out (dict): A dictionary containing either:
+				- 'X' and 'Y' if 2 keys are present
+				- 'X_train', 'X_val', 'Y_train', 'Y_val' if 4 keys are present
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if len(data) == 2:
+			data_out = {'X': data['neural'], 'Y': data['finger']}
+		elif len(data) == 4:
+			data_out = {'X_train': data['neural_train'], 'X_val': data['neural_test'], 'Y_train': data['finger_train'], 'Y_val': data['finger_test']}
+		else:
+			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
+		return data_out, interpipe
+
 class Dataset2DictBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
