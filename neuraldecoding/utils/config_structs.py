@@ -1,8 +1,9 @@
 from omegaconf import DictConfig, ListConfig
 from typing import Union
 
-SchedulerConfig = {
+scheduler_struct = {
     'type': str,
+    'is_iterative': bool,
     'params': DictConfig
 }
 
@@ -33,8 +34,7 @@ trainer_struct_nn = {
             'device': str,
             'print_results': bool,
             'print_every': int,
-            'clear_cache': bool,
-            'scheduler': Union[SchedulerConfig, None],
+            'clear_cache': bool
         },
         'evaluation': {
             'metrics': ListConfig,
@@ -56,6 +56,7 @@ trainer_struct_linear = {
             'params': DictConfig
         }
     }
+
 preprocessing_struct = {
         'order': ListConfig,
         'content': DictConfig

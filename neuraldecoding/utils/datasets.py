@@ -15,6 +15,10 @@ class FingerDataset(Dataset):
             ykey (str): Location of the finger data in the data dictionary.
         """
         # store the processed X/Y data
+        if not isinstance(data[xkey], torch.Tensor):
+            data[xkey] = torch.Tensor(data[xkey])
+        if not isinstance(data[ykey], torch.Tensor):
+            data[ykey] = torch.Tensor(data[ykey])
         self.neural = data[xkey]
         self.kin = data[ykey]
 
@@ -55,6 +59,10 @@ class FingerDatasetCustom(Dataset):
             otherinterpipekeys (str, list, optional): Additional keys in the interpipe dictionary to include. Defaults to None.
         """
         # store the processed X/Y data
+        if not isinstance(data[xkey], torch.Tensor):
+            data[xkey] = torch.Tensor(data[xkey])
+        if not isinstance(data[ykey], torch.Tensor):
+            data[ykey] = torch.Tensor(data[ykey])
         self.neural = data[xkey]
         self.kin = data[ykey]
         self.params = {}
@@ -81,7 +89,7 @@ class FingerDatasetCustom(Dataset):
         neu = self.neural[idx, :]
         kin = self.kin[idx, :] 
 
-        sample = {'neu': neu, 'kin': kin, 'params': self.params}
+        sample = {'neu': neu, 'kin': kin}
         
         for key in self.otherkeys or []:
             sample[key] = getattr(self, key)[idx, :]

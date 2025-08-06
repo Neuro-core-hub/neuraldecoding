@@ -233,11 +233,9 @@ class Dict2FingerDatasetBlock(DataFormattingBlock):
 		if 'neural_val' in data:
 			self.xkey = ['neural_train', 'neural_val', 'neural_test']
 			self.ykey = ['finger_train', 'finger_val', 'finger_test']
-			self.savekeys = ['train', 'valid', 'test']
 		else:
 			self.xkey = ['neural_train', 'neural_test']
 			self.ykey = ['finger_train', 'finger_test']
-			self.savekeys = ['train', 'test']
 
 		if self.otherdatakeys_list is None:
 			self.otherdatakeys_list = [None] * len(self.xkey)
@@ -248,7 +246,7 @@ class Dict2FingerDatasetBlock(DataFormattingBlock):
 			raise ValueError("otherdatakeys_list and otherinterpipekeys_list size mismatch.")
 
 		datasets = ()
-		for xkey, ykey, savekey, otherdatakeys, otherinterpipekeys in zip(self.xkey, self.ykey, self.savekeys, self.otherdatakeys_list, self.otherinterpipekeys_list):
+		for xkey, ykey, otherdatakeys, otherinterpipekeys in zip(self.xkey, self.ykey, self.otherdatakeys_list, self.otherinterpipekeys_list):
 			if otherdatakeys is None and otherinterpipekeys is None:
 				dataset = neuraldecoding.utils.datasets.FingerDataset(data, xkey, ykey)
 			else:
