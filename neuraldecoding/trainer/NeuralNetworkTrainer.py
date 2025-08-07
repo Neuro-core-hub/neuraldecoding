@@ -1,5 +1,6 @@
 import hydra
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 import numpy as np
 import torch
 from torch.optim import Optimizer
@@ -22,7 +23,7 @@ class NNTrainer(Trainer):
         super().__init__()
         # General training params 
         self.device = torch.device(config.training.device)
-        self.model = self.create_model(config.model).to(self.device)
+        self.model = self.create_model(OmegaConf.merge(config.model, config.preprocessing)).to(self.device)
         self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
         self.scheduler, self.scheduler_params = self.create_scheduler(config.scheduler, self.optimizer)
         self.loss_func = self.create_loss_function(config.loss_func)
