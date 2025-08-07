@@ -2,6 +2,7 @@ import hydra
 from omegaconf import DictConfig
 import numpy as np
 import torch
+import json
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
@@ -42,13 +43,13 @@ class NNTrainer(Trainer):
                 f.write(','.join(headers) + '\n')
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
-        self.data_path = config.data.data_path
         if dataset is not None:
             self.data_dict = self.load_data(dataset)
             self.train_loader, self.valid_loader = self.create_dataloaders()
 
-    def load_data(self, dataset): # TODO, finalize this when dataset is merged to main
-        data_dict = self.preprocessor.preprocess_pipeline(dataset.dataset, params={'is_train': True})
+    def load_data(self, data): # TODO, finalize this when dataset is merged to main
+        data_dict = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
+        # you should have Dict2TrainerBlock in your pipeline
         # from block Dict2TrainerBlock, outputing A dictionary containing either:
 		#                               - 'X' and 'Y' if 2 keys are present
 		#                               - 'X_train', 'X_val', 'Y_train', 'Y_val' if 4 keys are present
@@ -167,7 +168,7 @@ class NNTrainer(Trainer):
         # Save log
         if self.logger_save_path:
             with open(self.logger_save_path, 'a') as f:
-                entries = [epoch] + [self.logger[metric][0][-1] for metric in self.metrics] + [self.logger[metric][1][-1] for metric in self.metrics]
+                entries = [epoch] + [f'"{self.logger[metric][0][-1]}"' for metric in self.metrics] + [f'"{self.logger[metric][1][-1]}"' for metric in self.metrics]
                 f.write(','.join(map(str, entries)) + '\n')
 
         # Print log

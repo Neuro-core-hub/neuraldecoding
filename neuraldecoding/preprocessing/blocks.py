@@ -4,6 +4,7 @@ import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
 from neuraldecoding.feature_extraction import FeatureExtractor
 from neuraldecoding.utils.utils_general import resolve_path
+from neuraldecoding.utils.data_tools import load_one_nwb
 import sklearn.preprocessing
 
 import torch
@@ -12,6 +13,7 @@ from abc import ABC, abstractmethod
 
 import time
 import pickle
+
 
 class PreprocessingBlock(ABC):
 	"""
@@ -110,7 +112,21 @@ class Dict2DataDictBlock(DataFormattingBlock):
 
 		data_out = {'neural': neural, 'finger': finger}
 		return data_out, interpipe
+	
+class LoadNWBBlock(DataFormattingBlock):
+	'''
+	Block for load NWB file in trainer testing, to bypass dataset to reduce potential problems (probably no but remove variabilities) from dataset.
+	'''
+	def __init__(self):
+		super().__init__()
 
+	def transform(self, data, interpipe):
+		'''
+		data is expected to be a dictionary with entry of data_path containing directory string to the NWB file
+		'''
+		data = load_one_nwb(data['data_path'])
+		return data, interpipe
+	
 class ClassificationDict2TupleBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary to a tuple format for classification tasks.
