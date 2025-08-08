@@ -86,14 +86,18 @@ class Dict2DataDictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_type = "sbp"):
+	def __init__(self, neural_type = "sbp", data_keys = ["neural", "finger"], interpipe_keys = "trial_idx"):
 		"""
 		Initializes the Dict2DataDictBlock.
 		Args:
 			neural_type (str): Type of neural data to extract from the dictionary. Default is "sbp". Can be "sbp" or "tcfr"
+			data_keys (list): List of 2 keys names to store the neural and finger data in the output dictionary. Default is ["neural", "finger"].
+			interpipe_keys (str): Key name to store the trial_idx in the interpipe dictionary. Default is "trial_idx".
 		"""
 		super().__init__()
 		self.neural_type = neural_type
+		self.data_keys = data_keys
+		self.interpipe_keys = interpipe_keys
 
 	def transform(self, data: dict, interpipe):
 		"""
@@ -106,9 +110,13 @@ class Dict2DataDictBlock(DataFormattingBlock):
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
 		(neural, finger), trial_idx = neuraldecoding.utils.neural_finger_from_dict(data, self.neural_type)
-		interpipe['trial_idx'] = trial_idx
+		interpipe[self.interpipe_keys] = trial_idx
 
-		data_out = {'neural': neural, 'finger': finger}
+		data_out = {}
+		if len(self.data_keys) >= 1:
+			data_out[self.data_keys[0]] = neural
+			data_out[self.data_keys[1]] = finger
+
 		return data_out, interpipe
 
 class ClassificationDict2TupleBlock(DataFormattingBlock):
@@ -142,64 +150,132 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 		data_out = (neural, finger)
 		return data_out, interpipe
 
+class DataKeyRenameBlock(DataFormattingBlock):
+	"""
+	A block for renaming keys in the data dictionary.
+	"""
+	def __init__(self, rename_map):
+		"""
+		Initializes the KeyRenameBlock.
+		Args:
+			rename_map (dict): A dictionary mapping old keys to new keys. Keys represent the old names, and values represent the new names.
+		"""
+		super().__init__()
+		self.rename_map = rename_map
+
+	def transform(self, data, interpipe):
+		"""
+		Renames keys in the data dictionary according to the rename_map.
+		Args:
+			data (dict): Input data dictionary.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with renamed keys.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		for old_key, new_key in self.rename_map.items():
+			if old_key in data:
+				data[new_key] = data.pop(old_key)
+			else:
+				raise KeyError(f"Key '{old_key}' not found in data dictionary.")
+		return data, interpipe
+
+class InterpipeKeyRenameBlock(DataFormattingBlock):
+	"""
+	A block for renaming keys in the interpipe dictionary.
+	"""
+	def __init__(self, rename_map):
+		"""
+		Initializes the InterpipeKeyRenameBlock.
+		Args:
+			rename_map (dict): A dictionary mapping old keys to new keys. Keys represent the old names, and values represent the new names.
+		"""
+		super().__init__()
+		self.rename_map = rename_map
+
+	def transform(self, data, interpipe):
+		"""
+		Renames keys in the interpipe dictionary according to the rename_map.
+		Args:
+			data (dict): Input data dictionary.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary remains unchanged.
+			interpipe (dict): The interpipe dictionary with renamed keys.
+		"""
+		for old_key, new_key in self.rename_map.items():
+			if old_key in interpipe:
+				interpipe[new_key] = interpipe.pop(old_key)
+			else:
+				raise KeyError(f"Key '{old_key}' not found in interpipe dictionary.")
+		return data, interpipe
+
 class DataSplitBlock(DataFormattingBlock):
 	"""
 	A block for splitting data into training and testing sets based on trial indices.
-	Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx'.
+	Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx', if location and interpipe_location are not specified.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'finger'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'finger_train', 'finger_test']):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
 			split_ratio (float): The ratio of training data to total data. Default is 0.8.
 			split_seed (int): Seed for random number generator to ensure reproducibility. Default is 42.
+			location (list): List of 2 keys names in the data dictionary to be split. Default is ['neural', 'finger'].
+			interpipe_location (list): List of 1 key name in the interpipe dictionary containing the trial indices. Default is ['trial_idx'].
+			data_keys (list): List of 4 keys names to store the split data in the output dictionary. Default is ['neural_train', 'neural_test', 'finger_train', 'finger_test'].
 		"""
 		super().__init__()
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
+		self.location = location
+		self.interpipe_location = interpipe_location
+		self.data_keys = data_keys
 
 	def transform(self, data, interpipe):
 		"""
 		Transform the data by splitting it into training and testing sets based on trial indices.
-		Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx'.
+		Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx', if location and interpipe_location are not specified.
 		It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 		Args:
-			data (dict): Input data dictionary containing 'neural' and 'finger' keys.
+			data (dict): Input data dictionary containing 'neural' and 'finger' keys if location are not specified.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (dict): A dictionary containing:
+			data_out (dict): A dictionary containing (by default data keys):
 				- 'neural_train': Training neural data
 				- 'neural_test': Testing neural data
 				- 'finger_train': Training finger data
 				- 'finger_test': Testing finger data
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		if 'trial_idx' not in interpipe:
-			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataBlock).")
+		if self.interpipe_location[0] not in interpipe:
+			raise ValueError(f"DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock).")
 
-		split_data = neuraldecoding.utils.data_split_trial(data['neural'], 
-														   data['finger'], 
-														   interpipe['trial_idx'], 
+		split_data = neuraldecoding.utils.data_split_trial(data[self.location[0]], 
+														   data[self.location[1]], 
+														   interpipe[self.interpipe_location[0]], 
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed)
 		
 		(neural_train, finger_train), (neural_test, finger_test) = split_data
-		data_out = {'neural_train': neural_train, 
-					'neural_test': neural_test, 
-					'finger_train': finger_train, 
-					'finger_test': finger_test}
+		data_out = {}
+		data_out[self.data_keys[0]] = neural_train
+		data_out[self.data_keys[1]] = neural_test
+		data_out[self.data_keys[2]] = finger_train
+		data_out[self.data_keys[3]] = finger_test
 		return data_out, interpipe
 
 class Dict2TupleBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary to a tuple format.
 	Accepts either 2 or 4 keys in the dictionary:
-		- If 2 keys: 'neural' and 'finger'
-		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test'
+		- If 2 keys: 'neural' and 'finger', by default location (or no location).
+		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test', by default location (or no location).
 	"""
-	def __init__(self):
+	def __init__(self, location = None):
 		super().__init__()
+		self.location = location
 
 	def transform(self, data, interpipe):
 		"""
@@ -208,15 +284,21 @@ class Dict2TupleBlock(DataFormattingBlock):
 			data (dict): Input data dictionary.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (tuple): A tuple containing either:
+			data_out (tuple): A tuple containing either, (by default location):
 				- (neural, finger) if 2 keys are present
 				- (neural_train, neural_test, finger_train, finger_test) if 4 keys are present
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
+		if self.location is None:
+			if len(data) == 2:
+				self.location = ['neural', 'finger']
+			elif len(data) == 4:
+				self.location = ['neural_train', 'neural_test', 'finger_train', 'finger_test']
+		
 		if len(data) == 2:
-			data_out = (data['neural'] , data['finger'])
+			data_out = (data[self.location[0]], data[self.location[1]])
 		elif len(data) == 4:
-			data_out = (data['neural_train'], data['neural_test'], data['finger_train'], data['finger_test'])
+			data_out = (data[self.location[0]], data[self.location[1]], data[self.location[2]], data[self.location[3]])
 		else:
 			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
 		return data_out, interpipe
@@ -226,7 +308,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, time_nwb_loc, apply_trial_filtering = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, time_nwb_loc, apply_trial_filtering = True, data_keys = ['neural', 'finger'], interpipe_keys = 'time_stamps'):
 		"""
 		Initializes the Dict2DataDictBlock.
 		Args:
@@ -236,6 +318,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.behavior_nwb_loc = behavior_nwb_loc
 		self.time_nwb_loc = time_nwb_loc
 		self.apply_trial_filtering = apply_trial_filtering
+		self.data_keys = data_keys
+		self.interpipe_keys = interpipe_keys
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -260,10 +344,12 @@ class Dataset2DictBlock(DataFormattingBlock):
 	
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
-		
-		interpipe['time_stamps'] = time_stamps
 
-		data_out = {'neural': neural, 'finger': finger}
+		interpipe[self.interpipe_keys] = time_stamps
+
+		data_out = {}
+		data_out[self.data_keys[0]] = neural
+		data_out[self.data_keys[1]] = finger
 		return data_out, interpipe
 
 
