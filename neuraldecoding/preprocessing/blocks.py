@@ -241,11 +241,12 @@ class Dict2TrainerBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary to a trainer dictionary format.
 	Accepts either 2 or 4 keys in the dictionary:
-		- If 2 keys: 'neural' and 'finger'
-		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test'
+		- If 2 keys: 'neural' and 'finger', by default location (or no location).
+		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test', by default location (or no location).
 	"""
-	def __init__(self):
+	def __init__(self, location = None):
 		super().__init__()
+		self.location = location
 
 	def transform(self, data, interpipe):
 		"""
@@ -255,14 +256,20 @@ class Dict2TrainerBlock(DataFormattingBlock):
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
 			data_out (dict): A dictionary containing either:
-				- 'X' and 'Y' if 2 keys are present
+				- 'X' and 'Y' if 2 keys are present, (by default location).
 				- 'X_train', 'X_val', 'Y_train', 'Y_val' if 4 keys are present
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
+		if self.location is None:
+			if len(data) == 2:
+				self.location = ['neural', 'finger']
+			elif len(data) == 4:
+				self.location = ['neural_train', 'neural_test', 'finger_train', 'finger_test']
+
 		if len(data) == 2:
-			data_out = {'X': data['neural'], 'Y': data['finger']}
+			data_out = {'X': data[self.location[0]], 'Y': data[self.location[1]]}
 		elif len(data) == 4:
-			data_out = {'X_train': data['neural_train'], 'X_val': data['neural_test'], 'Y_train': data['finger_train'], 'Y_val': data['finger_test']}
+			data_out = {'X_train': data[self.location[0]], 'X_val': data[self.location[1]], 'Y_train': data[self.location[2]], 'Y_val': data[self.location[3]]}
 		else:
 			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
 		return data_out, interpipe
