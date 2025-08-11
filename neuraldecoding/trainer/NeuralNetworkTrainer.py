@@ -104,7 +104,7 @@ class NNTrainer(Trainer):
             for x,y in self.train_loader:
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -212,7 +212,7 @@ class IterationNNTrainer(NNTrainer):
 
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache)
 
                 if(self.clear_cache):
                     del y, yhat

@@ -54,21 +54,6 @@ class LSTM(nn.Module, NeuralNetworkModel):
         # Dropout layer for input (if enabled)
         self.input_dropout = nn.Dropout(self.drop_prob) if self.dropout_input else nn.Identity()
 
-
-    def __call__(self, data):
-        """
-        Makes the instance callable and returns the result of forward pass.
-
-        Parameters:
-            data (ndarray): Observation data for prediction, expected size [n, m]
-
-        Returns:
-            ndarray: Prediction results, size [n, k]
-        """
-        return self.forward(data)
-    
-
-
     def forward(self, x, h=None, return_all_tsteps=False, return_h = False):
         """
         Runs forward pass of LSTM Model
@@ -129,21 +114,6 @@ class LSTM(nn.Module, NeuralNetworkModel):
             hidden = (torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device),
                         torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
         return hidden
-
-    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False):
-        """
-        Trains LSTM Model
-        """
-        yhat = model(x)
-
-        loss = loss_func(yhat, y)
-
-        loss.backward()
-        optimizer.step()
-        if(clear_cache):
-            del x, y
-
-        return loss, yhat
 
     def save_model(self, filepath):
         """
