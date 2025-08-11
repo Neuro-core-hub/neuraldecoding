@@ -180,10 +180,18 @@ class PositionalEncoding(nn.Module):
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
 
-class TransformerModel(nn.Module):
+class TransformerModel(nn.Module, NeuralNetworkModel):
 
-    def __init__(self, num_features, num_outputs, enc_nhead=2, enc_nhid=2048, enc_nlayers=1, dropout=0.5):
+    def __init__(self, model_params):
         super(TransformerModel, self).__init__()
+        self.model_params = model_params
+        num_features = model_params['num_features']
+        num_outputs = model_params['num_outputs']
+        enc_nhead = model_params.get('enc_nhead', 2)
+        enc_nhid = model_params.get('enc_nhid', 2048)
+        enc_nlayers = model_params.get('enc_nlayers', 1)
+        dropout = model_params.get('dropout', 0.5)
+
         self.model_name = 'TransformerModel'
         self.src_mask = None
 
@@ -200,9 +208,6 @@ class TransformerModel(nn.Module):
         nn.init.uniform_(self.decoder.weight, -initrange, initrange)
         nn.init.zeros_(self.decoder.bias)
 
-    def __call__(self, data):
-        return self.forward(data)
-
     def forward(self, x):
         '''
         Run data forward through the encoder and then an FC layer.
@@ -213,24 +218,12 @@ class TransformerModel(nn.Module):
         output = self.transformer_encoder(src, self.src_mask)
         output = self.decoder(output)
         return output[-1, :, :]
-    
-    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False):
-        yhat = model(x)
-
-        loss = loss_func(yhat, y)
-
-        loss.backward()
-        optimizer.step()
-        if(clear_cache):
-            del x, y
-
-        return loss, yhat
 
     def save_model(self, filepath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
-            "model_type": "TCFNN"
+            "model_type": "Transformer"
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -240,9 +233,9 @@ class TransformerModel(nn.Module):
     def load_model(self, filepath):
         checkpoint = torch.load(filepath)
 
-        if checkpoint["model_type"] != "TCFNN":
-            raise Exception("Tried to load model that isn't a TCFNN Instance")
-        
+        if checkpoint["model_type"] != "Transformer":
+            raise Exception("Tried to load model that isn't a Transformer Instance")
+
         if self.model_params != checkpoint["model_params"]:
             raise ValueError("Model parameters do not match the checkpoint parameters")
 
@@ -254,10 +247,19 @@ class TransformerModel(nn.Module):
 
 class TransformerGRUModel(nn.Module):
 
-    def __init__(self, num_features, num_outputs, enc_nhead=2, enc_nhid=2048, enc_nlayers=1, dropout=0.5, rnn_nhid=300):
+    def __init__(self, model_params):
         super(TransformerGRUModel, self).__init__()
         self.model_name = 'TransformerModel'
         self.src_mask = None
+        
+        self.model_params = model_params
+        num_features = model_params['num_features']
+        num_outputs = model_params['num_outputs']
+        enc_nhead = model_params.get('enc_nhead', 2)
+        enc_nhid = model_params.get('enc_nhid', 2048)
+        enc_nlayers = model_params.get('enc_nlayers', 1)
+        dropout = model_params.get('dropout', 0.5)
+        rnn_nhid = model_params.get('rnn_nhid', 300)
 
         self.pos_encoder = PositionalEncoding(num_features, dropout)
         encoder_layers = TransformerEncoderLayer(num_features, enc_nhead, enc_nhid, dropout)
@@ -286,12 +288,53 @@ class TransformerGRUModel(nn.Module):
     def init_hidden(self, batch_size):
         return torch.zeros(self.rnn_nlayers, batch_size, self.rnn_nhid)
 
+    def save_model(self, filepath):
+        checkpoint_dict = {
+            "model_state_dict": self.state_dict(),
+            "model_params": self.model_params,
+            "model_type": "TransformerGRU"
+        }
+        folder = os.path.dirname(filepath)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
+        torch.save(checkpoint_dict, filepath)
+    
+    def load_model(self, filepath):
+        checkpoint = torch.load(filepath)
+
+        if checkpoint["model_type"] != "TransformerGRU":
+            raise Exception("Tried to load model that isn't a TransformerGRU Instance")
+
+        if self.model_params != checkpoint["model_params"]:
+            raise ValueError("Model parameters do not match the checkpoint parameters")
+
+        self.load_state_dict(checkpoint["model_state_dict"])
+
+        self.model_params = checkpoint["model_params"]
 
 class ConformerModel(nn.Module):
-    def __init__(self, num_channels, good_channels_idx, num_outputs, emb_size=40, num_heads=10, num_layers=6, drop_prob=0.5):
+    def __init__(self, model_params):
         super(ConformerModel, self).__init__()
+        '''
+        model_params contains:
+        - num_channels
+        - num_outputs
+        - good_channels_idx
+        - emb_size: default 40
+        - num_heads: default 10
+        - num_layers: default 6
+        - drop_prob: default 0.5
+        '''
         self.model_name = 'ConformerModel'
-        self.good_channels_idx = good_channels_idx
+        self.good_channels_idx = model_params['good_channels_idx']
+
+        self.model_params = model_params
+        num_channels = model_params['num_channels']
+        num_outputs = model_params['num_outputs']
+        emb_size = model_params.get('emb_size', 40)
+        num_heads = model_params.get('num_heads', 10)
+        num_layers = model_params.get('num_layers', 6)
+        drop_prob = model_params.get('drop_prob', 0.5)
 
         self.patch_embedding = PatchEmbedding(num_channels, emb_size, drop_prob)
         self.transformer = TransformerEncoder(num_layers, emb_size, num_heads)
@@ -307,3 +350,27 @@ class ConformerModel(nn.Module):
         x = self.class_head(x)
 
         return x
+
+    def save_model(self, filepath):
+        checkpoint_dict = {
+            "model_state_dict": self.state_dict(),
+            "model_params": self.model_params,
+            "model_type": "Conformer"
+        }
+        folder = os.path.dirname(filepath)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
+        torch.save(checkpoint_dict, filepath)
+    
+    def load_model(self, filepath):
+        checkpoint = torch.load(filepath)
+
+        if checkpoint["model_type"] != "Conformer":
+            raise Exception("Tried to load model that isn't a Conformer Instance")
+
+        if self.model_params != checkpoint["model_params"]:
+            raise ValueError("Model parameters do not match the checkpoint parameters")
+
+        self.load_state_dict(checkpoint["model_state_dict"])
+
+        self.model_params = checkpoint["model_params"]
