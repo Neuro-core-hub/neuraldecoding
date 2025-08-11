@@ -1,5 +1,6 @@
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Union
+from omegaconf import OmegaConf
 
 class FeatureExtractor:
     """
@@ -29,6 +30,8 @@ class FeatureExtractor:
         """
         self.bin_size_ms = config.get('bin_size_ms', 50)
         self.feature_type = config.get('feature_type', 'mav')
+        if not isinstance(self.feature_type, list) or not isinstance(self.feature_type, str):
+            self.feature_type = OmegaConf.to_container(self.feature_type)
         
         # Initialize feature parameters
         self.feature_params = config.get('feature_params', None)

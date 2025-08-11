@@ -12,10 +12,13 @@ class Trainer(ABC):
         pass
     
     def print_metrics(self):
-        # FIXME: for now, just printing the last metric value
+        text = ""
         for metric in self.logger:
             train_metric = self.logger[metric][0][-1]
             val_metric = self.logger[metric][1][-1]
-            print(f"    {metric:>12}{': train = ':>12}{train_metric}")
-            print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+            text += f"    {metric:>12}{': train = ':>12}{train_metric}\n"
+            text += f"    {'':>12}{'  val = ':>12}{val_metric}\n"
+        print(text)
+        return text
+
     
