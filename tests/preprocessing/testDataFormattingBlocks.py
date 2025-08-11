@@ -13,7 +13,7 @@ class TestDict2DataDictBlock(unittest.TestCase):
         self.block = Dict2DataDictBlock()
         self.mock_data = {
             'sbp': np.random.randn(100, 10),
-            'finger': np.random.randn(100, 3),
+            'behaviour': np.random.randn(100, 3),
             'trial_info': np.arange(100)
         }
         
@@ -22,7 +22,7 @@ class TestDict2DataDictBlock(unittest.TestCase):
         original_func = getattr(neuraldecoding.utils, 'neural_finger_from_dict', None)
         
         def mock_neural_finger_from_dict(data, neural_type):
-            return (data['sbp'], data['finger']), data['trial_info']
+            return (data['sbp'], data['behaviour']), data['trial_info']
         
         neuraldecoding.utils.neural_finger_from_dict = mock_neural_finger_from_dict
         
@@ -31,10 +31,10 @@ class TestDict2DataDictBlock(unittest.TestCase):
             result_data, result_interpipe = self.block.transform(self.mock_data, interpipe)
             
             self.assertIn('neural', result_data)
-            self.assertIn('finger', result_data)
+            self.assertIn('behaviour', result_data)
             self.assertIn('trial_idx', result_interpipe)
             np.testing.assert_array_equal(result_data['neural'], self.mock_data['sbp'])
-            np.testing.assert_array_equal(result_data['finger'], self.mock_data['finger'])
+            np.testing.assert_array_equal(result_data['behaviour'], self.mock_data['behaviour'])
             np.testing.assert_array_equal(result_interpipe['trial_idx'], self.mock_data['trial_info'])
         finally:
             if original_func:
@@ -101,7 +101,7 @@ class TestDataSplitBlock(unittest.TestCase):
         finger_data = np.random.randn(100, 3)
         trial_idx = np.arange(100)
         
-        data = {'neural': neural_data, 'finger': finger_data}
+        data = {'neural': neural_data, 'behaviour': finger_data}
         interpipe = {'trial_idx': trial_idx}
         
         import neuraldecoding.utils
@@ -119,19 +119,19 @@ class TestDataSplitBlock(unittest.TestCase):
             
             self.assertIn('neural_train', result_data)
             self.assertIn('neural_test', result_data)
-            self.assertIn('finger_train', result_data)
-            self.assertIn('finger_test', result_data)
+            self.assertIn('behaviour_train', result_data)
+            self.assertIn('behaviour_test', result_data)
             
             self.assertEqual(len(result_data['neural_train']), 80)
             self.assertEqual(len(result_data['neural_test']), 20)
-            self.assertEqual(len(result_data['finger_train']), 80)
-            self.assertEqual(len(result_data['finger_test']), 20)
+            self.assertEqual(len(result_data['behaviour_train']), 80)
+            self.assertEqual(len(result_data['behaviour_test']), 20)
         finally:
             if original_func:
                 neuraldecoding.utils.data_split_trial = original_func
                 
     def test_missing_trial_idx(self):
-        data = {'neural': np.random.randn(100, 10), 'finger': np.random.randn(100, 3)}
+        data = {'neural': np.random.randn(100, 10), 'behaviour': np.random.randn(100, 3)}
         interpipe = {}
         
         with self.assertRaises(ValueError):
@@ -142,7 +142,7 @@ class TestDict2TupleBlock(unittest.TestCase):
         self.block = Dict2TupleBlock()
         
     def test_transform_two_keys(self):
-        data = {'neural': np.random.randn(100, 10), 'finger': np.random.randn(100, 3)}
+        data = {'neural': np.random.randn(100, 10), 'behaviour': np.random.randn(100, 3)}
         interpipe = {}
         
         result_data, result_interpipe = self.block.transform(data, interpipe)
@@ -150,14 +150,14 @@ class TestDict2TupleBlock(unittest.TestCase):
         self.assertIsInstance(result_data, tuple)
         self.assertEqual(len(result_data), 2)
         np.testing.assert_array_equal(result_data[0], data['neural'])
-        np.testing.assert_array_equal(result_data[1], data['finger'])
+        np.testing.assert_array_equal(result_data[1], data['behaviour'])
         
     def test_transform_four_keys(self):
         data = {
             'neural_train': np.random.randn(80, 10),
             'neural_test': np.random.randn(20, 10),
-            'finger_train': np.random.randn(80, 3),
-            'finger_test': np.random.randn(20, 3)
+            'behaviour_train': np.random.randn(80, 3),
+            'behaviour_test': np.random.randn(20, 3)
         }
         interpipe = {}
         
@@ -167,8 +167,8 @@ class TestDict2TupleBlock(unittest.TestCase):
         self.assertEqual(len(result_data), 4)
         np.testing.assert_array_equal(result_data[0], data['neural_train'])
         np.testing.assert_array_equal(result_data[1], data['neural_test'])
-        np.testing.assert_array_equal(result_data[2], data['finger_train'])
-        np.testing.assert_array_equal(result_data[3], data['finger_test'])
+        np.testing.assert_array_equal(result_data[2], data['behaviour_train'])
+        np.testing.assert_array_equal(result_data[3], data['behaviour_test'])
         
     def test_invalid_key_count(self):
         data = {'key1': 'value1', 'key2': 'value2', 'key3': 'value3'}
@@ -215,11 +215,11 @@ class TestDataset2DictBlock(unittest.TestCase):
             result_data, result_interpipe = self.block.transform(mock_data, interpipe)
             
             self.assertIn('neural', result_data)
-            self.assertIn('finger', result_data)
+            self.assertIn('behaviour', result_data)
             self.assertIn('time_stamps', result_interpipe)
             
             np.testing.assert_array_equal(result_data['neural'], mock_data.dataset['neural_path'])
-            np.testing.assert_array_equal(result_data['finger'], mock_data.dataset['behavior_path'])
+            np.testing.assert_array_equal(result_data['behaviour'], mock_data.dataset['behavior_path'])
             np.testing.assert_array_equal(result_interpipe['time_stamps'], mock_data.dataset['time_path'])
         finally:
             neuraldecoding.utils.utils_general.resolve_path = original_func
