@@ -68,19 +68,6 @@ class TCN(nn.Module, NeuralNetworkModel):
 
     def __call__(self, data):
         return self.forward(data)
-
-    def forward(self, x, BadChannels=()):
-        # forward always defines connectivity
-        x[:, BadChannels, :] = 0
-        x = self.bn0(x)
-        x = self.cn1(x.permute(0, 2, 1))
-        x = F.relu(self.bn1(flatten(x)))
-        x = F.relu(self.bn2(self.do1(self.fc1(x))))
-        x = F.relu(self.bn3(self.do2(self.fc2(x))))
-        x = F.relu(self.bn4(self.do3(self.fc3(x))))
-        scores = (self.bn5(self.fc4(x)) - self.bn5.bias)/self.bn5.weight
-
-        return scores
     
     def forward(self, x, BadChannels=()):
         if x.dim() != 3:
