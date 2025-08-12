@@ -1,0 +1,62 @@
+order: [dict, filt, feat, split, xnorm, ynorm, hist, tensor, dataset]
+content:
+  dict:
+    type: Dataset2DictBlock
+    params:
+      neural_nwb_loc: "acquisition.neural_series"
+      behavior_nwb_loc: "acquisition.continuous_series"
+      nwb_trial_start_times_loc: "trials.start_time"
+      nwb_trial_end_times_loc: "trials.stop_time"
+      nwb_targets_loc: "trials.targets"
+  filt:
+    type: IndexSelectorBlock
+    params:
+      locations: neural
+      indices: [0,2,4,6,8,10,12,14]
+  feat: 
+    type: FeatureExtractionBlock
+    params:
+      location_data: ["neural","behavior"]
+      location_ts: ["neural_ts","behavior_ts"]
+      feature_extractor_config:
+        channels: 8
+        feature_type: [["mav"],["mean", "vel"]]
+        feature_params: [{}, {}]
+        bin_size_ms: 32
+  split:
+    type: DataSplitBlock
+    params:
+      split_ratio: 0.8
+      split_seed: 42
+  xnorm:
+    type: NormalizationBlock
+    params:
+      fit_location: neural_train
+      apply_locations: neural_test
+      normalizer_method: sklearn
+      sklearn_type: StandardScaler # None if normalizer_method is not 'sklearn'
+      normalizer_params: {}
+  ynorm:
+    type: NormalizationBlock
+    params:
+      fit_location: behavior_train
+      apply_locations: behavior_test
+      normalizer_method: sklearn
+      sklearn_type: StandardScaler # None if normalizer_method is not 'sklearn'
+      normalizer_params: {}
+  hist:
+    type: TrialHistoryBlock
+    params:
+      leadup: 20
+  tensor:
+    type: EnforceTensorBlock
+    params:
+      device: cuda
+      dtype: float32
+  dataset:
+    type: Dict2BehaviorDatasetBlock
+    params: 
+      otherdatakeys_list: ['trial_lengths_train', None]
+
+model_conf_append:
+  - content.hist.params.leadup

@@ -1,6 +1,7 @@
 import os
 import sys
 import numpy as np
+from omegaconf import open_dict
 
 
 def int_to_string(in_array):
@@ -74,3 +75,18 @@ def resolve_path(obj, path):
             except (KeyError, TypeError):
                 raise ValueError(f"Cannot resolve path segment: {key}")
     return obj
+
+def export_preprocess_params(model_config, preprocess_config):
+    for path in preprocess_config.model_conf_append:
+        try:
+            # Split the path to get the final key
+            keys = path.split('.')
+            final_key = keys[-1]
+            # Get the value at the path
+            value = resolve_path(preprocess_config, path)
+            # Save the value to model_config.params with the final key
+            with open_dict(model_config.params):
+                model_config.params[final_key] = value
+        except ValueError as e:
+            print(f"Warning: {e}. Skipping path: {path}")
+    return model_config

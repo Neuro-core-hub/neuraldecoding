@@ -186,7 +186,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         self.num_layers = model_params["num_layers"]
 
 class LSTMTrialInput(LSTM):
-    def __init__(self, model_params, ):
+    def __init__(self, model_params):
         """
         Initializes a LSTM with trial input support
 
@@ -194,6 +194,8 @@ class LSTMTrialInput(LSTM):
             model_params:                dict containing the same parameters as LSTM
         """
         super(LSTMTrialInput, self).__init__(model_params)
+
+        # search through the preprocessing params to find the leadup
         self.leadup = model_params.get("leadup", 0)
 
     def forward(self, x, h=None, trial_length=None, return_h=False):
@@ -209,7 +211,6 @@ class LSTMTrialInput(LSTM):
             out:                output/prediction from forward pass of shape (batch_size, seq_len^, num_outs)  ^if return_all_steps is true
             h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
         """
-        # Implement trial input support here if needed
         if x.dim() != 3:
             raise ValueError(f"Input tensor must be 3D (batch_size, num_inputs, sequence_length), got shape {x.shape}")
         if x.shape[1] != self.input_size:
@@ -236,10 +237,13 @@ class LSTMTrialInput(LSTM):
         else:
             return out
         
-    def train_step(self, x, y, trial_length, model, optimizer, loss_func, clear_cache = False): # TODO: Change to batch
+    def train_step(self, batch, model, optimizer, loss_func, clear_cache = False): 
         """
         Trains LSTM Model
         """
+        x = batch['neu'].to(self.device)
+        y = batch['kin'].to(self.device)
+        trial_length = batch.get('trial_length', None)
         yhat = model(x, trial_length=trial_length)
         y = y[:, self.leadup:self.leadup + trial_length, :]
 

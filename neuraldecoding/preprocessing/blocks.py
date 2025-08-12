@@ -5,6 +5,7 @@ import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
 from neuraldecoding.feature_extraction import FeatureExtractor
 from neuraldecoding.utils.utils_general import resolve_path
+from neuraldecoding.utils.data_tools import load_one_nwb
 import sklearn.preprocessing
 import neuraldecoding.utils.datasets
 
@@ -14,6 +15,7 @@ from abc import ABC, abstractmethod
 
 import time
 import pickle
+import numpy as np
 
 class PreprocessingBlock(ABC):
 	"""
@@ -36,6 +38,7 @@ class PreprocessingBlock(ABC):
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		"""
 		pass
+
 
 class DataFormattingBlock(PreprocessingBlock):
 	"""
@@ -80,39 +83,34 @@ class DataProcessingBlock(PreprocessingBlock):
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		"""
 		pass
-
-
-# Wrappers that Modifies Data Format
-class Dict2DataDictBlock(DataFormattingBlock):
+	
+class IndexSelectorBlock(DataFormattingBlock):
 	"""
-	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
-	Add 'trial_idx' to interpipe.
+	A block for selecting specific indices from the data dictionary.
 	"""
-	def __init__(self, neural_type = "sbp"):
-		"""
-		Initializes the Dict2DataDictBlock.
-		Args:
-			neural_type (str): Type of neural data to extract from the dictionary. Default is "sbp". Can be "sbp" or "tcfr"
-		"""
+	def __init__(self, locations, indices):
 		super().__init__()
-		self.neural_type = neural_type
+		if isinstance(locations, str):
+			locations = [locations]
+		self.locations = locations
+		self.indices = indices
 
-	def transform(self, data: dict, interpipe):
+	def transform(self, data, interpipe):
 		"""
-		Transform the data from a dictionary to neural and finger data in dictionary format.
+		Transform the data by selecting features from the specified locations.
 		Args:
-			data (dict): Input data dictionary from `neuraldecoding.utils.data_tools.load_one_nwb()`.
+			data (dict): Input data dictionary containing the data to be transformed.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (dict): A dictionary containing 'neural' and 'finger' data.
-			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
+			data_out (dict): The data dictionary with selected indices at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		(neural, finger), trial_idx, trial_ts = neuraldecoding.utils.neural_finger_from_dict(data, self.neural_type)
-		interpipe['trial_idx'] = trial_idx
-		interpipe['trial_ts'] = trial_ts
-
-		data_out = {'neural': neural, 'finger': finger}
-		return data_out, interpipe
+		for loc in self.locations:
+			if loc in data:
+				data[loc] = data[loc][:, self.indices]
+			else:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+		return data, interpipe
 
 class ClassificationDict2TupleBlock(DataFormattingBlock):
 	"""
@@ -120,7 +118,7 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 	Temporary block designed specifically for LDA and data from RPNI C-P2 experiments.
 
 	Assumes the dictionary contains keys 'X_train', 'y_train', 'X_test', and 'y_test'.
-	Returns a tuple of (neural, finger) for training or testing based on the 'is_train' key in the interpipe dictionary.
+	Returns a tuple of (neural, behavior) for training or testing based on the 'is_train' key in the interpipe dictionary.
 	"""
 	def __init__(self):
 		super().__init__()
@@ -132,23 +130,23 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
 			data_out (tuple): A tuple containing either:
-				- (neural, finger) , contains either training or testing data depending on 'is_train' in interpipe.
+				- (neural, behavior) , contains either training or testing data depending on 'is_train' in interpipe.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
 		if 'is_train' not in interpipe:
 			raise ValueError("ClassificationDict2TupleBlock requires 'is_train' in interpipe.")
 
 		if interpipe['is_train']:
-			neural, finger = (data['X_train'], data['y_train'].flatten())
+			neural, behavior = (data['X_train'], data['y_train'].flatten())
 		else:
-			neural, finger = (data['X_test'], data['y_test'].flatten())
-		data_out = (neural, finger)
+			neural, behavior = (data['X_test'], data['y_test'].flatten())
+		data_out = (neural, behavior)
 		return data_out, interpipe
 
 class DataSplitBlock(DataFormattingBlock):
 	"""
 	A block for splitting data into training and testing sets based on trial indices.
-	Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx'.
+	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
 	def __init__(self, split_ratio: 0.8, split_seed: 42):
@@ -166,27 +164,27 @@ class DataSplitBlock(DataFormattingBlock):
 	def transform(self, data, interpipe):
 		"""
 		Transform the data by splitting it into training and testing sets based on trial indices.
-		Assumes the data dictionary contains 'neural' and 'finger' keys, and the interpipe dictionary contains 'trial_idx'.
+		Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 		It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 		Args:
-			data (dict): Input data dictionary containing 'neural' and 'finger' keys.
+			data (dict): Input data dictionary containing 'neural' and 'behavior' keys.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
 			data_out (dict): A dictionary containing:
 				- 'neural_train': Training neural data
 				- 'neural_test': Testing neural data
-				- 'finger_train': Training finger data
-				- 'finger_test': Testing finger data
+				- 'behavior_train': Training behavior data
+				- 'behavior_test': Testing behavior data
 				if split_ratio is a tuple, also includes:
 				- 'neural_val': Validation neural data
-				- 'finger_val': Validation finger data
+				- 'behavior_val': Validation behavior data
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
 		if 'trial_idx' not in interpipe:
-			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataBlock).")
+			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataDictBlock).")
 
 		split_data = neuraldecoding.utils.data_split_trial(data['neural'], 
-														   data['finger'], 
+														   data['behavior'], 
 														   interpipe['trial_idx'], 
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed)
@@ -197,18 +195,17 @@ class DataSplitBlock(DataFormattingBlock):
 
 		return data, interpipe
 
-class Dict2FingerDatasetBlock(DataFormattingBlock):
+class Dict2BehaviorDatasetBlock(DataFormattingBlock):
 	"""
-	Converts a dictionary to a FingerDataset or FingerDatasetCustom class.
+	Converts a dictionary to a BehaviorDataset or BehaviorDatasetCustom class.
 	"""
-	def __init__(self, otherdatakeys_list=None, otherinterpipekeys_list=None):
+	def __init__(self, otherdatakeys_list=None):
 		"""
-		Initializes the Dict2FingerDatasetBlock. Creates FingerDataset objects for train, validation (if included) and test. 
-		FingerDatasetCustom allows for additional data/interpipe keys to be included in the dataset. otherdatakeys_list and
-		otherinterpipekeys_list can be list of lists. Ensure that otherdatakeys_list and otherinterpipekeys_list have settings
-		in the order of [train, valid, test] or [train, test] if no validation set is used.
+		Initializes the Dict2BehaviorDatasetBlock. Creates BehaviorDataset objects for train, validation (if included) and test. 
+		BehaviorDatasetCustom allows for additional data keys to be included in the dataset. otherdatakeys_list can be list of lists. Ensure 
+		that otherdatakeys_list and otherinterpipekeys_list have settings in the order of [train, valid, test] or [train, test] if no validation set is used.
 		e.g. ,
-			otherdatakeys_list = ['trial_lengths_train', None], otherinterpipekeys_list = [['leadup'], None]
+			otherdatakeys_list = [['trial_lengths_train'], None]
 		Args:
 			otherdatakeys_list (str, list, optional): Additional locations in the data dictionary to include. Must be length 2 if 
 				only train and test datasets are used, or length 3 if train, valid, and test datasets are used, or None.
@@ -218,86 +215,97 @@ class Dict2FingerDatasetBlock(DataFormattingBlock):
 		super().__init__()
 
 		self.otherdatakeys_list = otherdatakeys_list
-		self.otherinterpipekeys_list = otherinterpipekeys_list
 	
 	def transform(self, data, interpipe):
 		"""
-		Transform the data from a dictionary to FingerDataset or FingerDatasetCustom class.
+		Transform the data from a dictionary to BehaviorDataset or BehaviorDatasetCustom class.
 		Args:
 			data (dict): Input data dictionary containing the data and relevant information.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (tuple): A tuple of FingerDataset or FingerDatasetCustom instances in order of [train, valid, test] or [train, test].
+			data_out (tuple): A tuple of BehaviorDataset or BehaviorDatasetCustom instances in order of [train, valid, test] or [train, test].
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
 		if 'neural_val' in data:
 			self.xkey = ['neural_train', 'neural_val', 'neural_test']
-			self.ykey = ['finger_train', 'finger_val', 'finger_test']
+			self.ykey = ['behavior_train', 'behavior_val', 'behavior_test']
 		else:
 			self.xkey = ['neural_train', 'neural_test']
-			self.ykey = ['finger_train', 'finger_test']
+			self.ykey = ['behavior_train', 'behavior_test']
 
 		if self.otherdatakeys_list is None:
 			self.otherdatakeys_list = [None] * len(self.xkey)
-		if self.otherinterpipekeys_list is None:
-			self.otherinterpipekeys_list = [None] * len(self.xkey)
 		
-		if len(self.otherdatakeys_list) != len(self.xkey) or len(self.otherinterpipekeys_list) != len(self.xkey):
-			raise ValueError("otherdatakeys_list and otherinterpipekeys_list size mismatch.")
+		if len(self.otherdatakeys_list) != len(self.xkey):
+			raise ValueError("otherdatakeys_list size mismatch.")
 
 		datasets = ()
-		for xkey, ykey, otherdatakeys, otherinterpipekeys in zip(self.xkey, self.ykey, self.otherdatakeys_list, self.otherinterpipekeys_list):
-			if otherdatakeys is None and otherinterpipekeys is None:
-				dataset = neuraldecoding.utils.datasets.FingerDataset(data, xkey, ykey)
+		for xkey, ykey, otherdatakeys in zip(self.xkey, self.ykey, self.otherdatakeys_list):
+			if otherdatakeys is None:
+				dataset = neuraldecoding.utils.datasets.BehaviorDataset(data, xkey, ykey)
 			else:
-				dataset = neuraldecoding.utils.datasets.FingerDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys, otherinterpipekeys)
+				dataset = neuraldecoding.utils.datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
 			datasets += (dataset,)
 		
 		return datasets, interpipe
 
 class Dataset2DictBlock(DataFormattingBlock):
 	"""
-	Converts a dictionary (from load_one_nwb) to neural and finger data in dictionary format.
+	Converts a dictionary (from load_one_nwb) to neural and behavior data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, time_nwb_loc, apply_trial_filtering = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
 		"""
-		Initializes the Dict2DataDictBlock.
+		Initializes the Dataset2DictBlock.
 		Args:
-			neural_type (str): Type of neural data to extract from the dictionary. Default is "sbp". Can be "sbp" or "tcfr"
+			neural_nwb_loc (str): Location path for neural data in the NWB file.
+			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
+			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
 		"""
 		self.neural_nwb_loc = neural_nwb_loc
 		self.behavior_nwb_loc = behavior_nwb_loc
-		self.time_nwb_loc = time_nwb_loc
 		self.apply_trial_filtering = apply_trial_filtering
+		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
+		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
+		self.nwb_targets_loc = nwb_targets_loc
 		super().__init__()
 
 	def transform(self, data, interpipe):
 		"""
-		Transform the data from a dictionary to neural and finger data in dictionary format.
+		Transform the data from a dictionary to neural and behavior data in dictionary format.
 		Args:
 			data (dict): Input dataset class.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (dict): A dictionary containing 'neural' and 'finger' data.
+			data_out (dict): A dictionary containing 'neural' and 'behavior' data.
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
 		#TODO: Implement trial filtering (have an apply trial filters feature)
-		
-		neural, finger = resolve_path(data.dataset, self.neural_nwb_loc)[:], resolve_path(data.dataset, self.behavior_nwb_loc)[:]
-		time_stamps = resolve_path(data.dataset, self.time_nwb_loc)[:]
-		
-		try:
-			assert(len(neural) == len(time_stamps) == len(finger))
-		except:
-			ValueError("Dimension mismatch")
-	
+		neural_nwb, behavior_nwb = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
+		neural, behavior = neural_nwb.data[:], behavior_nwb.data[:]
+		trial_start_times = resolve_path(data.dataset, self.nwb_trial_start_times_loc)
+		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
+		targets = resolve_path(data.dataset, self.nwb_targets_loc)
+		# Convert to milliseconds
+		trial_start_times = trial_start_times[:] * 1000
+		trial_end_times = trial_end_times[:] * 1000
+		# Convert timestamps to milliseconds
+		neural_ts, behavior_ts = neural_nwb.timestamps[:] * 1000, behavior_nwb.timestamps[:] * 1000
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
-		
-		interpipe['time_stamps'] = time_stamps
 
-		data_out = {'neural': neural, 'finger': finger}
+		trial_idx = np.searchsorted(neural_ts, trial_start_times, side='left')
+		trial_filt = np.zeros(len(neural), dtype=np.int32)
+		boundaries = np.concatenate([trial_idx, [len(neural)]])
+		for i in range(len(trial_idx)):
+			trial_filt[boundaries[i]:boundaries[i+1]] = i
+
+		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behavior, 'behavior_ts': behavior_ts}
+		interpipe['trial_start_times'] = trial_start_times
+		interpipe['trial_end_times'] = trial_end_times
+		interpipe['trial_idx'] = trial_idx
+		interpipe['trial_filt'] = trial_filt
+		data_out['targets'] = targets[:]
 		return data_out, interpipe
 
 
@@ -400,9 +408,9 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data (dict): The data dictionary with history added at the specified locations.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		trial_ts_train = interpipe['trial_ts'][:interpipe['test_start_idx']]
-		data['neural_train'], data['finger_train'], trial_lengths_train = \
-			neuraldecoding.utils.add_trial_history(data['neural_train'], data['finger_train'], trial_ts_train, self.leadup)
+		trial_filt_train = interpipe['trial_filt'][:interpipe['test_start_idx']]
+		data['neural_train'], data['behavior_train'], trial_lengths_train = \
+			neuraldecoding.utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_filt_train, self.leadup)
 		data['trial_lengths_train'] = trial_lengths_train
 		interpipe['leadup'] = self.leadup
 
@@ -410,67 +418,32 @@ class TrialHistoryBlock(DataProcessingBlock):
 
 
 class NormalizationBlock(DataProcessingBlock):
-	"""
-	A block for normalizing data using specified methods.
-	Supports multiple normalization methods defined in `neuraldecoding.dataaugmentation.DataAugmentation`.
-	"""
-	def __init__(self, location, method, normalizer_params):
-		"""
-		Initializes the NormalizationBlock.
-		Args:
-			location (str or list): The key(s) in the data dictionary where normalization is applied.
-			method (str): The normalization method to use. Options includes 'moving_average', 'sklearn', 'sequence_scaler'.
-			normalizer_params (dict): Parameters for the normalization method.
-		"""
+	def __init__(self, fit_location, apply_locations, normalizer_method, 
+			  normalizer_params, sklearn_type=None, save_path=None):
 		super().__init__()
-		self.location = location
-		self.normalizer_method = method
+		self.fit_location = fit_location
+		if isinstance(apply_locations, str):
+			self.apply_location = [apply_locations]
+		self.apply_location = apply_locations
+		self.normalizer_method = normalizer_method
 		self.normalizer_params = normalizer_params
-
-	def transform(self, data, interpipe):
-		"""
-		Transform the data by normalizing it using the specified method.
-		Args:
-			data (dict): Input data dictionary containing the data to be normalized.
-			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
-		Returns:	
-			data (dict): The data dictionary with normalized data at the specified location.
-			interpipe (dict): The interpipe dictionary remains unchanged.
-		"""
-		if self.normalizer_method == 'moving_average':
-			p = self.normalizer_params['params']
-		elif self.normalizer_method == 'sklearn':
-			normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])
-			p = {'normalizer': normalizer(**self.normalizer_params['params'])}
-		else:
-			p = {}
-		for loc in self.location:
-			data[loc], normalizer = neuraldecoding.dataaugmentation.DataAugmentation.normalize(data[loc],
-																				   method = self.normalizer_method,
-																				   **p)
-		return data, interpipe
-
-class UpdateNormalizationBlock(DataProcessingBlock):
-	def __init__(self, location, method, normalizer_params):
-		super().__init__()
-		self.location = location
-		self.normalizer_method = method
-		self.normalizer_params = normalizer_params
+		self.sklearn_type = sklearn_type
+		self.save_path = save_path
 	def transform(self, data, interpipe):
 		if self.normalizer_method == 'sklearn':
-			normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])(**self.normalizer_params['params'])
-			data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
-			data[self.location[1]] = normalizer.transform(data[self.location[1]])
-		elif self.normalizer_method == 'sequence_scaler':
+			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params['params'])
+			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
+			for loc in self.apply_location:
+				data[loc] = normalizer.transform(data[self.location[1]])
+		elif self.normalizer_method == 'sequence_scaler':	
 			normalizer = SequenceScaler()
-			data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
-			data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location], **self.normalizer_params)
+			for loc in self.apply_location:
+				data[loc] = normalizer.transform(data[loc])
 		else:
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
-		if self.normalizer_params['is_save']:
-			if 'save_path' not in self.normalizer_params:
-				raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
-			with open(self.normalizer_params['save_path'], 'wb') as f:
+		if self.save_path is not None:
+			with open(self.save_path, 'wb') as f:
 				pickle.dump(normalizer, f)
 		return data, interpipe
 
@@ -520,16 +493,25 @@ class EnforceTensorBlock(DataProcessingBlock):
 		return data, interpipe
 
 class FeatureExtractionBlock(DataProcessingBlock):
-	def __init__(self, location, feature_extractor_config):
+	def __init__(self, location_data: list[str], location_ts: list[str], feature_extractor_config: dict):
 		super().__init__()
-		self.location = location
+		self.location_data = location_data
+		self.location_ts = location_ts
 		self.feature_extractor = FeatureExtractor(feature_extractor_config)
 
 	def transform(self, data, interpipe):
-		for loc in self.location:
+		for loc in self.location_data + self.location_ts:
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
-			data[loc] = self.feature_extractor.extract_binned_features(data=data[loc], timestamps_ms=interpipe.get('time_stamps', None))
+		features_list = self.feature_extractor.extract_binned_features(data=[data[loc] for loc in self.location_data], timestamps_ms=[data[loc] for loc in self.location_ts], return_array=True)
+		for loc in self.location_ts:
+			del data[loc]
+		for i, loc in enumerate(self.location_data):
+			data[loc] = features_list[i]
+		if 'trial_index' in interpipe:
+			interpipe['trial_index'] = interpipe['trial_index'] / self.feature_extractor.get('bin_size_ms', 50)
+		if 'trial_filt' in interpipe:
+			interpipe['trial_filt'] = interpipe['trial_filt'][::self.feature_extractor.config.get('bin_size_ms', 50)]
 		return data, interpipe
 	
 class LabelModificationBlock(DataProcessingBlock):
@@ -571,7 +553,7 @@ class LabelModificationBlock(DataProcessingBlock):
 			self.location = [self.location]
 
 		for loc in self.location:
-			data[loc] = neuraldecoding.utils.label_mods.apply_modifications(self.modifications, data[loc], interpipe['trial_ts'], self.param_dict)
+			data[loc] = neuraldecoding.utils.label_mods.apply_modifications(self.modifications, data[loc], interpipe['trial_filt'], self.param_dict)
 		
 		return data, interpipe
 	

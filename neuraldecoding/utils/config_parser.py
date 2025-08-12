@@ -2,7 +2,7 @@ from omegaconf import DictConfig, ListConfig
 from neuraldecoding.utils.config_structs import decoder_struct, trainer_struct_nn, trainer_struct_linear, preprocessing_struct
 from typing import Union, get_origin, get_args
 
-def verify_structure(content: DictConfig, struct: dict) -> tuple[bool, str | None]:
+def verify_structure(content: DictConfig, struct: dict) -> tuple[bool, str]:
     """
     Recursively verify if the content DictConfig matches the structure and types defined in struct.
 

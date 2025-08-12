@@ -5,7 +5,7 @@ from scipy.ndimage import uniform_filter1d
 import matplotlib.pyplot as plt
 import warnings
 
-def apply_modifications(modifications, kinematics, trial_ts, param_dict):
+def apply_modifications(modifications, kinematics, trial_filt, param_dict):
     if isinstance(modifications, str):
         modifications = [modifications]
     
@@ -13,15 +13,15 @@ def apply_modifications(modifications, kinematics, trial_ts, param_dict):
         if mod == 'shift_bins':
             kinematics = shift_kinematics(kinematics, param_dict['shift'])
         elif mod == 'shift_by_trial':
-            kinematics = shift_kinematics_by_trial(kinematics, trial_ts, param_dict['shift_range'], param_dict['individuate_dofs'])
+            kinematics = shift_kinematics_by_trial(kinematics, trial_filt, param_dict['shift_range'], param_dict['individuate_dofs'])
         elif mod == 'warp_by_trial':
-            kinematics = warp_kinematics_by_trial(kinematics, trial_ts, param_dict['warp_factor'], param_dict['hold_time'])
+            kinematics = warp_kinematics_by_trial(kinematics, trial_filt, param_dict['warp_factor'], param_dict['hold_time'])
         elif mod == 'random_warp':
-            kinematics = random_warp(kinematics, trial_ts, param_dict['hold_time'], param_dict['individuate_dofs'])
+            kinematics = random_warp(kinematics, trial_filt, param_dict['hold_time'], param_dict['individuate_dofs'])
         elif mod == 'sigmoid_replacement':
-            kinematics = replace_with_sigmoid(kinematics, trial_ts, param_dict['sigmoid_k'], param_dict['center'])
+            kinematics = replace_with_sigmoid(kinematics, trial_filt, param_dict['sigmoid_k'], param_dict['center'])
         elif mod == 'bias_endpoints':
-            kinematics = bias_endpoints(kinematics, trial_ts, param_dict['bias_range'], param_dict['individuate_dofs'])
+            kinematics = bias_endpoints(kinematics, trial_filt, param_dict['bias_range'], param_dict['individuate_dofs'])
         else:
             warnings.warn(f'Modification {mod} is not an option. Skipping...')
     

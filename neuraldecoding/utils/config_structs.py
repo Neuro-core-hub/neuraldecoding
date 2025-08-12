@@ -59,5 +59,6 @@ trainer_struct_linear = {
 
 preprocessing_struct = {
         'order': ListConfig,
-        'content': DictConfig
+        'content': DictConfig,
+        'model_conf_append': ListConfig
 }

@@ -1,1 +1,1 @@
-from .LSTM import LSTM
+from .LSTM import LSTM, LSTMTrialInput

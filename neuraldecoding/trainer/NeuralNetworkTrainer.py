@@ -23,7 +23,7 @@ class NNTrainer(Trainer):
         super().__init__()
         # General training params 
         self.device = torch.device(config.training.device)
-        self.model = self.create_model(OmegaConf.merge(config.model, config.preprocessing)).to(self.device)
+        self.model = self.create_model(config.model).to(self.device)
         self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
         self.scheduler, self.scheduler_params = self.create_scheduler(config.scheduler, self.optimizer)
         self.loss_func = self.create_loss_function(config.loss_func)
@@ -49,8 +49,7 @@ class NNTrainer(Trainer):
             raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
         
         """Assuming data is dictionary output of one NWB file, change later"""
-        data = load_one_nwb(self.data_path)
-        data_tuple = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
+        data_tuple = self.preprocessor.preprocess_pipeline(self.data_path, params={'is_train': True})
 
         if len(data_tuple) == 2:
             self.train_ds, self.valid_ds = data_tuple
@@ -76,10 +75,12 @@ class NNTrainer(Trainer):
         """Creates and returns a learning rate scheduler based on the configuration."""
         if scheduler_config is None:
             return None
-        scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         scheduler_params = {}
-        scheduler_params['one_cycle'] = scheduler_config.get('one_cycle', False)
-        scheduler_params['min_lr'] = scheduler_config.params.get('min_lr', 0.0)
+        scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
+        if scheduler_config.type == 'ReduceLROnPlateau':
+            learning_rate = optimizer.param_groups[0]['lr']
+            scheduler_params['min_lr'] = learning_rate / scheduler_config.get('num_steps', 2)
+        scheduler_params['n_cycle'] = scheduler_config.get('n_cycle', False)
 
         return scheduler_class(optimizer, **scheduler_config.params), scheduler_params
 
@@ -98,7 +99,7 @@ class NNTrainer(Trainer):
         raise ValueError(f"Loss function '{loss_config.type}' not found in torch.nn or neuraldecoding.utils.loss_functions.")
         
     def create_model(self, model_config: DictConfig) -> torch.nn.Module:
-        """Creates and returns a loss function based on the configuration."""
+        """Creates and returns a model based on the configuration."""
         model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
         model = model_class(model_config.params)
         return model
@@ -114,11 +115,8 @@ class NNTrainer(Trainer):
             train_all_targets = []
             for batch in self.train_loader:
                 self.optimizer.zero_grad()
-                
-                x = batch['neu'].to(self.device)
-                y = batch['kin'].to(self.device)
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+                loss, yhat = self.model.train_step(batch, self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
 
                 if(self.clear_cache):
                     del y, yhat
@@ -171,7 +169,7 @@ class NNTrainer(Trainer):
 
                     # Scheduler step
                     if self.scheduler:
-                        if self.scheduler_params['one_cycle']:
+                        if self.scheduler_params['n_cycle']:
                             if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                                 self.scheduler.step(val_loss)
                                 if self.optimizer.param_groups[0]['lr'] < self.scheduler_params['min_lr']:
@@ -192,9 +190,11 @@ class NNTrainer(Trainer):
                     return self.model, self.logger
                 iteration += 1
             
-            if self.scheduler and not self.scheduler_params['one_cycle']:
+            if self.scheduler and not self.scheduler_params['n_cycle']:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     self.scheduler.step(val_loss)
+                    if self.optimizer.param_groups[0]['lr'] < self.scheduler_params['min_lr']:
+                        return self.model, self.logger
             else:
                 self.scheduler.step()
 

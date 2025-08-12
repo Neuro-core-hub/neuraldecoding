@@ -1,0 +1,38 @@
+defaults:
+  - /model@model: model
+
+optimizer:
+  type: AdamW
+  params:
+    lr: 0.0002
+    weight_decay: 0.001
+
+scheduler:
+  type: ReduceLROnPlateau
+  n_cycle: True # will step scheduler when result is printed
+  num_steps: 2
+  params:
+    mode: 'min'
+    factor: 0.1
+    patience: 8
+
+loss_func:
+  type: MSELoss
+  params: {}
+
+training:
+  num_epochs: None
+  max_iters: None
+  batch_size: 64
+  device: cuda # cuda , if avail 
+  print_results: True
+  print_every: 100
+  clear_cache: False
+
+evaluation:
+  metrics: ["loss", "correlation"]
+  params: {}
+
+data:
+  data_path: 'placeholder_path'
+  params: {}

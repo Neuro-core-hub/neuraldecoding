@@ -47,8 +47,7 @@ class FingerDatasetCustom(Dataset):
                  interpipe,
                  xkey,
                  ykey,
-                 otherdatakeys=None,
-                 otherinterpipekeys=None):
+                 otherdatakeys=None):
         """
         Args:
             data (dict): Input data dictionary containing the data and relevant information.
@@ -70,15 +69,11 @@ class FingerDatasetCustom(Dataset):
         # store any other data that is needed for processing
         if isinstance(otherdatakeys, str):
             otherdatakeys = [otherdatakeys]
-        if isinstance(otherinterpipekeys, str):
-            otherinterpipekeys = [otherinterpipekeys]
 
         self.otherkeys = otherdatakeys
         for key in otherdatakeys or []:
             setattr(self, key, data[key])
 
-        for key in otherinterpipekeys or []:
-            self.params[key] = interpipe[key]
 
     def __len__(self):
         return len(self.neural)
