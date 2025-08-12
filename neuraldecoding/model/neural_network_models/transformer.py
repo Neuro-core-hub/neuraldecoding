@@ -9,7 +9,6 @@ from einops.layers.torch import Rearrange, Reduce
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import os
 import warnings
-warnings.warn("Transformer model not fixed yet")
 # most of the code from: https://github.com/eeyhsong/EEG-Conformer
 class PatchEmbedding(nn.Module):
     def __init__(self, num_channels, emb_size=40, drop_prob=0.5):
@@ -117,9 +116,9 @@ class TransformerEncoderBlock(nn.Sequential):
             ))
         )
 
-class TransformerEncoder(nn.Sequential):
-    def __init__(self, depth, emb_size, num_heads):
-        super().__init__(*[TransformerEncoderBlock(emb_size, num_heads) for _ in range(depth)])
+# class TransformerEncoder(nn.Sequential):
+#     def __init__(self, depth, emb_size, num_heads):
+#         super().__init__(*[TransformerEncoderBlock(emb_size, num_heads) for _ in range(depth)])
 
 class ClassificationHead(nn.Sequential):
     def __init__(self, emb_size, num_outputs, drop_prob=0.5):
@@ -198,7 +197,7 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
 
         self.pos_encoder = PositionalEncoding(num_features, dropout)
         encoder_layers = TransformerEncoderLayer(num_features, enc_nhead, enc_nhid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers, enc_nhead)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers)
         self.decoder = nn.Linear(num_features, num_outputs)
 
         self.init_weights()
@@ -262,14 +261,14 @@ class TransformerGRUModel(nn.Module, NeuralNetworkModel):
 
         self.pos_encoder = PositionalEncoding(num_features, dropout)
         encoder_layers = TransformerEncoderLayer(num_features, enc_nhead, enc_nhid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers, enc_nhead)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers)
         # self.decoder = nn.Linear(num_features, num_outputs)
         self.rnn_nhid = rnn_nhid
         self.rnn_nlayers = 1
         self.gru = nn.GRU(num_features, rnn_nhid, num_layers=1, batch_first=False)
         self.fc = nn.Linear(rnn_nhid, num_outputs)
 
-    def forward(self, x, h=None):
+    def forward(self, x, h=None, return_h=False):
         '''
         Run data forward through the encoder and then an FC layer.
         We never mask the inputs (we're not using this for sequence generation).
@@ -282,7 +281,10 @@ class TransformerGRUModel(nn.Module, NeuralNetworkModel):
         out = self.transformer_encoder(src, self.src_mask)
         out, h = self.gru(out, h)
         out = self.fc(out[-1, :])
-        return out, h
+        if return_h:
+            return out, h
+        else:
+            return out
 
     def init_hidden(self, batch_size):
         return torch.zeros(self.rnn_nlayers, batch_size, self.rnn_nhid)
@@ -311,65 +313,65 @@ class TransformerGRUModel(nn.Module, NeuralNetworkModel):
 
         self.model_params = checkpoint["model_params"]
 
-class ConformerModel(nn.Module, NeuralNetworkModel):
-    def __init__(self, params):
-        super(ConformerModel, self).__init__()
-        '''
-        model_params contains:
-        - num_channels
-        - num_outputs
-        - good_channels_idx
-        - emb_size: default 40
-        - num_heads: default 10
-        - num_layers: default 6
-        - drop_prob: default 0.5
-        '''
-        self.model_name = 'ConformerModel'
-        self.good_channels_idx = params['good_channels_idx']
+# class ConformerModel(nn.Module, NeuralNetworkModel):
+#     def __init__(self, params):
+#         super(ConformerModel, self).__init__()
+#         '''
+#         model_params contains:
+#         - num_channels
+#         - num_outputs
+#         - good_channels_idx
+#         - emb_size: default 40
+#         - num_heads: default 10
+#         - num_layers: default 6
+#         - drop_prob: default 0.5
+#         '''
+#         self.model_name = 'ConformerModel'
+#         self.good_channels_idx = params['good_channels_idx']
 
-        self.model_params = params
-        num_channels = params['num_channels']
-        num_outputs = params['num_outputs']
-        emb_size = params.get('emb_size', 40)
-        num_heads = params.get('num_heads', 10)
-        num_layers = params.get('num_layers', 6)
-        drop_prob = params.get('drop_prob', 0.5)
+#         self.model_params = params
+#         num_channels = params['num_channels']
+#         num_outputs = params['num_outputs']
+#         emb_size = params.get('emb_size', 40)
+#         num_heads = params.get('num_heads', 10)
+#         num_layers = params.get('num_layers', 6)
+#         drop_prob = params.get('drop_prob', 0.5)
 
-        self.patch_embedding = PatchEmbedding(num_channels, emb_size, drop_prob)
-        self.transformer = TransformerEncoder(num_layers, emb_size, num_heads)
-        self.class_head = ClassificationHead(emb_size, num_outputs, drop_prob)
+#         self.patch_embedding = PatchEmbedding(num_channels, emb_size, drop_prob)
+#         self.transformer = TransformerEncoder(num_layers, emb_size, num_heads)
+#         self.class_head = ClassificationHead(emb_size, num_outputs, drop_prob)
     
-    def forward(self, x):
-        # take only the good channels
-        x = x[:,self.good_channels_idx,:].unsqueeze(1)
+#     def forward(self, x):
+#         # take only the good channels
+#         x = x[:,self.good_channels_idx,:].unsqueeze(1)
 
-        # take only the first 32 channels
-        x = self.patch_embedding(x)
-        x = self.transformer(x)
-        x = self.class_head(x)
+#         # take only the first 32 channels
+#         x = self.patch_embedding(x)
+#         x = self.transformer(x)
+#         x = self.class_head(x)
 
-        return x
+#         return x
 
-    def save_model(self, filepath):
-        checkpoint_dict = {
-            "model_state_dict": self.state_dict(),
-            "model_params": self.model_params,
-            "model_type": "Conformer"
-        }
-        folder = os.path.dirname(filepath)
-        if folder and not os.path.exists(folder):
-            os.makedirs(folder)
-        torch.save(checkpoint_dict, filepath)
+#     def save_model(self, filepath):
+#         checkpoint_dict = {
+#             "model_state_dict": self.state_dict(),
+#             "model_params": self.model_params,
+#             "model_type": "Conformer"
+#         }
+#         folder = os.path.dirname(filepath)
+#         if folder and not os.path.exists(folder):
+#             os.makedirs(folder)
+#         torch.save(checkpoint_dict, filepath)
     
-    def load_model(self, filepath):
-        checkpoint = torch.load(filepath)
+#     def load_model(self, filepath):
+#         checkpoint = torch.load(filepath)
 
-        if checkpoint["model_type"] != "Conformer":
-            raise Exception("Tried to load model that isn't a Conformer Instance")
+#         if checkpoint["model_type"] != "Conformer":
+#             raise Exception("Tried to load model that isn't a Conformer Instance")
 
-        if self.model_params != checkpoint["model_params"]:
-            raise ValueError("Model parameters do not match the checkpoint parameters")
+#         if self.model_params != checkpoint["model_params"]:
+#             raise ValueError("Model parameters do not match the checkpoint parameters")
 
-        self.load_state_dict(checkpoint["model_state_dict"])
+#         self.load_state_dict(checkpoint["model_state_dict"])
 
-        self.model_params = checkpoint["model_params"]
+#         self.model_params = checkpoint["model_params"]
