@@ -1,14 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import numpy as np
 import os
 
-class RecurrentModel(nn.Module):
+class RecurrentModel(nn.Module, NeuralNetworkModel):
     ''' A general recurrent model that can use VanillaRNN/GRU/LSTM, with a linear layer to the output '''
-    def __init__(self, model_params):
+    def __init__(self, params):
         '''
-        model_params contains:
+        params contains:
         - input_size
         - hidden_size
         - num_outputs
@@ -20,16 +21,16 @@ class RecurrentModel(nn.Module):
         '''
         super().__init__()
         
-        self.model_params = model_params
+        self.model_params = params
 
-        self.input_size = model_params['input_size']
-        self.hidden_size = model_params['hidden_size']
-        self.num_outputs = model_params['num_outputs']
-        self.num_layers = model_params['num_layers']
-        self.rnn_type = model_params.get('rnn_type', 'lstm').lower()
-        self.hidden_noise_std = model_params.get('hidden_noise_std', None)
-        drop_prob = model_params.get('dropout', 0)
-        dropout_input = model_params.get('dropout_input', 0)
+        self.input_size = params['input_size']
+        self.hidden_size = params['hidden_size']
+        self.num_outputs = params['num_outputs']
+        self.num_layers = params['num_layers']
+        self.rnn_type = params.get('rnn_type', 'lstm').lower()
+        self.hidden_noise_std = params.get('hidden_noise_std', None)
+        drop_prob = params.get('dropout', 0)
+        dropout_input = params.get('dropout_input', 0)
 
         if dropout_input:
             self.dropout_input = nn.Dropout(dropout_input)
@@ -44,7 +45,7 @@ class RecurrentModel(nn.Module):
             self.rnn = nn.LSTM(self.input_size, self.hidden_size, self.num_layers, dropout=drop_prob, batch_first=True)
         self.fc = nn.Linear(self.hidden_size, self.num_outputs)
 
-    def forward(self, x, h=None,  return_all_tsteps=False):
+    def forward(self, x, h=None,  return_all_tsteps=False, return_h=False):
         """
         x:                  Neural data tensor of shape (batch_size, num_inputs, sequence_length)
         h:                  Hidden state tensor
@@ -67,7 +68,11 @@ class RecurrentModel(nn.Module):
             out = self.fc(out)  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
         else:
             out = self.fc(out[:, -1])  # out now has shape (batch_size, num_outs) like (64, 2)
-        return out, h
+
+        if return_h:
+            return out, h
+        else:
+            return out
 
     def init_hidden(self, batch_size):
         if self.rnn_type == 'lstm':

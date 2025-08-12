@@ -5,12 +5,12 @@ import numpy as np
 import os
 
 class LSTM(nn.Module, NeuralNetworkModel):
-    def __init__(self, model_params):
+    def __init__(self, params):
         ''' 
         Initializes a LSTM
 
          Args:
-            model_params:                dict containing the following model params:
+            params:                dict containing the following model params:
                                             input_size:         number of input features
                                             num_outputs:        number of output features
                                             hidden_size:        size of hidden state in model 
@@ -24,20 +24,20 @@ class LSTM(nn.Module, NeuralNetworkModel):
             None
         ''' 
 
-        model_params["rnn_type"] = "lstm"
+        params["rnn_type"] = "lstm"
         # nn.Module.__init__(self)
         # NeuralNetworkModel.__init__(self, model_params)
 
         super(LSTM, self).__init__()
 
-        self.input_size = model_params["input_size"]
-        self.hidden_size = model_params["hidden_size"]
-        self.num_layers = model_params["num_layers"]
-        self.num_outputs = model_params["num_outputs"]
-        self.device = model_params.get("device", "cpu") 
-        self.hidden_noise_std = model_params.get("hidden_noise_std", 0.0)
-        self.dropout_input = model_params.get("dropout_input", False)
-        self.drop_prob = model_params.get("drop_prob", 0.0)
+        self.input_size = params["input_size"]
+        self.hidden_size = params["hidden_size"]
+        self.num_layers = params["num_layers"]
+        self.num_outputs = params["num_outputs"]
+        self.device = params.get("device", "cpu") 
+        self.hidden_noise_std = params.get("hidden_noise_std", 0.0)
+        self.dropout_input = params.get("dropout_input", False)
+        self.drop_prob = params.get("drop_prob", 0.0)
 
         # Define LSTM layer
         self.rnn = nn.LSTM(

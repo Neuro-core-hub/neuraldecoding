@@ -1,17 +1,14 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-import config
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import os
-
-device = config.device
 
 def flatten(x, start_dim=1, end_dim=-1):
     return x.flatten(start_dim=start_dim, end_dim=end_dim)
 
 class TCN(nn.Module, NeuralNetworkModel):
-    def __init__(self, model_params):
+    def __init__(self, params):
         '''
         Initializes a TCFNN
         Args:
@@ -26,22 +23,22 @@ class TCN(nn.Module, NeuralNetworkModel):
                 drop_prob:         probability of dropout
         '''
         super().__init__()
-        self.model_params = model_params
-        self.input_size = model_params["input_size"]
-        self.hidden_size = model_params["hidden_size"]
-        self.ConvSize = model_params["ConvSize"]
-        self.ConvSizeOut = model_params["ConvSizeOut"]
-        self.num_states = model_params["num_states"]
-        self.use_batch_norm = model_params.get("use_batch_norm", True)
-        self.use_dropout = model_params.get("use_dropout", True)
-        self.drop_prob = model_params.get("drop_prob", 0.5)
+        self.model_params = params
+        self.input_size = params["input_size"]
+        self.hidden_size = params["hidden_size"]
+        self.ConvSize = params["ConvSize"]
+        self.ConvSizeOut = params["ConvSizeOut"]
+        self.num_states = params["num_states"]
+        self.use_batchnorm = params.get("use_batch_norm", True)
+        self.use_dropout = params.get("use_dropout", True)
+        self.drop_prob = params.get("drop_prob", 0.5)
         # assign layer objects to class attributes
         self.cn1 = nn.Conv1d(self.ConvSize, self.ConvSizeOut, 1, bias=True)
         self.fc1 = nn.Linear(self.input_size * self.ConvSizeOut, self.hidden_size)
         self.fc2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc3 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc4 = nn.Linear(self.hidden_size, self.num_states)
-        if self.use_batch_norm:
+        if self.use_batchnorm:
             self.bn0 = nn.BatchNorm1d(self.input_size)
             self.bn1 = nn.BatchNorm1d(self.input_size * self.ConvSizeOut)
             self.bn2 = nn.BatchNorm1d(self.hidden_size)
@@ -118,18 +115,6 @@ class TCN(nn.Module, NeuralNetworkModel):
             scores = (self.bn5(scores) - self.bn5.bias) / self.bn5.weight
         
         return scores
-    
-    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False):
-        yhat = model(x)
-
-        loss = loss_func(yhat, y)
-
-        loss.backward()
-        optimizer.step()
-        if(clear_cache):
-            del x, y
-
-        return loss, yhat
     
     def save_model(self, filepath):
         checkpoint_dict = {

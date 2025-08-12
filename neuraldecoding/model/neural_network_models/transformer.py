@@ -182,15 +182,15 @@ class PositionalEncoding(nn.Module):
 
 class TransformerModel(nn.Module, NeuralNetworkModel):
 
-    def __init__(self, model_params):
+    def __init__(self, params):
         super(TransformerModel, self).__init__()
-        self.model_params = model_params
-        num_features = model_params['num_features']
-        num_outputs = model_params['num_outputs']
-        enc_nhead = model_params.get('enc_nhead', 2)
-        enc_nhid = model_params.get('enc_nhid', 2048)
-        enc_nlayers = model_params.get('enc_nlayers', 1)
-        dropout = model_params.get('dropout', 0.5)
+        self.model_params = params
+        num_features = params['num_features']
+        num_outputs = params['num_outputs']
+        enc_nhead = params.get('enc_nhead', 2)
+        enc_nhid = params.get('enc_nhid', 2048)
+        enc_nlayers = params.get('enc_nlayers', 1)
+        dropout = params.get('dropout', 0.5)
 
         self.model_name = 'TransformerModel'
         self.src_mask = None
@@ -247,19 +247,19 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
 
 class TransformerGRUModel(nn.Module):
 
-    def __init__(self, model_params):
+    def __init__(self, params):
         super(TransformerGRUModel, self).__init__()
         self.model_name = 'TransformerModel'
         self.src_mask = None
         
-        self.model_params = model_params
-        num_features = model_params['num_features']
-        num_outputs = model_params['num_outputs']
-        enc_nhead = model_params.get('enc_nhead', 2)
-        enc_nhid = model_params.get('enc_nhid', 2048)
-        enc_nlayers = model_params.get('enc_nlayers', 1)
-        dropout = model_params.get('dropout', 0.5)
-        rnn_nhid = model_params.get('rnn_nhid', 300)
+        self.model_params = params
+        num_features = params['num_features']
+        num_outputs = params['num_outputs']
+        enc_nhead = params.get('enc_nhead', 2)
+        enc_nhid = params.get('enc_nhid', 2048)
+        enc_nlayers = params.get('enc_nlayers', 1)
+        dropout = params.get('dropout', 0.5)
+        rnn_nhid = params.get('rnn_nhid', 300)
 
         self.pos_encoder = PositionalEncoding(num_features, dropout)
         encoder_layers = TransformerEncoderLayer(num_features, enc_nhead, enc_nhid, dropout)
@@ -313,7 +313,7 @@ class TransformerGRUModel(nn.Module):
         self.model_params = checkpoint["model_params"]
 
 class ConformerModel(nn.Module):
-    def __init__(self, model_params):
+    def __init__(self, params):
         super(ConformerModel, self).__init__()
         '''
         model_params contains:
@@ -326,15 +326,15 @@ class ConformerModel(nn.Module):
         - drop_prob: default 0.5
         '''
         self.model_name = 'ConformerModel'
-        self.good_channels_idx = model_params['good_channels_idx']
+        self.good_channels_idx = params['good_channels_idx']
 
-        self.model_params = model_params
-        num_channels = model_params['num_channels']
-        num_outputs = model_params['num_outputs']
-        emb_size = model_params.get('emb_size', 40)
-        num_heads = model_params.get('num_heads', 10)
-        num_layers = model_params.get('num_layers', 6)
-        drop_prob = model_params.get('drop_prob', 0.5)
+        self.model_params = params
+        num_channels = params['num_channels']
+        num_outputs = params['num_outputs']
+        emb_size = params.get('emb_size', 40)
+        num_heads = params.get('num_heads', 10)
+        num_layers = params.get('num_layers', 6)
+        drop_prob = params.get('drop_prob', 0.5)
 
         self.patch_embedding = PatchEmbedding(num_channels, emb_size, drop_prob)
         self.transformer = TransformerEncoder(num_layers, emb_size, num_heads)
