@@ -8,7 +8,8 @@ from einops import rearrange
 from einops.layers.torch import Rearrange, Reduce
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import os
-
+import warnings
+warnings.warn("Transformer model not fixed yet")
 # most of the code from: https://github.com/eeyhsong/EEG-Conformer
 class PatchEmbedding(nn.Module):
     def __init__(self, num_channels, emb_size=40, drop_prob=0.5):
@@ -197,7 +198,7 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
 
         self.pos_encoder = PositionalEncoding(num_features, dropout)
         encoder_layers = TransformerEncoderLayer(num_features, enc_nhead, enc_nhid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers, enc_nhead)
         self.decoder = nn.Linear(num_features, num_outputs)
 
         self.init_weights()
@@ -243,9 +244,7 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
 
         self.model_params = checkpoint["model_params"]
     
-
-
-class TransformerGRUModel(nn.Module):
+class TransformerGRUModel(nn.Module, NeuralNetworkModel):
 
     def __init__(self, params):
         super(TransformerGRUModel, self).__init__()
@@ -263,7 +262,7 @@ class TransformerGRUModel(nn.Module):
 
         self.pos_encoder = PositionalEncoding(num_features, dropout)
         encoder_layers = TransformerEncoderLayer(num_features, enc_nhead, enc_nhid, dropout)
-        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, enc_nlayers, enc_nhead)
         # self.decoder = nn.Linear(num_features, num_outputs)
         self.rnn_nhid = rnn_nhid
         self.rnn_nlayers = 1
@@ -312,7 +311,7 @@ class TransformerGRUModel(nn.Module):
 
         self.model_params = checkpoint["model_params"]
 
-class ConformerModel(nn.Module):
+class ConformerModel(nn.Module, NeuralNetworkModel):
     def __init__(self, params):
         super(ConformerModel, self).__init__()
         '''
