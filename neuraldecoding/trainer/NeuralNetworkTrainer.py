@@ -19,7 +19,7 @@ import os
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
-        super().__init__()
+        super().__init__(config)
         # General training params 
         self.device = torch.device(config.training.device)
         self.model = self.create_model(config.model).to(self.device)
@@ -29,18 +29,6 @@ class NNTrainer(Trainer):
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
         self.clear_cache = config.training.clear_cache
-        # Evaluation and logging params
-        self.print_results = config.training.get("print_results", True)
-        self.print_every = config.training.get("print_every", 10)
-        self.metrics = config.evaluation.metrics
-        self.metric_params = config.evaluation.get("params", {})
-        self.logger = {metric: [[], []] for metric in self.metrics}
-        self.logger_save_path = config.evaluation.get("save_path", None)
-        if self.logger_save_path:
-            os.makedirs(os.path.dirname(self.logger_save_path), exist_ok=True)
-            with open(self.logger_save_path, 'a') as f:
-                headers = ['epoch'] + [f'{metric}_train' for metric in self.metrics] + [f'{metric}_val' for metric in self.metrics]
-                f.write(','.join(headers) + '\n')
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         if dataset is not None:
@@ -164,22 +152,7 @@ class NNTrainer(Trainer):
 
         return self.model, self.logger
 
-    def save_print_log(self, epoch, train_loss, val_loss):
-        # Save log
-        if self.logger_save_path:
-            with open(self.logger_save_path, 'a') as f:
-                entries = [epoch] + [f'"{self.logger[metric][0][-1]}"' for metric in self.metrics] + [f'"{self.logger[metric][1][-1]}"' for metric in self.metrics]
-                f.write(','.join(map(str, entries)) + '\n')
-
-        # Print log
-        if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
-            print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-            for metric in self.logger:
-                train_metric = self.logger[metric][0][-1]
-                val_metric = self.logger[metric][1][-1]
-                print(f"    {metric:>12}{': train = ':>12}{train_metric}")
-                print(f"    {'':>12}{'  val = ':>12}{val_metric}")
-
+    
     def clear_gpu_cache(self):
         self.model.cpu()
         del self.model
