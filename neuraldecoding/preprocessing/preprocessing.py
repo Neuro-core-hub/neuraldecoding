@@ -31,7 +31,7 @@ class Preprocessing:
             })
     
     def preprocess_pipeline(self, data, params = {'is_train': True}):
-        current_data = data.copy()
+        current_data = data
         inter_pipeline_data = {}
         inter_pipeline_data.update(params)
         for step in self.pipeline:
