@@ -5,12 +5,12 @@ import numpy as np
 import os
 
 class LSTM(nn.Module, NeuralNetworkModel):
-    def __init__(self, model_params):
+    def __init__(self, params):
         ''' 
         Initializes a LSTM
 
          Args:
-            model_params:                dict containing the following model params:
+            params:                dict containing the following model params:
                                             input_size:         number of input features
                                             num_outputs:        number of output features
                                             hidden_size:        size of hidden state in model 
@@ -24,20 +24,20 @@ class LSTM(nn.Module, NeuralNetworkModel):
             None
         ''' 
 
-        model_params["rnn_type"] = "lstm"
+        params["rnn_type"] = "lstm"
         # nn.Module.__init__(self)
         # NeuralNetworkModel.__init__(self, model_params)
 
         super(LSTM, self).__init__()
 
-        self.input_size = model_params["input_size"]
-        self.hidden_size = model_params["hidden_size"]
-        self.num_layers = model_params["num_layers"]
-        self.num_outputs = model_params["num_outputs"]
-        self.device = model_params.get("device", "cpu") 
-        self.hidden_noise_std = model_params.get("hidden_noise_std", 0.0)
-        self.dropout_input = model_params.get("dropout_input", False)
-        self.drop_prob = model_params.get("drop_prob", 0.0)
+        self.input_size = params["input_size"]
+        self.hidden_size = params["hidden_size"]
+        self.num_layers = params["num_layers"]
+        self.num_outputs = params["num_outputs"]
+        self.device = params.get("device", "cpu") 
+        self.hidden_noise_std = params.get("hidden_noise_std", 0.0)
+        self.dropout_input = params.get("dropout_input", False)
+        self.drop_prob = params.get("drop_prob", 0.0)
 
         # Define LSTM layer
         self.rnn = nn.LSTM(
@@ -53,21 +53,6 @@ class LSTM(nn.Module, NeuralNetworkModel):
 
         # Dropout layer for input (if enabled)
         self.input_dropout = nn.Dropout(self.drop_prob) if self.dropout_input else nn.Identity()
-
-
-    def __call__(self, data):
-        """
-        Makes the instance callable and returns the result of forward pass.
-
-        Parameters:
-            data (ndarray): Observation data for prediction, expected size [n, m]
-
-        Returns:
-            ndarray: Prediction results, size [n, k]
-        """
-        return self.forward(data)
-    
-
 
     def forward(self, x, h=None, return_all_tsteps=False, return_h = False):
         """
@@ -129,21 +114,6 @@ class LSTM(nn.Module, NeuralNetworkModel):
             hidden = (torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device),
                         torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
         return hidden
-
-    def train_step(self, x, y, model, optimizer, loss_func, clear_cache = False): # TODO: Change to batch
-        """
-        Trains LSTM Model
-        """
-        yhat = model(x)
-
-        loss = loss_func(yhat, y)
-
-        loss.backward()
-        optimizer.step()
-        if(clear_cache):
-            del x, y
-
-        return loss, yhat
 
     def save_model(self, filepath):
         """
