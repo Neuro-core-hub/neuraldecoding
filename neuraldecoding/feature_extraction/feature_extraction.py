@@ -31,8 +31,11 @@ class FeatureExtractor:
         self.bin_size_ms = config.get('bin_size_ms', 50)
         self.feature_type = config.get('feature_type', 'mav')
         if not isinstance(self.feature_type, list) or not isinstance(self.feature_type, str):
-            self.feature_type = OmegaConf.to_container(self.feature_type)
-        
+            try:
+                self.feature_type = OmegaConf.to_container(self.feature_type)
+            except Exception as e:
+                print(f"Error converting feature_type: {e}")
+
         # Initialize feature parameters
         self.feature_params = config.get('feature_params', None)
         if self.feature_params is None:
