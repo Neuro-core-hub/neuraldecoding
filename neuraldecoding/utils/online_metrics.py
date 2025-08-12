@@ -88,6 +88,9 @@ def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "c
                 continue
         timeseries = get_timeseries_from_trial(nwb_file, trial_index, timeseries_path, start_label=trial_start_label, stop_label=trial_stop_label)
         # Get initial value of the timeseries
+        # Add extra index if ndim ==1
+        if timeseries.ndim == 1:
+            timeseries = timeseries[: , None]
         initial_value = timeseries[0, :]
         if exclude_intarget_trials:
             if np.all(np.abs(initial_value - target) <= target_radius):
