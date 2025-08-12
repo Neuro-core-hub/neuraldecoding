@@ -1,0 +1,39 @@
+order:
+  - dataset2dict
+  - index_selector_emg
+  - feature_extraction
+  - split_data
+  - trainer_out
+content:
+  dataset2dict:
+    type: Dataset2DictBlock
+    params:
+      neural_nwb_loc: "acquisition.neural"
+      behavior_nwb_loc: "acquisition.continuous"
+      nwb_trial_start_times_loc: "trials.cue_time"
+      nwb_trial_end_times_loc: "trials.stop_time"
+      nwb_targets_loc: "trials.targets"
+  index_selector_emg:
+    type: IndexSelectorBlock
+    params:
+      location: ["neural"]
+      indices: [0, 2, 4, 6, 8, 10, 12, 14]
+  feature_extraction:
+    type: FeatureExtractionBlock
+    params:
+      location_data: ["neural","behavior"]
+      location_ts: ["neural_ts","behavior_ts"]
+      feature_extractor_config:
+        channels: 8
+        feature_type: [["mav"],["mean", "vel"]]
+        feature_params: [{}, {}]
+        bin_size_ms: 50
+  split_data:
+    type: DataSplitBlock
+    params:
+      location: ["neural","behavior"]
+      split_ratio: 0.8
+      split_seed: -1
+  trainer_out:
+    type: Dict2TrainerBlock
+    params: {}
