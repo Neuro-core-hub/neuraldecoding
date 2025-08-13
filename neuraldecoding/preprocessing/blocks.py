@@ -368,7 +368,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True, data_keys = ['neural', 'behaviour'], interpipe_keys = 'time_stamps', nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True, data_keys = ['neural', 'behaviour'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -410,10 +410,12 @@ class Dataset2DictBlock(DataFormattingBlock):
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
 
-		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behaviour, 'behavior_ts': behaviour_ts}
-		interpipe['trial_start_times'] = trial_start_times
-		interpipe['trial_end_times'] = trial_end_times
-		data_out['targets'] = targets[:]
+		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
+		interpipe[self.interpipe_keys['trial_start_times']] = trial_start_times
+		interpipe[self.interpipe_keys['trial_end_times']] = trial_end_times
+		interpipe[self.interpipe_keys['targets']] = targets[:]
+		interpipe[f'{self.data_keys[0]}_ts'] = neural_ts
+		interpipe[f'{self.data_keys[1]}_ts'] = behaviour_ts
 		return data_out, interpipe
 
 class IndexSelectorBlock(DataFormattingBlock):
@@ -821,7 +823,7 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 		"""
 		# Grab timestamps and EMG
 		emg = data[self.location_emg]
-		times = data[self.location_times]
+		times = interpipe[self.location_times]
 		trial_start_times = interpipe['trial_start_times']
 		trial_end_times = interpipe['trial_end_times']
 
