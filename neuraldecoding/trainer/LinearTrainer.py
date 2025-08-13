@@ -17,19 +17,22 @@ import os
 import pickle
 
 class LinearTrainer(Trainer):
-    def __init__(self, dataset: Dataset, preprocessor: Preprocessing, config: DictConfig):
+    def __init__(self, preprocessor: Preprocessing, config: DictConfig, dataset = None):
         super().__init__(config)
         self.model = self.create_model(self.cfg.model)
         self.preprocessor = preprocessor
-        self.dataset = dataset
+        if dataset is not None:
+            self.data_dict = self.load_data(dataset)
+        #setting dummy num epochs to print stuff
+        self.num_epochs = 1
 
-    def load_data(self):
-        result = self.preprocessor.preprocess_pipeline(self.dataset, params={'is_train': True})
-        self.train_X = result['neural_train']
-        self.train_Y = result['behavior_train']
-        self.valid_X = result['neural_test']
-        self.valid_Y = result['behavior_test']
-        
+    def load_data(self, dataset):
+        result = self.preprocessor.preprocess_pipeline(dataset, params={'is_train': True})
+        self.train_X = result['X_train']
+        self.train_Y = result['Y_train']
+        self.valid_X = result['X_val']
+        self.valid_Y = result['Y_val']
+
     def create_model(self, config):
         """Creates and returns a loss function based on the configuration."""
         model_class = getattr(neuraldecoding.model.linear_models, config.type)
@@ -41,13 +44,13 @@ class LinearTrainer(Trainer):
         # Validate model
         self.validate_model()
         print("Model trained, metrics:")
-        self.print_metrics()
+        self.save_print_log()
         return self.model, self.logger
     
     def validate_model(self):
         train_prediction = self.model(self.train_X)
         valid_prediction = self.model(self.valid_X)
-        for metric in self.cfg.metrics:
+        for metric in self.metrics:
             metric_method = getattr(neuraldecoding.utils.eval_metrics, metric)
             self.logger[metric][0].append(metric_method(train_prediction, self.train_Y))
             self.logger[metric][1].append(metric_method(valid_prediction, self.valid_Y))

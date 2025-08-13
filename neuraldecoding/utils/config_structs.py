@@ -16,6 +16,8 @@ trainer_struct_nn = {
 
 trainer_struct_linear = {
         'model': DictConfig,
+        'training': DictConfig,
+        'evaluation': DictConfig,
         'data': DictConfig
     }
 preprocessing_struct = {

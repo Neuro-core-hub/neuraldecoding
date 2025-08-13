@@ -241,7 +241,7 @@ class DataSplitBlock(DataFormattingBlock):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
-			location (List[str]): List of keys for data arrays in the data dictionary. Default is ['neural', 'finger'].
+			location (List[str]): List of keys for data arrays in the data dictionary. Default is ['neural', 'behaviour'].
 			split_ratio (float): The ratio of training data to total data. Default is 0.8.
 			split_seed (int): Seed for random number generator to ensure reproducibility. Default is 42.
 			location (list): List of 2 keys names in the data dictionary to be split. Default is ['neural', 'behaviour'].
@@ -330,8 +330,8 @@ class Dict2TrainerBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary to a trainer dictionary format.
 	Accepts either 2 or 4 keys in the dictionary:
-		- If 2 keys: 'neural' and 'finger', by default location (or no location).
-		- If 4 keys: 'neural_train', 'neural_test', 'finger_train', 'finger_test', by default location (or no location).
+		- If 2 keys: 'neural' and 'behaviour', by default location (or no location).
+		- If 4 keys: 'neural_train', 'neural_test', 'behaviour_train', 'behaviour_test', by default location (or no location).
 	"""
 	def __init__(self, location = None):
 		super().__init__()
@@ -351,9 +351,9 @@ class Dict2TrainerBlock(DataFormattingBlock):
 		"""
 		if self.location is None:
 			if len(data) == 2:
-				self.location = ['neural', 'finger']
+				self.location = ['neural', 'behaviour']
 			elif len(data) == 4:
-				self.location = ['neural_train', 'neural_test', 'finger_train', 'finger_test']
+				self.location = ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test']
 
 		if len(data) == 2:
 			data_out = {'X': data[self.location[0]], 'Y': data[self.location[1]]}
