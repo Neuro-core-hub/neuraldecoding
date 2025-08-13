@@ -1,0 +1,4 @@
+type: "RidgeRegression"
+params:
+  alpha: 0.001
+  fit_intercept: False

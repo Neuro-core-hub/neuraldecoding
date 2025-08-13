@@ -1,0 +1,10 @@
+defaults:
+  - /model@model: model
+
+data:
+  data_path: "D:/ND/github/LINK_dataset/data/001201/sub-Monkey-N/sub-Monkey-N_ses-20210628_ecephys.nwb"
+  params:
+    num_train_trials: 300
+    sequence_length: ${trainer.model.params.sequence_length}
+    split_ratio: 0.8
+    split_seed: 42

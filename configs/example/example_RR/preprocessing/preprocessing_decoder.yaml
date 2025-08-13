@@ -1,0 +1,56 @@
+preprocessing_decoder: 
+  order: [dict1, stabilization1, split1, add_history1, add_history2, update_normalize_sequence, tuple_out]
+  #order: [dict1, stabilization1, split1, tuple_out]
+  content:
+    dict1:
+      type: Dict2DataDictBlock
+      params:
+        neural_type: tcfr
+    split1:
+      type: DataSplitBlock
+      params:
+        split_ratio: 0.9
+        split_seed: -1
+    add_history1:
+      type: AddHistoryBlock
+      params:
+        location: ['neural_train', 'finger_train']
+        seq_length: 8
+        isRR: True
+    add_history2:
+      type: AddHistoryBlock
+      params:
+        location: ['neural_test', 'finger_test']
+        seq_length: 8
+        isRR: True
+    update_normalize_sequence:
+      type: UpdateNormalizationBlock
+      params:
+        location: ['neural_train', 'neural_test']
+        method: sklearn
+        normalizer_params:
+          type: StandardScaler
+          is_save: False
+          params: {}
+    tuple_out:
+      type: Dict2TupleBlock
+      params: {}
+    stabilization1:
+      type: StabilizationBlock
+      params:
+        location: 'neural'
+        stabilization_config:
+          type: LatentSpaceAlignment
+          params:
+            # dim_red_method: 
+            #   type: EMFactorAnalysis1
+            #   params:
+            #     verbose: True
+            dim_red_method: 
+              type: NoDimRed
+              params: {}
+            alignment_method: 
+              type: NoAlignment
+              params: {}
+            fpath: "results/alignment_models/latent_space_alignment_date_{date}.pkl"
+            ndims: 60

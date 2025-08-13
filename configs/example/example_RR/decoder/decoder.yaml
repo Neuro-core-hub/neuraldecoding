@@ -1,0 +1,4 @@
+defaults:
+  - /model: model
+
+fpath: "examples/saves/RR_model.pkl" # directory to saved model
