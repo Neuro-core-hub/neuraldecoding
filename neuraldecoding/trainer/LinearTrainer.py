@@ -17,7 +17,7 @@ import os
 import pickle
 
 class LinearTrainer(Trainer):
-    def __init__(self, preprocessor: Preprocessing, config: DictConfig, dataset):
+    def __init__(self, preprocessor: Preprocessing, config: DictConfig, dataset = None):
         super().__init__(config)
         self.model = self.create_model(self.cfg.model)
         self.preprocessor = preprocessor
