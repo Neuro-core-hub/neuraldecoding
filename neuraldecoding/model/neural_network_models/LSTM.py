@@ -59,7 +59,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         Runs forward pass of LSTM Model
 
         Args:
-            x:                  Neural data tensor of shape (batch_size, num_inputs, sequence_length) or (batch_size, num_inputs)
+            x:                  Neural data tensor of shape (batch_size, num_inputs, sequence_length) or (sequence_length, num_inputs)
             h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
             return_all_steps:   If true, returns predictions from all timesteps in the sequence. If false, only returns the
                                 last step in the sequence.
