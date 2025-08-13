@@ -28,8 +28,12 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
-        self.train_batch_size = self.batch_size[0]
-        self.valid_batch_size = self.batch_size[1]
+        if isinstance(self.batch_size, list):
+            self.train_batch_size = self.batch_size[0]
+            self.valid_batch_size = self.batch_size[1]
+        else:
+            self.train_batch_size = self.batch_size
+            self.valid_batch_size = self.batch_size
         self.clear_cache = config.training.clear_cache
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
