@@ -19,7 +19,7 @@ loss_func:
 
 training:
   num_epochs: 5
-  batch_size: [64, 64]
+  batch_size: [64, 1]
   device: cuda # cuda , if avail 
   print_results: False
   print_every: 1

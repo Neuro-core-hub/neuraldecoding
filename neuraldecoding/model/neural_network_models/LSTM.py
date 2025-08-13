@@ -59,7 +59,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         Runs forward pass of LSTM Model
 
         Args:
-            x:                  Neural data tensor of shape (batch_size, num_inputs, sequence_length)
+            x:                  Neural data tensor of shape (batch_size, num_inputs, sequence_length) or (sequence_length, num_inputs)
             h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
             return_all_steps:   If true, returns predictions from all timesteps in the sequence. If false, only returns the
                                 last step in the sequence.
@@ -68,33 +68,41 @@ class LSTM(nn.Module, NeuralNetworkModel):
             h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
         """
 
-        if x.dim() != 3:
-            raise ValueError(f"Input tensor must be 3D (batch_size, num_inputs, sequence_length), got shape {x.shape}")
+        if x.dim() != 3 and x.dim() != 2:
+            raise ValueError(f"Input tensor must be 3D (batch_size, num_inputs, sequence_length) or 2D, got shape {x.shape}")
         if x.shape[1] != self.input_size:
             raise ValueError(f"Input feature dimension mismatch: expected {self.input_size}, got {x.shape[1]}")
-
-        x = x.permute(0, 2, 1)  # put in format (batches, sequence length (history), features)
-
+        
+        if x.dim() == 3:
+            x = x.permute(0, 2, 1)  # put in format (batches, sequence length (history), features)
+            if h is None:
+                h = self.init_hidden(x.shape[0], dim=3) # x.shape[0] is batch size
+        elif x.dim() == 2:
+            if h is None:
+                h = self.init_hidden(x.shape[0], dim=2)
+        else:
+            raise ValueError(f"Invalid input tensor dimension {x.dim()}. Expected 2 or 3 dimensions.")
+        
         if self.dropout_input and self.training:
             x = self.input_dropout(x)
-
-        if h is None:
-            h = self.init_hidden(x.shape[0]) # x.shape[0] is batch size
-
+            
         out, h = self.rnn(x, h) # out shape:    (batch_size, seq_len, hidden_size) like (64, 20, 350)
                                 # h shape:      (n_layers, batch_size, hidden_size) like (2, 64, 350)
 
         if return_all_tsteps:
             out = self.fc(out)  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
         else:
-            out = self.fc(out[:, -1])  # out now has shape (batch_size, num_outs) like (64, 2)
+            if x.dim() == 2:  # unbatched input
+                out = self.fc(out[-1])  # shape: (hidden_size,) -> (num_outputs,)
+            else:  # batched input
+                out = self.fc(out[:, -1]) # out now has shape (batch_size, num_outs) like (64, 2)
         if return_h:
             return out, h
         else:
             return out
     
 
-    def init_hidden(self, batch_size):
+    def init_hidden(self, batch_size, dim=3):
         """
         Initializes hidden state of LSTM Model
 
@@ -105,14 +113,26 @@ class LSTM(nn.Module, NeuralNetworkModel):
             hidden:       hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
         """
         # lstm - create a tuple of two hidden states
-        if self.hidden_noise_std:
-            hidden = (torch.normal(mean=torch.zeros(self.num_layers, batch_size, self.hidden_size),
-                                    std=self.hidden_noise_std).to(device=self.device),
-                        torch.normal(mean=torch.zeros(self.num_layers, batch_size, self.hidden_size),
-                                    std=self.hidden_noise_std).to(device=self.device))
+        if dim == 3:
+            if self.hidden_noise_std:
+                hidden = (torch.normal(mean=torch.zeros(self.num_layers, batch_size, self.hidden_size),
+                                        std=self.hidden_noise_std).to(device=self.device),
+                            torch.normal(mean=torch.zeros(self.num_layers, batch_size, self.hidden_size),
+                                        std=self.hidden_noise_std).to(device=self.device))
+            else:
+                hidden = (torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device),
+                            torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
+        elif dim == 2:
+            if self.hidden_noise_std:
+                hidden = (torch.normal(mean=torch.zeros(self.num_layers, self.hidden_size),
+                                        std=self.hidden_noise_std).to(device=self.device),
+                            torch.normal(mean=torch.zeros(self.num_layers, self.hidden_size),
+                                        std=self.hidden_noise_std).to(device=self.device))
+            else:
+                hidden = (torch.zeros(self.num_layers, self.hidden_size).to(device=self.device),
+                            torch.zeros(self.num_layers, self.hidden_size).to(device=self.device))
         else:
-            hidden = (torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device),
-                        torch.zeros(self.num_layers, batch_size, self.hidden_size).to(device=self.device))
+            raise ValueError(f"Invalid dimension {dim} for hidden state initialization. Expected 2 or 3.")
         return hidden
 
     def save_model(self, filepath):

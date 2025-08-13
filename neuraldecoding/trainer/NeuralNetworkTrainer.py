@@ -28,6 +28,12 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
+        if isinstance(self.batch_size, list):
+            self.train_batch_size = self.batch_size[0]
+            self.valid_batch_size = self.batch_size[1]
+        else:
+            self.train_batch_size = self.batch_size
+            self.valid_batch_size = self.batch_size
         self.clear_cache = config.training.clear_cache
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
@@ -50,8 +56,8 @@ class NNTrainer(Trainer):
                                     self.data_dict["Y_train"].detach().clone().to(torch.float32))
         valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
                                     self.data_dict['Y_val'].detach().clone().to(torch.float32))
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
+        valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
         return train_loader, valid_loader
 
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
@@ -104,30 +110,8 @@ class NNTrainer(Trainer):
             train_all_targets = np.concatenate(train_all_targets, axis=0)
             train_loss = running_loss / len(self.train_loader)
 
-
             # Validate
-            self.model.eval()
-            running_val_loss = 0.0
-            val_all_predictions = []
-            val_all_targets = []
-
-            with torch.no_grad():
-                for x_val, y_val in self.valid_loader:
-                    x_val = x_val.to(self.device)
-                    y_val = y_val.to(self.device)
-                    yhat_val = self.model(x_val)
-                    val_loss = self.loss_func(yhat_val, y_val)
-
-                    running_val_loss += val_loss.item()
-                    val_all_predictions.append(yhat_val.cpu().numpy())
-                    val_all_targets.append(y_val.cpu().numpy())
-                    if(self.clear_cache):
-                        del y_val, yhat_val
-
-            val_all_predictions = np.concatenate(val_all_predictions, axis=0)
-            val_all_targets = np.concatenate(val_all_targets, axis=0)
-            val_loss = running_val_loss / len(self.valid_loader)
-
+            val_loss, val_all_predictions, val_all_targets = self.validate_model()
 
             # Scheduler step
             if self.scheduler:
@@ -151,13 +135,70 @@ class NNTrainer(Trainer):
             self.save_print_log(epoch, train_loss, val_loss)
 
         return self.model, self.logger
-
     
     def clear_gpu_cache(self):
         self.model.cpu()
         del self.model
         del self.optimizer
         torch.cuda.empty_cache()
+
+    def validate_model(self):
+        # Validate
+        self.model.eval()
+        running_val_loss = 0.0
+        val_all_predictions = []
+        val_all_targets = []
+
+        with torch.no_grad():
+            for x_val, y_val in self.valid_loader:
+                x_val = x_val.to(self.device)
+                y_val = y_val.to(self.device)
+                yhat_val = self.model(x_val)
+                val_loss = self.loss_func(yhat_val, y_val)
+
+                running_val_loss += val_loss.item()
+                val_all_predictions.append(yhat_val.cpu().numpy())
+                val_all_targets.append(y_val.cpu().numpy())
+                if(self.clear_cache):
+                    del y_val, yhat_val
+
+        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+        val_all_targets = np.concatenate(val_all_targets, axis=0)
+        val_loss = running_val_loss / len(self.valid_loader)
+
+        return val_loss, val_all_predictions, val_all_targets
+
+class LSTMTrainer(NNTrainer):
+    def __init__(self, preprocessor, config, dataset = None):
+        super().__init__(preprocessor, config, dataset)
+
+    def validate_model(self):
+        # Validate
+        self.model.eval()
+        running_val_loss = 0.0
+        val_all_predictions = []
+        val_all_targets = []
+        h = None
+
+        with torch.no_grad():
+            for x_val, y_val in self.valid_loader:
+                x_val = x_val.to(self.device)
+                y_val = y_val.to(self.device)
+                yhat_val, h = self.model.forward(x_val, h, return_h=True)
+                yhat_val = yhat_val.unsqueeze(0)
+                val_loss = self.loss_func(yhat_val, y_val)
+
+                running_val_loss += val_loss.item()
+                val_all_predictions.append(yhat_val.cpu().numpy())
+                val_all_targets.append(y_val.cpu().numpy())
+                if(self.clear_cache):
+                    del y_val, yhat_val
+
+        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+        val_all_targets = np.concatenate(val_all_targets, axis=0)
+        val_loss = running_val_loss / len(self.valid_loader)
+
+        return val_loss, val_all_predictions, val_all_targets
 
 class IterationNNTrainer(NNTrainer):
     '''
