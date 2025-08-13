@@ -5,7 +5,7 @@ optimizer:
   type: AdamW
   params:
     lr: 0.0002
-    weight_decay: 0.001
+    weight_decay: 0.003
 
 scheduler:
   type: ReduceLROnPlateau
@@ -21,9 +21,8 @@ loss_func:
   params: {}
 
 training:
-  num_epochs: None
-  max_iters: None
-  batch_size: 64
+  num_epochs: null
+  max_iters: null
   device: cuda # cuda , if avail 
   print_results: True
   print_every: 100
@@ -31,6 +30,7 @@ training:
 
 evaluation:
   metrics: ["loss", "correlation"]
+  only_val: [False, True]
   params: {}
 
 data:

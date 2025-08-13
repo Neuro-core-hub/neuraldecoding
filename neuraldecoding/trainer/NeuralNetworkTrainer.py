@@ -17,9 +17,11 @@ from neuraldecoding.model.neural_network_models.LSTM import LSTM
 import neuraldecoding.utils.eval_metrics
 from neuraldecoding.utils.eval_metrics import *
 import os
+from omegaconf import open_dict
+import warnings
 
 class NNTrainer(Trainer):
-    def __init__(self, preprocessor, config):
+    def __init__(self, dataset, preprocessor, config):
         super().__init__()
         # General training params 
         self.device = torch.device(config.training.device)
@@ -29,38 +31,42 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.max_iters = config.training.max_iters
-        self.batch_size = config.training.batch_size
+        if config.model.type == 'LSTMTrialInput':
+            self.batch_size = config.training.get('batch_size', 1)
+            if self.batch_size != 1:
+                warnings.warn("LSTMTrialInput does not support batch_size in model config. Setting batch_size to 1.")
+                with open_dict(config.training):
+                    self.batch_size = 1  # Override batch size to 1 for trial input support
+        else:
+            self.batch_size = config.training.get('batch_size', 64)
         self.clear_cache = config.training.clear_cache
         # Evaluation and logging params
         self.print_results = config.training.get("print_results", True)
         self.print_every = config.training.get("print_every", 10)
         self.metrics = config.evaluation.metrics
         self.metric_params = config.evaluation.get("params", {})
+        self.only_val = config.evaluation.get("only_val", [False]*len(self.metrics))
         self.logger = {metric: [[], []] for metric in self.metrics}
         self.preprocessor = preprocessor
-        self.data_path = config.data.data_path
+        self.dataset = dataset
         self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders()
 
         assert self.scheduler is not None or self.max_iters is not None or self.num_epochs is not None, "At least one of scheduler, max_iters, or num_epochs must be defined."
 
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
-        if not os.path.exists(self.data_path):
-            raise FileNotFoundError(f"Data path does not exist: {self.data_path}")
-        
-        """Assuming data is dictionary output of one NWB file, change later"""
-        data_tuple = self.preprocessor.preprocess_pipeline(self.data_path, params={'is_train': True})
+        data_tuple = self.preprocessor.preprocess_pipeline(self.dataset, params={'is_train': True})
 
         if len(data_tuple) == 2:
             self.train_ds, self.valid_ds = data_tuple
         elif len(data_tuple) == 3:
             self.train_ds, self.valid_ds, self.test_ds = data_tuple
 
-        train_loader = DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True)
-        valid_loader = DataLoader(self.valid_ds, batch_size=self.batch_size, shuffle=False)
+        train_loader = DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True, drop_last=True)
+        valid_loader = DataLoader(self.valid_ds, batch_size=len(self.valid_ds), shuffle=False)
 
         if hasattr(self, 'test_ds'):
-            test_loader = DataLoader(self.test_ds, batch_size=self.batch_size, shuffle=False)
+            test_loader = DataLoader(self.test_ds, batch_size=len(self.test_ds), shuffle=False)
         else:
             test_loader = None
 
@@ -79,7 +85,7 @@ class NNTrainer(Trainer):
         scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         if scheduler_config.type == 'ReduceLROnPlateau':
             learning_rate = optimizer.param_groups[0]['lr']
-            scheduler_params['min_lr'] = learning_rate / scheduler_config.get('num_steps', 2)
+            scheduler_params['min_lr'] = learning_rate / (scheduler_config.get('num_steps', 2) + 0.001)
         scheduler_params['n_cycle'] = scheduler_config.get('n_cycle', False)
 
         return scheduler_class(optimizer, **scheduler_config.params), scheduler_params
@@ -109,11 +115,11 @@ class NNTrainer(Trainer):
         iteration = 1
         while True:
             # Train
-            self.model.train()
             running_loss = 0.0
-            train_all_predictions = []
-            train_all_targets = []
+            i = 0
             for batch in self.train_loader:
+                i += 1
+                self.model.train()
                 self.optimizer.zero_grad()
 
                 loss, yhat = self.model.train_step(batch, self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
@@ -124,48 +130,44 @@ class NNTrainer(Trainer):
                 running_loss += loss.item()
 
                 if iteration != 0 and iteration % self.print_every == 0:
-                    train_loss = running_loss / len(self.train_loader)
+                    train_loss = running_loss / i
 
                     # Validate
                     self.model.eval()
                     running_val_loss = 0.0
-                    val_all_predictions = []
-                    val_all_targets = []
                     with torch.no_grad():
                         x_val = torch.stack([sample['neu'] for sample in self.valid_loader.dataset]).to(self.device)
                         y_val = torch.stack([sample['kin'] for sample in self.valid_loader.dataset]).to(self.device)
                         yhat_val = self.model(x_val)
                         val_loss = self.loss_func(yhat_val, y_val)
-
                         running_val_loss += val_loss.item()
-                        val_all_predictions = yhat_val.cpu().numpy()
-                        val_all_targets = y_val.cpu().numpy()
+
                         if(self.clear_cache):
                             del y_val, yhat_val
-
-                    val_all_predictions = np.concatenate(val_all_predictions, axis=0)
-                    val_all_targets = np.concatenate(val_all_targets, axis=0)
-                    val_loss = running_val_loss / len(self.valid_loader)
 
                     with torch.no_grad():
                         x_train = torch.stack([sample['neu'] for sample in self.train_loader.dataset]).to(self.device)
                         y_train = torch.stack([sample['kin'] for sample in self.train_loader.dataset]).to(self.device)
                         yhat_train = self.model(x_train)
-                        train_all_predictions = yhat_train.cpu().numpy()
-                        train_all_targets = y_train.cpu().numpy()
                         if(self.clear_cache):
                             del y_train, yhat_train
 
                     # Calculate and populate metrics
                     for metric in self.metrics:
                         if metric == "loss":
-                            self.logger[metric][0].append(train_loss)
+                            if not self.only_val[self.metrics.index(metric)]:
+                                self.logger[metric][0].append(train_loss)
+                            else:
+                                self.logger[metric][0].append('not computed')
                             self.logger[metric][1].append(val_loss)
                         else:
                             metric_param = self.metric_params.get(metric, None)
                             metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
-                            self.logger[metric][0].append(metric_class(train_all_predictions, train_all_targets, metric_param))
-                            self.logger[metric][1].append(metric_class(val_all_predictions, val_all_targets, metric_param))
+                            if not self.only_val[self.metrics.index(metric)]:
+                                self.logger[metric][0].append(metric_class(yhat_train, y_train, metric_param))
+                            else:
+                                self.logger[metric][0].append('not computed')
+                            self.logger[metric][1].append(metric_class(yhat_val, y_val, metric_param))
 
                     # Scheduler step
                     if self.scheduler:
@@ -178,8 +180,8 @@ class NNTrainer(Trainer):
                                 self.scheduler.step()
 
                     # Print progress
-                    if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
-                        print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+                    if self.print_results:
+                        print(f"Epoch {epoch}, iteration {iteration}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
                         for metric in self.logger:
                             train_metric = self.logger[metric][0][-1]
                             val_metric = self.logger[metric][1][-1]
@@ -189,16 +191,18 @@ class NNTrainer(Trainer):
                 if self.max_iters is not None and iteration >= self.max_iters:
                     return self.model, self.logger
                 iteration += 1
+
+                self.model.train()
             
             if self.scheduler and not self.scheduler_params['n_cycle']:
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     self.scheduler.step(val_loss)
                     if self.optimizer.param_groups[0]['lr'] < self.scheduler_params['min_lr']:
                         return self.model, self.logger
-            else:
-                self.scheduler.step()
+                else:
+                    self.scheduler.step()
 
-            if epoch >= self.num_epochs and self.num_epochs is not None:
+            if self.num_epochs is not None and epoch >= self.num_epochs:
                 return self.model, self.logger
             
             epoch += 1

@@ -287,24 +287,19 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
-		trial_start_times = trial_start_times[:] * 1000
-		trial_end_times = trial_end_times[:] * 1000
+		trial_start_times = trial_start_times[:] 
+		trial_end_times = trial_end_times[:]
 		# Convert timestamps to milliseconds
 		neural_ts, behavior_ts = neural_nwb.timestamps[:] * 1000, behavior_nwb.timestamps[:] * 1000
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
 
 		trial_idx = np.searchsorted(neural_ts, trial_start_times, side='left')
-		trial_filt = np.zeros(len(neural), dtype=np.int32)
-		boundaries = np.concatenate([trial_idx, [len(neural)]])
-		for i in range(len(trial_idx)):
-			trial_filt[boundaries[i]:boundaries[i+1]] = i
 
 		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behavior, 'behavior_ts': behavior_ts}
 		interpipe['trial_start_times'] = trial_start_times
 		interpipe['trial_end_times'] = trial_end_times
 		interpipe['trial_idx'] = trial_idx
-		interpipe['trial_filt'] = trial_filt
 		data_out['targets'] = targets[:]
 		return data_out, interpipe
 
@@ -424,17 +419,16 @@ class NormalizationBlock(DataProcessingBlock):
 		self.fit_location = fit_location
 		if isinstance(apply_locations, str):
 			self.apply_location = [apply_locations]
-		self.apply_location = apply_locations
 		self.normalizer_method = normalizer_method
 		self.normalizer_params = normalizer_params
 		self.sklearn_type = sklearn_type
 		self.save_path = save_path
 	def transform(self, data, interpipe):
 		if self.normalizer_method == 'sklearn':
-			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params['params'])
+			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params)
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
 			for loc in self.apply_location:
-				data[loc] = normalizer.transform(data[self.location[1]])
+				data[loc] = normalizer.transform(data[loc])
 		elif self.normalizer_method == 'sequence_scaler':	
 			normalizer = SequenceScaler()
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location], **self.normalizer_params)
@@ -508,10 +502,12 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			del data[loc]
 		for i, loc in enumerate(self.location_data):
 			data[loc] = features_list[i]
-		if 'trial_index' in interpipe:
-			interpipe['trial_index'] = interpipe['trial_index'] / self.feature_extractor.get('bin_size_ms', 50)
-		if 'trial_filt' in interpipe:
-			interpipe['trial_filt'] = interpipe['trial_filt'][::self.feature_extractor.config.get('bin_size_ms', 50)]
+		if 'trial_idx' in interpipe:
+			interpipe['trial_idx'] = np.astype((interpipe['trial_idx'] / self.feature_extractor.bin_size_ms), np.int32)
+			interpipe['trial_filt'] = np.zeros(len(data[self.location_data[0]]), dtype=np.int32)
+			for i, start in enumerate(interpipe['trial_idx']):
+				end = interpipe['trial_idx'][i + 1] if i + 1 < len(interpipe['trial_idx']) else len(data[self.location_data[0]])
+				interpipe['trial_filt'][start:end] = i
 		return data, interpipe
 	
 class LabelModificationBlock(DataProcessingBlock):

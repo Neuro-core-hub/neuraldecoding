@@ -5,6 +5,10 @@ from sklearn.metrics import r2_score
 def correlation(pred,target,params=None):
     """Calculates the correlation between y1 and y2 (tensors)"""
     corr = []
+    if isinstance(pred, torch.Tensor):
+        pred = pred.cpu().numpy()
+    if isinstance(target, torch.Tensor):
+        target = target.cpu().numpy()
     for i in range(pred.shape[1]):
         corr.append(np.corrcoef(pred[:, i], target[:, i])[1, 0])
     return corr

@@ -3,6 +3,7 @@ import torch.nn as nn
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import numpy as np
 import os
+from omegaconf import open_dict
 
 class LSTM(nn.Module, NeuralNetworkModel):
     def __init__(self, model_params):
@@ -228,9 +229,9 @@ class LSTMTrialInput(LSTM):
                                 # h shape:      (n_layers, batch_size, hidden_size) like (2, 64, 350)
 
         if trial_length is None:
-            out = self.fc(out[:, -1])  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
+            out = self.fc(out[:, -1])  # out now has shape (batch_size, num_outs) like (64, 2)# out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
         else:
-            out = self.fc(out[:,self.leadup:self.leadup + trial_length]).permute(0, 2, 1)  # out now has shape (batch_size, num_outs) like (64, 2)
+            out = self.fc(out[:,self.leadup:self.leadup + trial_length]).permute(0, 2, 1)  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
 
         if return_h:
             return out, h
@@ -243,11 +244,17 @@ class LSTMTrialInput(LSTM):
         """
         x = batch['neu'].to(self.device)
         y = batch['kin'].to(self.device)
-        trial_length = batch.get('trial_length', None)
+        trial_length = batch.get('trial_lengths_train', None)
+        if trial_length is not None:
+            trial_length = int(trial_length.item())
         yhat = model(x, trial_length=trial_length)
-        y = y[:, self.leadup:self.leadup + trial_length, :]
+        y = y[:, :, :trial_length]
 
-        loss = loss_func(yhat, y)
+        losses = []
+        for dof in range(yhat.shape[1]):
+            loss = loss_func(yhat[:, dof, :].unsqueeze(2), y[:, dof, :].unsqueeze(2))
+            losses.append(loss)
+        loss = sum(losses)
 
         loss.backward()
         optimizer.step()
@@ -255,3 +262,15 @@ class LSTMTrialInput(LSTM):
             del x, y
 
         return loss, yhat
+    
+    def __call__(self, data, trial_length=None):
+        """
+        Makes the instance callable and returns the result of forward pass.
+
+        Parameters:
+            data (ndarray): Observation data for prediction, expected size [n, m]
+
+        Returns:
+            ndarray: Prediction results, size [n, k]
+        """
+        return self.forward(data, trial_length=trial_length)

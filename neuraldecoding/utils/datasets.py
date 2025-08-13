@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset
 
-class FingerDataset(Dataset):
+class BehaviorDataset(Dataset):
     """ Torch Dataset for predicting finger position/velocity from neural data. """
 
     def __init__(self,
@@ -35,11 +35,11 @@ class FingerDataset(Dataset):
 
         return sample
 
-class FingerDatasetCustom(Dataset):
+class BehaviorDatasetCustom(Dataset):
     """Torch Dataset for predicting finger position/velocity from neural data.
        Has functionality to return other data in the dataset such as trial lengths.
        Also allows for interpipe parameters to be passed through.
-       May be slower than the default FingerDataset, but allows for more flexibility.
+       May be slower than the default BehaviorDataset, but allows for more flexibility.
     """
 
     def __init__(self,
@@ -87,6 +87,6 @@ class FingerDatasetCustom(Dataset):
         sample = {'neu': neu, 'kin': kin}
         
         for key in self.otherkeys or []:
-            sample[key] = getattr(self, key)[idx, :]
+            sample[key] = getattr(self, key)[idx]
 
         return sample

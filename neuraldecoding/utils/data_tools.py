@@ -134,7 +134,7 @@ def data_split_direct(x, y, ratio):
 def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
     boundaries = np.concatenate([trial_idx, [len(x)]])
     n_trials = len(trial_idx)
-    trial_list = torch.arange(trial_idx)
+    trial_list = torch.arange(len(trial_idx))
 
     if isinstance(split_ratio, float):
         n_train = int(n_trials * split_ratio)
@@ -169,8 +169,8 @@ def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
 
     data = {'neural_train': x[train_mask], 
 			'neural_test': x[test_mask], 
-			'finger_train': y[train_mask], 
-			'finger_test': y[test_mask]}
+			'behavior_train': y[train_mask], 
+			'behavior_test': y[test_mask]}
     if val_trials is not None:
         data['neural_val'] = x[val_mask]
         data['finger_val'] = y[val_mask]
@@ -229,6 +229,8 @@ def add_history_numpy(neural_data, seq_len):
     the output is of shape (n_samples, seq_len, n_channels)
     """
     Xtrain1 = torch.zeros((int(neural_data.shape[0]), int(neural_data.shape[1]), seq_len))
+    if not isinstance(neural_data, np.ndarray):
+        neural_data = neural_data.numpy()
     Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
     for k1 in range(seq_len - 1):
         k = k1 + 1
