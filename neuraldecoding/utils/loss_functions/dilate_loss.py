@@ -3,7 +3,7 @@ from . import soft_dtw
 from . import path_soft_dtw 
 
 # Sophia's function for DILATE loss
-def dilate_loss(outputs, targets, alpha, gamma, device, individuate_dofs=False):
+def dilate_loss(outputs, targets, alpha, gamma, device, individuate_dofs=False, only_final_loss=True):
     """
     Compute the DILATE loss for sequence alignment between `outputs` and `targets`.
 
@@ -14,10 +14,10 @@ def dilate_loss(outputs, targets, alpha, gamma, device, individuate_dofs=False):
     Parameters
     ----------
     outputs : torch.Tensor
-        Predicted sequences of shape (batch_size, N_output, T)
+        Predicted sequences of shape (batch_size, N_output, T) or (T, N_output). 
 
     targets : torch.Tensor
-        Ground-truth sequences of shape (batch_size, N_output, T)
+        Ground-truth sequences of shape (batch_size, N_output, T) or (T, N_output). 
 
     alpha : float
         Weighting factor in [0, 1] to balance shape loss vs. temporal loss.
@@ -39,6 +39,9 @@ def dilate_loss(outputs, targets, alpha, gamma, device, individuate_dofs=False):
     loss_temporal : torch.Tensor
         The temporal alignment penalty.
     """
+    if outputs.ndim == 2:
+        outputs = outputs.transpose(0, 1).unsqueeze(0)  # shape (1, N_output, T)
+        targets = targets.transpose(0, 1).unsqueeze(0)  # shape (1, N_output, T)
     _, N, _ = outputs.shape
     pos_dim = N // 2
 
@@ -60,7 +63,10 @@ def dilate_loss(outputs, targets, alpha, gamma, device, individuate_dofs=False):
     else:
         loss, loss_shape, loss_temporal = dilate_func(outputs, targets, alpha, gamma, device)
     
-    return loss, loss_shape, loss_temporal
+    if only_final_loss:
+        return loss
+    else:
+        return loss, loss_shape, loss_temporal
 
 
 def dilate_func(outputs, targets, alpha, gamma, device):

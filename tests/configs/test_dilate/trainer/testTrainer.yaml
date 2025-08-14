@@ -13,12 +13,16 @@ scheduler:
   num_steps: 2
   params:
     mode: 'min'
-    factor: 0.1
+    factor: 0.5
     patience: 8
 
 loss_func:
   type: MSELoss
   params: {}
+    #alpha: 1
+    #gamma: 0.001
+    #device: cuda
+    #individuate_dofs: False
 
 training:
   num_epochs: null
@@ -29,9 +33,15 @@ training:
   clear_cache: False
 
 evaluation:
-  metrics: ["loss", "correlation"]
-  only_val: [False, True]
-  params: {}
+  metrics: ["loss", "correlation", "softdtw", "tdi", dilate]
+  only_val: [False, True, True, True, True]
+  params: 
+    loss: {}
+    correlation: {}
+    softdtw: {per_dof: True, gamma: 0.001, device: cuda}
+    tdi: {per_dof: True, gamma: 0.001, device: cuda}
+    dilate: {per_dof: True, alpha: 0.5, gamma: 0.001, device: cuda}
+
 
 data:
   data_path: 'placeholder_path'

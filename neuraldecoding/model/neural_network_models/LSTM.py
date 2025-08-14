@@ -250,11 +250,7 @@ class LSTMTrialInput(LSTM):
         yhat = model(x, trial_length=trial_length)
         y = y[:, :, :trial_length]
 
-        losses = []
-        for dof in range(yhat.shape[1]):
-            loss = loss_func(yhat[:, dof, :].unsqueeze(2), y[:, dof, :].unsqueeze(2))
-            losses.append(loss)
-        loss = sum(losses)
+        loss = loss_func(yhat, y)
 
         loss.backward()
         optimizer.step()
