@@ -16,6 +16,7 @@ from neuraldecoding.model.neural_network_models.LSTM import LSTM
 import neuraldecoding.utils.eval_metrics
 from neuraldecoding.utils.eval_metrics import *
 import os
+import collections
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
@@ -28,7 +29,7 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
-        if isinstance(self.batch_size, list):
+        if isinstance(self.batch_size, collections.abc.Iterable):
             self.train_batch_size = self.batch_size[0]
             self.valid_batch_size = self.batch_size[1]
         else:
@@ -180,23 +181,23 @@ class LSTMTrainer(NNTrainer):
         val_all_targets = []
         h = None
 
-        with torch.no_grad():
-            for x_val, y_val in self.valid_loader:
-                x_val = x_val.to(self.device)
-                y_val = y_val.to(self.device)
-                yhat_val, h = self.model.forward(x_val, h, return_h=True)
-                yhat_val = yhat_val.unsqueeze(0)
-                val_loss = self.loss_func(yhat_val, y_val)
+        x_val = self.data_dict['X_val']
+        y_val = self.data_dict['Y_val']
+        x_val = x_val.to(self.device)
+        y_val = y_val.to(self.device)
 
-                running_val_loss += val_loss.item()
-                val_all_predictions.append(yhat_val.cpu().numpy())
-                val_all_targets.append(y_val.cpu().numpy())
-                if(self.clear_cache):
-                    del y_val, yhat_val
+        yhat_val = self.model.forward(x_val, return_all_tsteps=True)
+
+        val_loss = self.loss_func(yhat_val, y_val)
+
+        val_all_predictions.append(yhat_val.detach().cpu().numpy())
+        val_all_targets.append(y_val.detach().cpu().numpy())
 
         val_all_predictions = np.concatenate(val_all_predictions, axis=0)
         val_all_targets = np.concatenate(val_all_targets, axis=0)
-        val_loss = running_val_loss / len(self.valid_loader)
+
+        if(self.clear_cache):
+            del y_val, yhat_val
 
         return val_loss, val_all_predictions, val_all_targets
 
