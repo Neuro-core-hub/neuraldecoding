@@ -3,6 +3,7 @@ from omegaconf import DictConfig
 import numpy as np
 import torch
 import json
+import collections
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
@@ -28,7 +29,7 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
-        if isinstance(self.batch_size, list):
+        if isinstance(self.batch_size, collections.abc.Iterable):
             self.train_batch_size = self.batch_size[0]
             self.valid_batch_size = self.batch_size[1]
         else:
@@ -181,24 +182,12 @@ class LSTMTrainer(NNTrainer):
         h = None
 
         with torch.no_grad():
-            for x_val, y_val in self.valid_loader:
-                x_val = x_val.to(self.device)
-                y_val = y_val.to(self.device)
-                yhat_val, h = self.model.forward(x_val, h, return_h=True)
-                yhat_val = yhat_val.unsqueeze(0)
-                val_loss = self.loss_func(yhat_val, y_val)
+            all_x = self.valid_loader.dataset.tensors[0][:,:,-1]
+            val_all_targets = self.valid_loader.dataset.tensors[1]
+            val_all_predictions = self.model.forward(all_x, return_all_tsteps=True)
+            val_loss = self.loss_func(val_all_predictions, val_all_targets).item()
 
-                running_val_loss += val_loss.item()
-                val_all_predictions.append(yhat_val.cpu().numpy())
-                val_all_targets.append(y_val.cpu().numpy())
-                if(self.clear_cache):
-                    del y_val, yhat_val
-
-        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
-        val_all_targets = np.concatenate(val_all_targets, axis=0)
-        val_loss = running_val_loss / len(self.valid_loader)
-
-        return val_loss, val_all_predictions, val_all_targets
+        return val_loss, val_all_predictions.detach().cpu().numpy(), val_all_targets.detach().cpu().numpy()
 
 class IterationNNTrainer(NNTrainer):
     '''

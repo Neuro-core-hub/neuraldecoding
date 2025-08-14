@@ -6,7 +6,7 @@ def correlation(pred,target,params=None):
     """Calculates the correlation between y1 and y2 (tensors)"""
     corr = []
     for i in range(pred.shape[1]):
-        corr.append(np.corrcoef(pred[:, i], target[:, i])[1, 0])
+        corr.append(np.corrcoef(pred.squeeze()[:, i], target.squeeze()[:, i])[1, 0])
     return corr
 
 def accuracy(pred, target, params=None):
