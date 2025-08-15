@@ -19,11 +19,12 @@ from neuraldecoding.utils.eval_metrics import *
 import os
 from omegaconf import open_dict
 import warnings
+import copy
 
 class NNTrainer(Trainer):
     def __init__(self, dataset, preprocessor, config):
         super().__init__()
-        # General training params 
+        # General training params
         self.device = torch.device(config.training.device)
         self.model = self.create_model(config.model).to(self.device)
         self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
@@ -31,6 +32,7 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.max_iters = config.training.max_iters
+        self.take_best = config.training.get('take_best', True)
         if config.model.type == 'LSTMTrialInput':
             self.batch_size = config.training.get('batch_size', 1)
             if self.batch_size != 1:
@@ -113,6 +115,11 @@ class NNTrainer(Trainer):
     def train_model(self):
         epoch = 1
         iteration = 1
+        best_val_loss = float('inf')
+        best_state_dict = None
+        epoch_best = 0
+        iteration_best = 0
+
         while True:
             # Train
             running_loss = 0.0
@@ -141,6 +148,12 @@ class NNTrainer(Trainer):
                         yhat_val = self.model(x_val)
                         val_loss = self.loss_func(yhat_val, y_val)
                         running_val_loss += val_loss.item()
+
+                        if self.take_best and val_loss < best_val_loss:
+                            best_val_loss = val_loss
+                            best_state_dict = copy.deepcopy(self.model.state_dict())
+                            epoch_best = epoch
+                            iteration_best = iteration
 
                         if(self.clear_cache):
                             del y_val, yhat_val
@@ -175,6 +188,8 @@ class NNTrainer(Trainer):
                             if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                                 self.scheduler.step(val_loss)
                                 if self.optimizer.param_groups[0]['lr'] < self.scheduler_params['min_lr']:
+                                    if self.take_best and best_state_dict is not None:
+                                        self.reload_model(best_state_dict, epoch_best, iteration_best)
                                     return self.model, self.logger
                             else:
                                 self.scheduler.step()
@@ -189,6 +204,8 @@ class NNTrainer(Trainer):
                             print(f"    {'':>12}{'  val = ':>12}{val_metric}")
                 
                 if self.max_iters is not None and iteration >= self.max_iters:
+                    if self.take_best and best_state_dict is not None:
+                        self.reload_model(best_state_dict, epoch_best, iteration_best)
                     return self.model, self.logger
                 iteration += 1
 
@@ -198,11 +215,15 @@ class NNTrainer(Trainer):
                 if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                     self.scheduler.step(val_loss)
                     if self.optimizer.param_groups[0]['lr'] < self.scheduler_params['min_lr']:
+                        if self.take_best and best_state_dict is not None:
+                            self.reload_model(best_state_dict, epoch_best, iteration_best)
                         return self.model, self.logger
                 else:
                     self.scheduler.step()
 
             if self.num_epochs is not None and epoch >= self.num_epochs:
+                if self.take_best and best_state_dict is not None:
+                    self.reload_model(best_state_dict, epoch_best, iteration_best)
                 return self.model, self.logger
             
             epoch += 1
@@ -213,3 +234,37 @@ class NNTrainer(Trainer):
         del self.model
         del self.optimizer
         torch.cuda.empty_cache()
+    
+    def reload_model(self, model_state_dict, epoch_best, iteration_best):
+        """Reloads the model with the given state dictionary."""
+        self.model.load_state_dict(model_state_dict)
+        self.model.to(self.device)
+        self.model.eval()
+
+        print(f"Reloaded model from epoch {epoch_best}, iteration {iteration_best} with best validation loss.")
+
+        with torch.no_grad():
+            x_val = torch.stack([sample['neu'] for sample in self.valid_loader.dataset]).to(self.device)
+            y_val = torch.stack([sample['kin'] for sample in self.valid_loader.dataset]).to(self.device)
+            yhat_val = self.model(x_val)
+            val_loss = self.loss_func(yhat_val, y_val)
+
+            if(self.clear_cache):
+                del x_val, y_val, yhat_val
+                del x_train, y_train, yhat_train
+
+        final_metrics = {}
+        for metric in self.metrics:
+            if metric == "loss":
+                final_metrics[metric] = val_loss
+            else:
+                metric_param = self.metric_params.get(metric, None)
+                metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
+                final_metrics[metric]  = metric_class(yhat_val, y_val, metric_param)
+
+        print(f"Final validation metrics: ")
+        for metric in self.logger:
+            val_metric = final_metrics[metric]
+            print(f"    {metric:>12}{'  val = ':>12}{val_metric}")
+
+        return self.model

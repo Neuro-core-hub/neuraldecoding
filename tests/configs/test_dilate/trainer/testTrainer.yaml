@@ -31,16 +31,15 @@ training:
   print_results: True
   print_every: 100
   clear_cache: False
+  take_best: True
 
 evaluation:
-  metrics: ["loss", "correlation", "softdtw", "tdi", dilate]
-  only_val: [False, True, True, True, True]
+  metrics: ["loss", "correlation", "mse"]
+  only_val: [False, True, True]
   params: 
     loss: {}
     correlation: {}
-    softdtw: {per_dof: True, gamma: 0.001, device: cuda}
-    tdi: {per_dof: True, gamma: 0.001, device: cuda}
-    dilate: {per_dof: True, alpha: 0.5, gamma: 0.001, device: cuda}
+    mse: {}
 
 
 data:
