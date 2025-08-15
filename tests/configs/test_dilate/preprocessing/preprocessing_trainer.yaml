@@ -1,4 +1,4 @@
-order: [dict, xfilt, yfilt, feat, split, xnorm, ynorm, trainhist, testhist, tensor, dataset]
+order: [dict, xfilt, yfilt, feat, split, sigmoid, xnorm, ynorm, trainhist, testhist, tensor, dataset]
 content:
   dict:
     type: Dataset2DictBlock
@@ -17,7 +17,7 @@ content:
     type: IndexSelectorBlock
     params:
       locations: behavior
-      indices: [1,3]
+      indices: &fingers [1,3]
   feat: 
     type: FeatureExtractionBlock
     params:
@@ -28,11 +28,21 @@ content:
         feature_type: [["mav"],["mean", "vel"]]
         feature_params: [{}, {}]
         bin_size_ms: 32
+        target_filter: *fingers
   split:
     type: DataSplitBlock
     params:
       split_ratio: 0.8
       split_seed: 42
+  sigmoid:
+    type: LabelModificationBlock
+    params:
+      nicknames: sigrep
+      param_dict:
+        sigrep:
+          mod_type: sigmoid_replacement
+          sigmoid_k: 4
+          center: 0.5
   xnorm:
     type: NormalizationBlock
     params:

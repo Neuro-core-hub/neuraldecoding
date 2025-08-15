@@ -4,24 +4,27 @@ from typing import List, Tuple, Union
 from scipy.ndimage import uniform_filter1d
 import matplotlib.pyplot as plt
 import warnings
+from neuraldecoding.utils.loss_functions import dilate_loss
 
-def apply_modifications(modifications, kinematics, trial_filt, param_dict):
-    if isinstance(modifications, str):
-        modifications = [modifications]
-    
-    for mod in modifications:
+def apply_modifications(nicknames, kinematics, interpipe, param_dict):
+    trial_filt = interpipe['trial_filt'][interpipe['train_mask']]
+    targets_filt = interpipe['targets_filt'][interpipe['train_mask']]
+
+    for name in nicknames:
+        current_params = param_dict[name]
+        mod = current_params['mod_type']
         if mod == 'shift_bins':
-            kinematics = shift_kinematics(kinematics, param_dict['shift'])
+            kinematics = shift_kinematics(kinematics, current_params['shift'])
         elif mod == 'shift_by_trial':
-            kinematics = shift_kinematics_by_trial(kinematics, trial_filt, param_dict['shift_range'], param_dict['individuate_dofs'])
+            kinematics = shift_kinematics_by_trial(kinematics, trial_filt, current_params['shift_range'], current_params['individuate_dofs'])
         elif mod == 'warp_by_trial':
-            kinematics = warp_kinematics_by_trial(kinematics, trial_filt, param_dict['warp_factor'], param_dict['hold_time'])
+            kinematics = warp_kinematics_by_trial(kinematics, trial_filt, current_params['warp_factor'], current_params['hold_time'])
         elif mod == 'random_warp':
-            kinematics = random_warp(kinematics, trial_filt, param_dict['hold_time'], param_dict['individuate_dofs'])
+            kinematics = random_warp(kinematics, trial_filt, current_params['hold_time'], current_params['individuate_dofs'])
         elif mod == 'sigmoid_replacement':
-            kinematics = replace_with_sigmoid(kinematics, trial_filt, param_dict['sigmoid_k'], param_dict['center'])
+            kinematics = replace_with_sigmoid(kinematics, trial_filt, targets_filt, current_params['sigmoid_k'], current_params['center'])
         elif mod == 'bias_endpoints':
-            kinematics = bias_endpoints(kinematics, trial_filt, param_dict['bias_range'], param_dict['individuate_dofs'])
+            kinematics = bias_endpoints(kinematics, trial_filt, current_params['bias_range'], current_params['individuate_dofs'])
         else:
             warnings.warn(f'Modification {mod} is not an option. Skipping...')
     
@@ -468,19 +471,11 @@ def warp_kinematics_by_trial(
 def replace_with_sigmoid(
     kinematics: torch.Tensor,
     trial_indices: np.ndarray,
+    targets: np.ndarray,
     sigmoid_k: float = 1.0,
     center: int = 0.5
 ) -> torch.Tensor:
-    """    Replace the kinematics of an entire trial with a sigmoid that connects the two position endpoints, rederive for velocity.
-    Args:
-        kinematics: Tensor of shape (T, N) where N is the number of kinematic variables
-                   (first half positions, second half velocities)
-        trial_indices: Array of shape (T,) containing trial indices for each time point
-        sigmoid_k: A parameter representing the steepness of the sigmoid
-        center: A parameter representing the center of the sigmoid as a fraction of each trial
-    Returns:
-        Modified kinematics tensor with biased endpoints
-    """
+    
     def sigmoid(x, x0=0, k=1, y_start=0, y_end=1):
         return torch.tensor(y_start + (y_end - y_start) / (1 + np.exp(-k * (x - x0)))).to(dtype=torch.float32)
     
@@ -493,6 +488,7 @@ def replace_with_sigmoid(
     # Get the number of dimensions and separate position and velocity
     N = kinematics.shape[1]
     pos_dim = N // 2
+    prev_target = None
 
     for trial in unique_trials:
         # Get mask for this trial
@@ -501,11 +497,16 @@ def replace_with_sigmoid(
         trial_data = kinematics[trial_mask]
         trial_length = len(trial_data)
 
+        trial_target = targets[trial_mask][0]
+        if prev_target is None:
+            prev_target = trial_target
+            continue
+
         sigmoid_trial_data = trial_data.clone()
 
         for dim in range(pos_dim):
-            y_start = trial_data[0, dim]
-            y_end = trial_data[-1, dim]
+            y_start = prev_target[dim]
+            y_end = trial_target[dim]
             x = np.arange(trial_length)
             x0 = trial_length * center
             y_new = sigmoid(x, x0=x0, k=sigmoid_k, y_start=y_start, y_end=y_end)
@@ -517,6 +518,8 @@ def replace_with_sigmoid(
                 sigmoid_trial_data[1:, dim+pos_dim] = y_new[1:] - y_new[:-1]
             
             sigmoid_data[trial_mask, dim+pos_dim] = sigmoid_trial_data[:, dim+pos_dim]
+        
+        prev_target = trial_target
 
         """
         loss_index = dilate_loss(sigmoid_data[trial_mask, 0].unsqueeze(0).unsqueeze(2), kinematics[trial_mask, 0].unsqueeze(0).unsqueeze(2), 1, 0.001, device=kinematics.device)

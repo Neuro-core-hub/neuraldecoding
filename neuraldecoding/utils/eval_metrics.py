@@ -16,7 +16,7 @@ def mse(pred, target, params=None):
     if len(pred) == 0:
         raise ValueError("Arrays cannot be empty")
     
-    return np.mean((pred - target) ** 2)
+    return np.mean((pred - target) ** 2, axis=0)
 
 def dilate(pred, target, params={'per_dof': True, 'alpha': 0.5, 'gamma': 0.001, 'device':'cpu'}):
     if isinstance(pred, np.ndarray):

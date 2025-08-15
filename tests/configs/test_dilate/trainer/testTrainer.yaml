@@ -19,10 +19,12 @@ scheduler:
 loss_func:
   type: MSELoss
   params: {}
-    #alpha: 1
-    #gamma: 0.001
-    #device: cuda
-    #individuate_dofs: False
+  #type: dilate_loss
+  #params: 
+  #  alpha: 1
+  #  gamma: 0.001
+  #  device: cuda
+  #  individuate_dofs: False
 
 training:
   num_epochs: null

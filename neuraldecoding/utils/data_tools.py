@@ -131,7 +131,9 @@ def data_split_direct(x, y, ratio):
 
     return data, test_start_idx
 
-def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
+def data_split_trial(x, y, interpipe, split_ratio=0.8, seed = 42):
+    trial_idx = interpipe['trial_idx']
+
     boundaries = np.concatenate([trial_idx, [len(x)]])
     n_trials = len(trial_idx)
     trial_list = torch.arange(len(trial_idx))
@@ -165,17 +167,18 @@ def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
             start, end = boundaries[trial], boundaries[trial + 1]
             val_mask[start:end] = True
 
-    test_start_idx = boundaries[n_train]
-
     data = {'neural_train': x[train_mask], 
 			'neural_test': x[test_mask], 
 			'behavior_train': y[train_mask], 
 			'behavior_test': y[test_mask]}
+    interpipe['train_mask'] = train_mask
+    interpipe['test_mask'] = test_mask
     if val_trials is not None:
         data['neural_val'] = x[val_mask]
         data['finger_val'] = y[val_mask]
+        interpipe['val_mask'] = val_mask
 
-    return data, test_start_idx
+    return data
 
 def add_history(neural_data, seq_len):
     """

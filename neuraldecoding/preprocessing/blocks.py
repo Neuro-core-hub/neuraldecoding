@@ -183,15 +183,11 @@ class DataSplitBlock(DataFormattingBlock):
 		if 'trial_idx' not in interpipe:
 			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataDictBlock).")
 
-		split_data = neuraldecoding.utils.data_split_trial(data['neural'], 
+		data = neuraldecoding.utils.data_split_trial(data['neural'], 
 														   data['behavior'], 
-														   interpipe['trial_idx'], 
+														   interpipe, 
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed)
-		
-		data, test_start_idx = split_data
-		
-		interpipe['test_start_idx'] = test_start_idx
 
 		return data, interpipe
 
@@ -300,7 +296,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		interpipe['trial_start_times'] = trial_start_times
 		interpipe['trial_end_times'] = trial_end_times
 		interpipe['trial_idx'] = trial_idx
-		data_out['targets'] = targets[:]
+		interpipe['targets'] = targets[:]
 		return data_out, interpipe
 
 
@@ -403,7 +399,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data (dict): The data dictionary with history added at the specified locations.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		trial_filt_train = interpipe['trial_filt'][:interpipe['test_start_idx']]
+		trial_filt_train = interpipe['trial_filt'][interpipe['train_mask']]
 		data['neural_train'], data['behavior_train'], trial_lengths_train = \
 			neuraldecoding.utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_filt_train, self.leadup)
 		data['trial_lengths_train'] = trial_lengths_train
@@ -492,8 +488,13 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		self.location_data = location_data
 		self.location_ts = location_ts
 		self.feature_extractor = FeatureExtractor(feature_extractor_config)
+		self.target_filter = feature_extractor_config.get('target_filter', None)
+		if self.target_filter is not None:
+			self.target_filter = np.array(self.target_filter, dtype=np.int32)
 
 	def transform(self, data, interpipe):
+		if self.target_filter is None:
+			self.target_filter = np.arange(data['targets'].shape[1])
 		for loc in self.location_data + self.location_ts:
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
@@ -505,17 +506,19 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		if 'trial_idx' in interpipe:
 			interpipe['trial_idx'] = np.astype((interpipe['trial_idx'] / self.feature_extractor.bin_size_ms), np.int32)
 			interpipe['trial_filt'] = np.zeros(len(data[self.location_data[0]]), dtype=np.int32)
+			interpipe['targets_filt'] = np.zeros((len(data[self.location_data[0]]), self.target_filter.shape[0]), dtype=np.float32)
 			for i, start in enumerate(interpipe['trial_idx']):
 				end = interpipe['trial_idx'][i + 1] if i + 1 < len(interpipe['trial_idx']) else len(data[self.location_data[0]])
 				interpipe['trial_filt'][start:end] = i
+				interpipe['targets_filt'][start:end] = interpipe['targets'][i][self.target_filter]
 		return data, interpipe
 	
 class LabelModificationBlock(DataProcessingBlock):
 	"""
-	A block to add label modifications to training and/or testing data.
+	A block to add label modifications to training data.
 	"""
 
-	def __init__(self, modifications, param_dict, location):
+	def __init__(self, nicknames, param_dict):
 		"""
 		Initializes the LabelModificationBlock. Below are modification options and the required parameters in param_dict.
 		See the apply_modifications function in utils/label_mods.py function and hover over each individual modification 
@@ -528,12 +531,11 @@ class LabelModificationBlock(DataProcessingBlock):
 		- 'bias_endpoints': 'bias_range', 'individuate_dofs'
 		Args:
 			modifications (str or list): modification or modifications to add to labels
+			nicknames (str or list): nickname or nicknames for the modifications
 			leadup (int): The length of the history to be added before the first bin of each trial. Default is 10.
-			location (str or list): where to apply the modifications
 		"""
-		self.modifications = modifications
 		self.param_dict = param_dict
-		self.location = location
+		self.nicknames = nicknames
 	
 	def transform(self, data, interpipe):
 		"""
@@ -545,11 +547,10 @@ class LabelModificationBlock(DataProcessingBlock):
 			data (dict): The data dictionary with labels modified at the specified locations
 			interpipe (dict): The interpipe dictionary remains unchanged
 		"""
-		if isinstance(self.location, str):
-			self.location = [self.location]
+		if isinstance(self.nicknames, str):
+			self.nicknames = [self.nicknames]
 
-		for loc in self.location:
-			data[loc] = neuraldecoding.utils.label_mods.apply_modifications(self.modifications, data[loc], interpipe['trial_filt'], self.param_dict)
+		data['behavior_train'] = neuraldecoding.utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)
 		
 		return data, interpipe
 	
