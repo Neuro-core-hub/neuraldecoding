@@ -29,6 +29,7 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
+        self.full_batch_valid = config.training.get('full_batch_valid', False)
         if isinstance(self.batch_size, collections.abc.Iterable):
             self.train_batch_size = self.batch_size[0]
             self.valid_batch_size = self.batch_size[1]
@@ -58,7 +59,10 @@ class NNTrainer(Trainer):
         valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
                                     self.data_dict['Y_val'].detach().clone().to(torch.float32))
         train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
+        if self.full_batch_valid:
+            valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
+        else:
+            valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
         return train_loader, valid_loader
 
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
@@ -68,6 +72,8 @@ class NNTrainer(Trainer):
 
     def create_scheduler(self, scheduler_config: DictConfig, optimizer: Optimizer) -> _LRScheduler:
         """Creates and returns a learning rate scheduler based on the configuration."""
+        if scheduler_config is None or not scheduler_config or len(scheduler_config) == 0:
+            return None
         scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         return scheduler_class(optimizer, **scheduler_config.params)
 
