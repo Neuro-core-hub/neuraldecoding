@@ -32,13 +32,11 @@ class testTcFNN(unittest.TestCase):
 
         self.params = {
             "input_size": 2,
-            "hidden_size": 8,
             "ConvSize": 4,
             "ConvSizeOut": 8,
             "num_states": 1,
-            "use_batch_norm": True,
-            "use_dropout": True,
-            "drop_prob": 0.5
+            "layer_size_list": [256, 200, 100, 50, 20],
+            "dropout_p": 0.5
         }
 
     def test_lstm_train_pred(self):

@@ -8,6 +8,86 @@ def flatten(x, start_dim=1, end_dim=-1):
     return x.flatten(start_dim=start_dim, end_dim=end_dim)
 
 class TCN(nn.Module, NeuralNetworkModel):
+    '''
+    Willsey's Convolutional Net, with more parameters for setting number of layers (eg. [256, 200, 100, 50, 20])
+    '''
+    def __init__(self, params):
+        super().__init__()
+        self.model_params = params
+        self.input_size = params['input_size']
+        self.ConvSize = params['ConvSize']
+        self.ConvSizeOut = params['ConvSizeOut']
+        self.layer_size_list = params['layer_size_list']
+        self.num_states = params['num_states']
+        self.dropout_p = params['dropout_p']
+
+        # convolutional input layer
+        self.bncn = nn.BatchNorm1d(self.input_size)
+        self.cn = nn.Conv1d(self.ConvSize, self.ConvSizeOut, 1, bias=True)
+
+        # middle layer(s)
+        middle_size_list = [self.input_size*self.ConvSizeOut] + self.layer_size_list
+        self.hiddenlayers = nn.ModuleList([nn.Sequential(nn.BatchNorm1d(prevsize),
+                                                         nn.Linear(prevsize, nextsize),
+                                                         nn.Dropout(p=self.dropout_p))
+                                           for prevsize, nextsize in zip(middle_size_list[:-1], middle_size_list[1:])])
+
+        # linear output layer
+        self.bnout = nn.BatchNorm1d(self.layer_size_list[-1])
+        self.fcout = nn.Linear(self.layer_size_list[-1], self.num_states)
+
+        # init weights
+        nn.init.kaiming_normal_(self.cn.weight, nonlinearity='relu')
+        nn.init.kaiming_normal_(self.fcout.weight, nonlinearity='relu')
+        nn.init.zeros_(self.cn.bias)
+        nn.init.zeros_(self.fcout.bias)
+        for layer in self.hiddenlayers:
+            # "layer" is a ModuleList, defined above
+            nn.init.kaiming_normal_(layer[1].weight, nonlinearity='relu')
+            nn.init.zeros_(layer[1].bias)
+
+    def forward(self, x, BadChannels=[]):
+        x[:, BadChannels, :] = 0
+
+        # conv layer
+        x = self.bncn(x)
+        x = self.cn(x.permute(0, 2, 1))
+        x = flatten(x)
+
+        # middle layers
+        for layer in self.hiddenlayers:
+            x = F.relu( layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
+
+        # output layer
+        scores = self.fcout(self.bnout(x))
+        return scores
+    
+    def save_model(self, filepath):
+        checkpoint_dict = {
+            "model_state_dict": self.state_dict(),
+            "model_params": self.model_params,
+            "model_type": "TCFNN"
+        }
+        folder = os.path.dirname(filepath)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
+        torch.save(checkpoint_dict, filepath)
+    
+    def load_model(self, filepath):
+        checkpoint = torch.load(filepath)
+
+        if checkpoint["model_type"] != "TCFNN":
+            raise Exception("Tried to load model that isn't a TCFNN Instance")
+        
+        if self.model_params != checkpoint["model_params"]:
+            raise ValueError("Model parameters do not match the checkpoint parameters")
+
+        self.load_state_dict(checkpoint["model_state_dict"])
+
+        self.model_params = checkpoint["model_params"]
+
+class TCN_old(nn.Module, NeuralNetworkModel):
+    # Old version
     def __init__(self, params):
         '''
         Initializes a TCFNN
@@ -120,7 +200,7 @@ class TCN(nn.Module, NeuralNetworkModel):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
-            "model_type": "TCFNN"
+            "model_type": "TCFNN_old"
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -130,8 +210,8 @@ class TCN(nn.Module, NeuralNetworkModel):
     def load_model(self, filepath):
         checkpoint = torch.load(filepath)
 
-        if checkpoint["model_type"] != "TCFNN":
-            raise Exception("Tried to load model that isn't a TCFNN Instance")
+        if checkpoint["model_type"] != "TCFNN_old":
+            raise Exception("Tried to load model that isn't an old TCFNN Instance")
         
         if self.model_params != checkpoint["model_params"]:
             raise ValueError("Model parameters do not match the checkpoint parameters")
