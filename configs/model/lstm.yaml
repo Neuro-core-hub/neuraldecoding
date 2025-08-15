@@ -5,7 +5,7 @@ params:
   hidden_size: 100
   num_layers: 1  
   rnn_type: lstm
-  device: cuda  
+  device: cpu  
   hidden_noise_std: 0.1  
   dropout_input: False 
   drop_prob: 0.0
