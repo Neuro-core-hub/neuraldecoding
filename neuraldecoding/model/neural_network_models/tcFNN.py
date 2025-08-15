@@ -66,7 +66,7 @@ class TCN(nn.Module, NeuralNetworkModel):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
-            "model_type": "TCFNN"
+            "model_type": "TCN"
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -76,8 +76,8 @@ class TCN(nn.Module, NeuralNetworkModel):
     def load_model(self, filepath):
         checkpoint = torch.load(filepath)
 
-        if checkpoint["model_type"] != "TCFNN":
-            raise Exception("Tried to load model that isn't a TCFNN Instance")
+        if checkpoint["model_type"] != "TCN":
+            raise Exception("Tried to load model that isn't a TCN Instance")
         
         if self.model_params != checkpoint["model_params"]:
             raise ValueError("Model parameters do not match the checkpoint parameters")
