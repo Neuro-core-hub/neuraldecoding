@@ -120,12 +120,12 @@ def data_split_direct(x, y, ratio):
 
     data = {'neural_train': x[train_idx], 
 			'neural_test': x[test_idx], 
-			'finger_train': y[train_idx], 
-			'finger_test': y[test_idx]}
+			'behavior_train': y[train_idx], 
+			'behavior_test': y[test_idx]}
 
     if valid_idx is not None:
         data['neural_val'] = x[valid_idx]
-        data['finger_val'] = y[valid_idx]
+        data['behavior_val'] = y[valid_idx]
 
     test_start_idx = len(train_idx)
 
@@ -143,7 +143,7 @@ def data_split_trial(x, y, interpipe, split_ratio=0.8, seed = 42):
         train_trials = trial_list[:n_train]
         val_trials = None
         test_trials = trial_list[n_train:]
-    elif isinstance(split_ratio, tuple) == 3:
+    else:
         n_train = int(n_trials * split_ratio[0])
         n_val = int(n_trials * split_ratio[1])
         train_trials = trial_list[:n_train]
@@ -175,7 +175,7 @@ def data_split_trial(x, y, interpipe, split_ratio=0.8, seed = 42):
     interpipe['test_mask'] = test_mask
     if val_trials is not None:
         data['neural_val'] = x[val_mask]
-        data['finger_val'] = y[val_mask]
+        data['behavior_val'] = y[val_mask]
         interpipe['val_mask'] = val_mask
 
     return data

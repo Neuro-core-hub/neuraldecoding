@@ -411,7 +411,8 @@ class NormalizationBlock(DataProcessingBlock):
 		super().__init__()
 		self.fit_location = fit_location
 		if isinstance(apply_locations, str):
-			self.apply_location = [apply_locations]
+			apply_locations = [apply_locations]
+		self.apply_location = apply_locations
 		self.normalizer_method = normalizer_method
 		self.normalizer_params = normalizer_params
 		self.sklearn_type = sklearn_type
