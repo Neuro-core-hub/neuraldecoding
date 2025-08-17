@@ -237,7 +237,7 @@ class Dict2BehaviorDatasetBlock(DataFormattingBlock):
 			if otherdatakeys is None:
 				dataset = utils.datasets.BehaviorDataset(data, xkey, ykey)
 			else:
-				dataset = datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
+				dataset = utils.datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
 			datasets += (dataset,)
 		
 		return datasets, interpipe

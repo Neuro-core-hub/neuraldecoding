@@ -4,7 +4,7 @@ from typing import List, Tuple, Union
 from scipy.ndimage import uniform_filter1d
 import matplotlib.pyplot as plt
 import warnings
-from neuraldecoding.utils.loss_functions import dilate_loss
+from .loss_functions import dilate_loss
 
 def apply_modifications(nicknames, kinematics, interpipe, param_dict):
     trial_filt = interpipe['trial_filt'][interpipe['train_mask']]
