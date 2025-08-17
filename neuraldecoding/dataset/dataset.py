@@ -30,7 +30,6 @@ class Dataset:
             identifier="",
             session_start_time=datetime.now(tzlocal()),
         )
-        self.io = None # Added file handle storage
 
         # if self.cfg.dataset_type == "zstruct":
         #     self._initialize_zstruct()
@@ -64,7 +63,7 @@ class Dataset:
         Load data from NWB file
 
         """
-        self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
+        io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
         self.dataset = self.io.read()
 
     def _load_data_zstruct(self):

@@ -40,14 +40,13 @@ class NNTrainer(Trainer):
         self.only_val = config.evaluation.get("only_val", [False]*len(self.metrics))
         self.logger = {metric: [[], []] for metric in self.metrics}
         self.preprocessor = preprocessor
-        self.dataset = dataset
-        self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders()
+        self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders(dataset)
 
         assert self.scheduler is not None or self.max_iters is not None or self.num_epochs is not None, "At least one of scheduler, max_iters, or num_epochs must be defined."
 
-    def create_dataloaders(self):
+    def create_dataloaders(self, dataset):
         """Creates PyTorch DataLoaders for training and validation data."""
-        data_tuple = self.preprocessor.preprocess_pipeline(self.dataset, params={'is_train': True})
+        data_tuple = self.preprocessor.preprocess_pipeline(dataset, params={'is_train': True})
 
         if len(data_tuple) == 2:
             self.train_ds, self.valid_ds = data_tuple

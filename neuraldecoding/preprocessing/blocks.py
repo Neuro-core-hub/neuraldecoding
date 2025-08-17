@@ -524,7 +524,7 @@ class LabelModificationBlock(DataProcessingBlock):
 	A block to add label modifications to training data.
 	"""
 
-	def __init__(self, nicknames, param_dict):
+	def __init__(self, nicknames, param_dict, retain_unmodified=False):
 		"""
 		Initializes the LabelModificationBlock. Below are modification options and the required parameters in param_dict.
 		See the apply_modifications function in utils/label_mods.py function and hover over each individual modification 
@@ -542,6 +542,8 @@ class LabelModificationBlock(DataProcessingBlock):
 		"""
 		self.param_dict = param_dict
 		self.nicknames = nicknames
+		self.retain_unmodified = retain_unmodified
+		self.unmodified_data = None
 	
 	def transform(self, data, interpipe):
 		"""
@@ -555,6 +557,9 @@ class LabelModificationBlock(DataProcessingBlock):
 		"""
 		if isinstance(self.nicknames, str):
 			self.nicknames = [self.nicknames]
+		
+		if self.retain_unmodified:
+			self.unmodified_data = data['behavior_train'].copy()
 
 		data['behavior_train'] = utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)
 		
