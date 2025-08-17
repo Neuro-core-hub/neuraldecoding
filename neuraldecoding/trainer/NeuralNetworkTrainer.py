@@ -1,23 +1,13 @@
-import hydra
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
-import numpy as np
 import torch
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.data import DataLoader, TensorDataset
-import neuraldecoding.utils.loss_functions as loss_functions
-from neuraldecoding.utils import prep_data_and_split, load_one_nwb
-import neuraldecoding.model.neural_network_models
-from neuraldecoding.trainer.Trainer import Trainer
-import neuraldecoding.stabilization.latent_space_alignment
-from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
-from neuraldecoding.model.neural_network_models.LSTM import LSTM
-import neuraldecoding.utils.eval_metrics
-from neuraldecoding.utils.eval_metrics import *
-import os
+from torch.utils.data import DataLoader
+from ..utils import loss_functions
+from ..trainer.Trainer import Trainer
+from ..utils import eval_metrics
 from omegaconf import open_dict
+from ..model import neural_network_models
 import warnings
 import copy
 
@@ -108,7 +98,7 @@ class NNTrainer(Trainer):
         
     def create_model(self, model_config: DictConfig) -> torch.nn.Module:
         """Creates and returns a model based on the configuration."""
-        model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
+        model_class = getattr(neural_network_models, model_config.type)
         model = model_class(model_config.params)
         return model
 
@@ -175,7 +165,7 @@ class NNTrainer(Trainer):
                             self.logger[metric][1].append(val_loss)
                         else:
                             metric_param = self.metric_params.get(metric, None)
-                            metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
+                            metric_class = getattr(eval_metrics, metric)
                             if not self.only_val[self.metrics.index(metric)]:
                                 self.logger[metric][0].append(metric_class(yhat_train, y_train, metric_param))
                             else:
@@ -259,7 +249,7 @@ class NNTrainer(Trainer):
                 final_metrics[metric] = val_loss
             else:
                 metric_param = self.metric_params.get(metric, None)
-                metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
+                metric_class = getattr(eval_metrics, metric)
                 final_metrics[metric]  = metric_class(yhat_val, y_val, metric_param)
 
         print(f"Final validation metrics: ")

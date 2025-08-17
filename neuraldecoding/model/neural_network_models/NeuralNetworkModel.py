@@ -1,5 +1,5 @@
 from typing import Any
-from neuraldecoding.model.Model import Model
+from .. import Model
 import torch
 import numpy as np
 

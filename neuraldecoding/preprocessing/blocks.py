@@ -1,13 +1,10 @@
-import neuraldecoding.utils
-import neuraldecoding.utils.label_mods
-import neuraldecoding.stabilization.latent_space_alignment
-import neuraldecoding.dataaugmentation.DataAugmentation
-from neuraldecoding.dataaugmentation import SequenceScaler
-from neuraldecoding.feature_extraction import FeatureExtractor
-from neuraldecoding.utils.utils_general import resolve_path
-from neuraldecoding.utils.data_tools import load_one_nwb
+from ..dataaugmentation import SequenceScaler
+from ..feature_extraction import FeatureExtractor
+from ..utils.utils_general import resolve_path
+from ..utils.data_tools import load_one_nwb
 import sklearn.preprocessing
-import neuraldecoding.utils.datasets
+from .. import utils
+from .. import stabilization
 
 import torch
 
@@ -183,11 +180,11 @@ class DataSplitBlock(DataFormattingBlock):
 		if 'trial_idx' not in interpipe:
 			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataDictBlock).")
 
-		data = neuraldecoding.utils.data_split_trial(data['neural'], 
-														   data['behavior'], 
-														   interpipe, 
-														   split_ratio=self.split_ratio, 
-														   seed=self.split_seed)
+		data = utils.data_split_trial(data['neural'], 
+										data['behavior'], 
+										interpipe, 
+										split_ratio=self.split_ratio, 
+										seed=self.split_seed)
 
 		return data, interpipe
 
@@ -238,9 +235,9 @@ class Dict2BehaviorDatasetBlock(DataFormattingBlock):
 		datasets = ()
 		for xkey, ykey, otherdatakeys in zip(self.xkey, self.ykey, self.otherdatakeys_list):
 			if otherdatakeys is None:
-				dataset = neuraldecoding.utils.datasets.BehaviorDataset(data, xkey, ykey)
+				dataset = utils.datasets.BehaviorDataset(data, xkey, ykey)
 			else:
-				dataset = neuraldecoding.utils.datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
+				dataset = datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
 			datasets += (dataset,)
 		
 		return datasets, interpipe
@@ -315,7 +312,7 @@ class StabilizationBlock(DataProcessingBlock):
 			stabilization_config (dict): Configuration for the stabilization method.
 		"""
 		super().__init__()
-		stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, stabilization_config["type"])
+		stabilization_method = getattr(stabilization.latent_space_alignment, stabilization_config["type"])
 		self.stabilization = stabilization_method(stabilization_config["params"])
 		self.location = location
 
@@ -371,7 +368,7 @@ class AddHistoryBlock(DataProcessingBlock):
 			self.location = [self.location]
 
 		for loc in self.location:
-			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
+			data[loc] = utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
 
@@ -401,7 +398,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 		"""
 		trial_filt_train = interpipe['trial_filt'][interpipe['train_mask']]
 		data['neural_train'], data['behavior_train'], trial_lengths_train = \
-			neuraldecoding.utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_filt_train, self.leadup)
+			utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_filt_train, self.leadup)
 		data['trial_lengths_train'] = trial_lengths_train
 		interpipe['leadup'] = self.leadup
 
@@ -410,7 +407,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 
 class NormalizationBlock(DataProcessingBlock):
 	def __init__(self, fit_location, apply_locations, normalizer_method, 
-			  normalizer_params, sklearn_type=None, save_path=None):
+			  normalizer_params, sklearn_type=None, save_path=None, retain_denorm=False):
 		super().__init__()
 		self.fit_location = fit_location
 		if isinstance(apply_locations, str):
@@ -419,22 +416,30 @@ class NormalizationBlock(DataProcessingBlock):
 		self.normalizer_params = normalizer_params
 		self.sklearn_type = sklearn_type
 		self.save_path = save_path
+		self.scaler = None
+		self.retain_denorm = retain_denorm
+		self.denorm_data = {}
 	def transform(self, data, interpipe):
 		if self.normalizer_method == 'sklearn':
 			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params)
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
 			for loc in self.apply_location:
+				if self.retain_denorm:
+					self.denorm_data[loc] = data[loc].copy()
 				data[loc] = normalizer.transform(data[loc])
 		elif self.normalizer_method == 'sequence_scaler':	
 			normalizer = SequenceScaler()
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location], **self.normalizer_params)
 			for loc in self.apply_location:
+				if self.retain_denorm:
+					self.denorm_data[loc] = data[loc].copy()
 				data[loc] = normalizer.transform(data[loc])
 		else:
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
 		if self.save_path is not None:
 			with open(self.save_path, 'wb') as f:
 				pickle.dump(normalizer, f)
+		self.scaler = normalizer
 		return data, interpipe
 
 class LoadNormalizationBlock(DataProcessingBlock):
@@ -550,7 +555,7 @@ class LabelModificationBlock(DataProcessingBlock):
 		if isinstance(self.nicknames, str):
 			self.nicknames = [self.nicknames]
 
-		data['behavior_train'] = neuraldecoding.utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)
+		data['behavior_train'] = utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)
 		
 		return data, interpipe
 	

@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from sklearn.metrics import r2_score
-from neuraldecoding.utils.loss_functions import soft_dtw, path_soft_dtw, dilate_loss
+from ..utils.loss_functions import soft_dtw, path_soft_dtw, dilate_loss
 
 def mse(pred, target, params=None):
     """Calculates the mean squared error between y1 and y2 (tensors)"""
