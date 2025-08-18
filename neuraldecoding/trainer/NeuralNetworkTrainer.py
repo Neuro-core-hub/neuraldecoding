@@ -88,10 +88,10 @@ class NNTrainer(Trainer):
         if loss_class is not None:
             return loss_class(**loss_config.params)
 
-        # Then try to get from your custom loss functions
-        loss_func = getattr(loss_functions, loss_config.type, None)
-        if loss_func is not None:
-            return lambda y_true, y_pred, **kwargs: loss_func(y_true, y_pred, **{**loss_config.params, **kwargs})
+        # Then try to get from custom loss functions
+        loss_class = getattr(loss_functions, loss_config.type, None)
+        if loss_class is not None:
+            return loss_class(**loss_config.params)
 
         raise ValueError(f"Loss function '{loss_config.type}' not found in torch.nn or neuraldecoding.utils.loss_functions.")
         
