@@ -174,39 +174,6 @@ class NNTrainer(Trainer):
         val_loss = running_val_loss / len(self.valid_loader)
 
         return val_loss, val_all_predictions, val_all_targets
-
-class LSTMTrainer(NNTrainer):
-    def __init__(self, preprocessor, config, dataset = None):
-        super().__init__(preprocessor, config, dataset)
-
-    def validate_model(self):
-        # Validate
-        self.model.eval()
-        running_val_loss = 0.0
-        val_all_predictions = []
-        val_all_targets = []
-        h = None
-
-        x_val = self.data_dict['X_val']
-        y_val = self.data_dict['Y_val']
-        x_val = x_val.to(self.device)
-        y_val = y_val.to(self.device)
-
-        yhat_val = self.model.forward(x_val, return_all_tsteps=True)
-
-        val_loss = self.loss_func(yhat_val, y_val)
-
-        val_all_predictions.append(yhat_val.detach().cpu().numpy())
-        val_all_targets.append(y_val.detach().cpu().numpy())
-
-        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
-        val_all_targets = np.concatenate(val_all_targets, axis=0)
-
-        if(self.clear_cache):
-            del y_val, yhat_val
-
-        return val_loss, val_all_predictions, val_all_targets
-
 class IterationNNTrainer(NNTrainer):
     '''
     The trainer used in LINK dataset multiday training. Archived here for reference.

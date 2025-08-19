@@ -15,18 +15,19 @@ class TCN(nn.Module, NeuralNetworkModel):
         super().__init__()
         self.model_params = params
         self.input_size = params['input_size']
-        self.ConvSize = params['ConvSize']
-        self.ConvSizeOut = params['ConvSizeOut']
+        self.conv_size = params['conv_size']
+        self.conv_size_out = params['conv_size_out']
         self.layer_size_list = params['layer_size_list']
         self.num_states = params['num_states']
         self.dropout_p = params['dropout_p']
+        self.denormalize = params['denormalize']
 
         # convolutional input layer
         self.bncn = nn.BatchNorm1d(self.input_size)
-        self.cn = nn.Conv1d(self.ConvSize, self.ConvSizeOut, 1, bias=True)
+        self.cn = nn.Conv1d(self.conv_size, self.conv_size_out, 1, bias=True)
 
         # middle layer(s)
-        middle_size_list = [self.input_size*self.ConvSizeOut] + self.layer_size_list
+        middle_size_list = [self.input_size*self.conv_size_out] + self.layer_size_list
         self.hiddenlayers = nn.ModuleList([nn.Sequential(nn.BatchNorm1d(prevsize),
                                                          nn.Linear(prevsize, nextsize),
                                                          nn.Dropout(p=self.dropout_p))
@@ -58,8 +59,13 @@ class TCN(nn.Module, NeuralNetworkModel):
         for layer in self.hiddenlayers:
             x = F.relu( layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
 
-        # output layer
-        scores = self.fcout(self.bnout(x))
+        # output 
+        if self.denormalize:
+            scores = (self.bnout(x) - self.bnout.bias) / self.bnout.weight
+            scores = self.fcout(scores)
+        else:
+            scores = self.bnout(x)
+            scores = self.fcout(scores)
         return scores
     
     def save_model(self, filepath):
@@ -95,8 +101,8 @@ class TCN_old(nn.Module, NeuralNetworkModel):
             model_params: dict containing the following model params:
                 input_size:         number of input features
                 hidden_size:        size of hidden state in model
-                ConvSize:         number of convolutional filters
-                ConvSizeOut:      number of output channels for convolutional layer
+                conv_size:         number of convolutional filters
+                conv_size_out:      number of output channels for convolutional layer
                 num_states:        number of output features
                 use_batch_norm:    whether to use batch normalization
                 use_dropout:        whether to use dropout
@@ -106,21 +112,21 @@ class TCN_old(nn.Module, NeuralNetworkModel):
         self.model_params = params
         self.input_size = params["input_size"]
         self.hidden_size = params["hidden_size"]
-        self.ConvSize = params["ConvSize"]
-        self.ConvSizeOut = params["ConvSizeOut"]
+        self.conv_size = params["conv_size"]
+        self.conv_size_out = params["conv_size_out"]
         self.num_states = params["num_states"]
         self.use_batchnorm = params.get("use_batch_norm", True)
         self.use_dropout = params.get("use_dropout", True)
         self.drop_prob = params.get("drop_prob", 0.5)
         # assign layer objects to class attributes
-        self.cn1 = nn.Conv1d(self.ConvSize, self.ConvSizeOut, 1, bias=True)
-        self.fc1 = nn.Linear(self.input_size * self.ConvSizeOut, self.hidden_size)
+        self.cn1 = nn.Conv1d(self.conv_size, self.conv_size_out, 1, bias=True)
+        self.fc1 = nn.Linear(self.input_size * self.conv_size_out, self.hidden_size)
         self.fc2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc3 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc4 = nn.Linear(self.hidden_size, self.num_states)
         if self.use_batchnorm:
             self.bn0 = nn.BatchNorm1d(self.input_size)
-            self.bn1 = nn.BatchNorm1d(self.input_size * self.ConvSizeOut)
+            self.bn1 = nn.BatchNorm1d(self.input_size * self.conv_size_out)
             self.bn2 = nn.BatchNorm1d(self.hidden_size)
             self.bn3 = nn.BatchNorm1d(self.hidden_size)
             self.bn4 = nn.BatchNorm1d(self.hidden_size)
