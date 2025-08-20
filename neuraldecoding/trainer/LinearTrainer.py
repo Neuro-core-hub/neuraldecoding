@@ -15,11 +15,11 @@ import os
 import pickle
 
 class LinearTrainer(Trainer):
-    def __init__(self, preprocessor, config):
+    def __init__(self, preprocessor, config, data_path):
         super().__init__()
         self.model = self.create_model(config.model)
         self.preprocessor = preprocessor
-        self.data_path = config.data.data_path
+        self.data_path = data_path
         self.train_X, self.train_Y = self.load_data()
 
     def load_data(self): # TODO, finalize this when dataset is merged to main

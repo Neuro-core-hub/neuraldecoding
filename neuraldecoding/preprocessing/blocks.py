@@ -323,8 +323,6 @@ class AddNoiseBlock(DataProcessingBlock):
 
 		return data, interpipe
 
-
-
 class NormalizationBlock(DataProcessingBlock):
 	"""
 	A block for normalizing data using specified methods.
