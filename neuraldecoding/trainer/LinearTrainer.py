@@ -52,7 +52,6 @@ class LinearTrainer(Trainer):
         valid_prediction = self.model(self.valid_X)
         for metric in self.metrics:
             metric_method = getattr(neuraldecoding.utils.eval_metrics, metric)
-            self.logger[metric][0].append(metric_method(train_prediction, self.train_Y))
-            self.logger[metric][1].append(metric_method(valid_prediction, self.valid_Y))
-    
-        
+            self.logger[metric]['train'].append(metric_method(train_prediction, self.train_Y))
+            self.logger[metric]['valid'].append(metric_method(valid_prediction, self.valid_Y))
+
