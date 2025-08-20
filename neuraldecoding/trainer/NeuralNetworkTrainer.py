@@ -16,10 +16,11 @@ from neuraldecoding.model.neural_network_models.LSTM import LSTM
 import neuraldecoding.utils.eval_metrics
 from neuraldecoding.utils.eval_metrics import *
 import os
+import collections
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
-        super().__init__()
+        super().__init__(config)
         # General training params 
         self.device = torch.device(config.training.device)
         self.model = self.create_model(config.model).to(self.device)
@@ -28,19 +29,14 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
+        self.full_batch_valid = config.training.get('full_batch_valid', False)
+        if isinstance(self.batch_size, collections.abc.Iterable):
+            self.train_batch_size = self.batch_size[0]
+            self.valid_batch_size = self.batch_size[1]
+        else:
+            self.train_batch_size = self.batch_size
+            self.valid_batch_size = self.batch_size
         self.clear_cache = config.training.clear_cache
-        # Evaluation and logging params
-        self.print_results = config.training.get("print_results", True)
-        self.print_every = config.training.get("print_every", 10)
-        self.metrics = config.evaluation.metrics
-        self.metric_params = config.evaluation.get("params", {})
-        self.logger = {metric: [[], []] for metric in self.metrics}
-        self.logger_save_path = config.evaluation.get("save_path", None)
-        if self.logger_save_path:
-            os.makedirs(os.path.dirname(self.logger_save_path), exist_ok=True)
-            with open(self.logger_save_path, 'a') as f:
-                headers = ['epoch'] + [f'{metric}_train' for metric in self.metrics] + [f'{metric}_val' for metric in self.metrics]
-                f.write(','.join(headers) + '\n')
         # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         if dataset is not None:
@@ -62,8 +58,11 @@ class NNTrainer(Trainer):
                                     self.data_dict["Y_train"].detach().clone().to(torch.float32))
         valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
                                     self.data_dict['Y_val'].detach().clone().to(torch.float32))
-        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.batch_size, shuffle=False)
+        train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
+        if self.full_batch_valid:
+            valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
+        else:
+            valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
         return train_loader, valid_loader
 
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
@@ -73,6 +72,8 @@ class NNTrainer(Trainer):
 
     def create_scheduler(self, scheduler_config: DictConfig, optimizer: Optimizer) -> _LRScheduler:
         """Creates and returns a learning rate scheduler based on the configuration."""
+        if scheduler_config is None or not scheduler_config or len(scheduler_config) == 0:
+            return None
         scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         return scheduler_class(optimizer, **scheduler_config.params)
 
@@ -104,7 +105,7 @@ class NNTrainer(Trainer):
             for x,y in self.train_loader:
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -116,30 +117,8 @@ class NNTrainer(Trainer):
             train_all_targets = np.concatenate(train_all_targets, axis=0)
             train_loss = running_loss / len(self.train_loader)
 
-
             # Validate
-            self.model.eval()
-            running_val_loss = 0.0
-            val_all_predictions = []
-            val_all_targets = []
-
-            with torch.no_grad():
-                for x_val, y_val in self.valid_loader:
-                    x_val = x_val.to(self.device)
-                    y_val = y_val.to(self.device)
-                    yhat_val = self.model(x_val)
-                    val_loss = self.loss_func(yhat_val, y_val)
-
-                    running_val_loss += val_loss.item()
-                    val_all_predictions.append(yhat_val.cpu().numpy())
-                    val_all_targets.append(y_val.cpu().numpy())
-                    if(self.clear_cache):
-                        del y_val, yhat_val
-
-            val_all_predictions = np.concatenate(val_all_predictions, axis=0)
-            val_all_targets = np.concatenate(val_all_targets, axis=0)
-            val_loss = running_val_loss / len(self.valid_loader)
-
+            val_loss, val_all_predictions, val_all_targets = self.validate_model()
 
             # Scheduler step
             if self.scheduler:
@@ -163,29 +142,38 @@ class NNTrainer(Trainer):
             self.save_print_log(epoch, train_loss, val_loss)
 
         return self.model, self.logger
-
-    def save_print_log(self, epoch, train_loss, val_loss):
-        # Save log
-        if self.logger_save_path:
-            with open(self.logger_save_path, 'a') as f:
-                entries = [epoch] + [f'"{self.logger[metric][0][-1]}"' for metric in self.metrics] + [f'"{self.logger[metric][1][-1]}"' for metric in self.metrics]
-                f.write(','.join(map(str, entries)) + '\n')
-
-        # Print log
-        if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
-            print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-            for metric in self.logger:
-                train_metric = self.logger[metric][0][-1]
-                val_metric = self.logger[metric][1][-1]
-                print(f"    {metric:>12}{': train = ':>12}{train_metric}")
-                print(f"    {'':>12}{'  val = ':>12}{val_metric}")
-
+    
     def clear_gpu_cache(self):
         self.model.cpu()
         del self.model
         del self.optimizer
         torch.cuda.empty_cache()
 
+    def validate_model(self):
+        # Validate
+        self.model.eval()
+        running_val_loss = 0.0
+        val_all_predictions = []
+        val_all_targets = []
+
+        with torch.no_grad():
+            for x_val, y_val in self.valid_loader:
+                x_val = x_val.to(self.device)
+                y_val = y_val.to(self.device)
+                yhat_val = self.model(x_val)
+                val_loss = self.loss_func(yhat_val, y_val)
+
+                running_val_loss += val_loss.item()
+                val_all_predictions.append(yhat_val.cpu().numpy())
+                val_all_targets.append(y_val.cpu().numpy())
+                if(self.clear_cache):
+                    del y_val, yhat_val
+
+        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+        val_all_targets = np.concatenate(val_all_targets, axis=0)
+        val_loss = running_val_loss / len(self.valid_loader)
+
+        return val_loss, val_all_predictions, val_all_targets
 class IterationNNTrainer(NNTrainer):
     '''
     The trainer used in LINK dataset multiday training. Archived here for reference.
@@ -212,7 +200,7 @@ class IterationNNTrainer(NNTrainer):
 
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.model, self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache)
 
                 if(self.clear_cache):
                     del y, yhat
