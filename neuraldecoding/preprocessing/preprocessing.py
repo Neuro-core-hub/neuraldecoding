@@ -10,8 +10,8 @@ class Preprocessing:
         self.config = config
         self.pipeline = []
 
-        order = self.config['order']
-        content = self.config['content']
+        order = self.config.get('order', [])
+        content = self.config.get('content', {})
         
         for step_name in order:
             if step_name not in content:
@@ -31,7 +31,7 @@ class Preprocessing:
             })
     
     def preprocess_pipeline(self, data, params = {'is_train': True}):
-        current_data = data.copy()
+        current_data = data
         inter_pipeline_data = {}
         inter_pipeline_data.update(params)
         for step in self.pipeline:

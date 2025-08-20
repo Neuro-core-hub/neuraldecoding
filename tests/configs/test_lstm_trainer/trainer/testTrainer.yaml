@@ -18,8 +18,8 @@ loss_func:
   params: {}
 
 training:
-  num_epochs: 10
-  batch_size: 64
+  num_epochs: 5
+  batch_size: [64, 1]
   device: cuda # cuda , if avail 
   print_results: False
   print_every: 1
@@ -27,12 +27,8 @@ training:
 
 evaluation:
   metrics: ["loss", "correlation"]
+  save_path: "tests/trainer/results/test_trainer_results.csv"
   params: {}
 
 data:
-  data_path: "D:/ND/github/LINK_dataset/data/001201/sub-Monkey-N/sub-Monkey-N_ses-20210628_ecephys.nwb"
-  params:
-    num_train_trials: 300
-    sequence_length: ${trainer.model.params.sequence_length}
-    split_ratio: 0.8
-    split_seed: 42
+  params: {}

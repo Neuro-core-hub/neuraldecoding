@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, List
 
-class Model:
+class Model(ABC):
     def __init__(self, params: List[Any]) -> None:
         self.params = params
     
@@ -26,4 +26,20 @@ class Model:
         pass
 
 
+class DummyModel(Model):
+    def train_step(self, input_data: Any) -> None:
+        print("rocky theme plays")
+        return
+    
+    def forward(self, input: Any) -> Any:
+        print("plop")
+    
+    def save_model(self, filepath: str) -> None:
+        print("this model is saving itself for marriage")
 
+    def load_model(self, filepath: str) -> None:
+        print("Sarcastic comment loading.. :P XD ROFLcopter!!!")
+    
+    def __call__(self, data: Any) -> Any:
+        self.forward(data)
+        return

@@ -1,0 +1,62 @@
+compression:
+  type: "gzip"
+  options: 4
+num_channels: 96
+institution: "University of Michigan"
+lab: "Chestek Lab"
+reference_time: "ExperimentTime"
+device: 
+  name: "Cerebus"
+  description: "Data acquisition system"
+  manufacturer: "Blackrock Neurotech"
+electrode_group:
+  name: "Utah Array"
+  description: "Utah Array"
+  location: "Motor Cortex - Hand Knob Precentral Gyrus"
+modules:
+  behavior:
+    name: behavior
+    description: "finger movement data and decodes"
+  ecephys:
+    name: ecephys
+    description: "continuous neural features"
+timeseries:
+  FingerAnglesTIMRL:
+    module: behavior
+    nwb_type: TimeSeries
+    nwb_params:
+      name: finger_angles
+      description: "finger positions measured by flex sensors [thumb, index, middle, ring, pinky], calibrated to 0-1"
+      unit: "Proportion of Flex"
+  RawInputVals:
+    module: behavior
+    nwb_type: TimeSeries
+    nwb_params:
+      name: "raw_finger_angles"
+      description: "finger positions measured by flex sensors [thumb, index, middle, ring, pinky], uncalibrated (0-1023)"
+      unit: "ADC value"
+  Decode:
+    module: behavior
+    nwb_type: TimeSeries
+    nwb_params:
+      name: decode
+      description: "behavior as predicted by a decoder, in units 0-1."
+      unit: "Proportion of Flex"
+  NeuralFeature:
+    module: ecephys
+    nwb_type: ElectricalSeries
+    nwb_params:
+      name: "SBP"
+      description: "Spiking Band Power of brain activity, magnitude of 300-1000Hz BP downsampled to 2khz"
+      conversion: 2.5e-7
+      filtering: "bandpass: 300-1000 Hz"
+  SampleWidth:
+    module: ecephys
+    nwb_type: TimeSeries
+    nwb_params:
+      name: "SampleWidth"
+      description: "SBP is sampled at 2KhZ but in this setup summed into 1ms bins, so samplewidth"
+      unit: "# of samples"
+units:
+  field: "Channel"
+  has_spikes: True

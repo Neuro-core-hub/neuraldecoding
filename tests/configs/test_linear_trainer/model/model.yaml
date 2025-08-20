@@ -1,0 +1,4 @@
+type: "RidgeRegression" # Names defined in model module
+params:
+  alpha: 0.001
+  fit_intercept: False # arbitrary parameters feeding into the model

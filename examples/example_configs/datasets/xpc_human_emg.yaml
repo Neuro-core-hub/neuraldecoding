@@ -1,0 +1,12 @@
+dataset_type: zstruct
+autoload: True
+save_path: null
+dataset_parameters:
+  overwrite: False
+  experiment_type: human_emg
+  server_dir: Z:\Data\Humans\RPNI
+  alt_filepath: null
+  subject: "C-P2"
+  subject_id: "Wingnut"
+  date: 2025-06-02
+  run: 4
