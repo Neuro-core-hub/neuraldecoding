@@ -17,8 +17,8 @@ class testConfig(unittest.TestCase):
 
     def test_change(self):
         conf_old = copy.deepcopy(self.conf)
-        self.conf.update_value("trainer.model.type", "SLMT", merge=False)
-        self.conf.update_value("decoder.model", None, merge=False)
+        self.conf.update("trainer.model.type", "SLMT", merge=False)
+        self.conf.update("decoder.model", None, merge=False)
         new_hash = self.conf.get_hash()
 
         self.assertTrue(self.conf.get_value("trainer.model.type") == "SLMT", f"Modified Config Expected 'SLMT' in trainer.model.type, got {self.conf.get_value('trainer.model.type')}")
@@ -30,14 +30,14 @@ class testConfig(unittest.TestCase):
         self.assertTrue(self.conf.get_changes() == {'decoder.model': ({'type': 'LSTM', 'params': {'input_size': 96, 'num_outputs': 4, 'hidden_size': 300, 'num_layers': 1, 'rnn_type': 'lstm', 'device': 'cuda', 'hidden_noise_std': 0.0, 'dropout_input': False, 'drop_prob': 0.0, 'sequence_length': 20}}, None), 'trainer.model.type': ('LSTM', 'SLMT')}, f"Unexpected changes detected: {self.conf.get_changes()}")
 
     def test_revert(self):
-        self.conf.reset_to_original()
+        self.conf.reset()
         self.assertTrue(self.conf.get_hash() == self.ini_hash, f"Expected hash {self.ini_hash}, got {self.conf.get_hash()}")
         self.assertFalse(self.conf.has_changes(), "Expected no changes after revert")
 
     def test_history(self):
-        self.conf.reset_to_original()
-        self.conf.update_value("trainer.model.type", "SLMT", merge=False)
-        self.conf.update_value("decoder.model", None, merge=False)
+        self.conf.reset()
+        self.conf.update("trainer.model.type", "SLMT", merge=False)
+        self.conf.update("decoder.model", None, merge=False)
         history = self.conf.get_history()
         self.assertTrue(len(history) == 2, f"Expected history length 2, got {len(history)}")
         self.assertTrue(history.iloc[0]['entry'] == 'trainer.model.type', f"Expected entry 'trainer.model.type' at row 0, got {history.iloc[0]['entry']}")
@@ -46,10 +46,10 @@ class testConfig(unittest.TestCase):
         self.assertTrue(history.iloc[1]['operation'] == {'value': None, 'merge': False}, f"Expected operation {{'value': None, 'merge': False}} at row 1, got {history.iloc[1]['operation']}")
 
     def test_save_and_load(self):
-        self.conf.reset_to_original()
-        self.conf.update_value("trainer.model.type", "SLMT", merge=False)
-        self.conf.update_value("decoder.model", None, merge=False)
-        self.conf.save_config(file_name="SLMT_nodecode.yaml")
+        self.conf.reset()
+        self.conf.update("trainer.model.type", "SLMT", merge=False)
+        self.conf.update("decoder.model", None, merge=False)
+        self.conf.save(file_name="SLMT_nodecode.yaml")
 
         saved_file_path = os.path.join(self.config_dir, "SLMT_nodecode.yaml")
         self.assertTrue(os.path.exists(saved_file_path), f"Expected saved config file to exist at {saved_file_path}")

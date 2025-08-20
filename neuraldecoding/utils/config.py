@@ -18,12 +18,17 @@ class config:
         self.config = DictConfig({})
         self.original_config = DictConfig({})
         self.config_path = config_path
-        self.update_history = pd.DataFrame(columns=['entry', 'operation'])
+        self.update_history = pd.DataFrame(columns=['timestamp', 'entry', 'operation'])
         self.first_load = True
         if config_path:
-            self.load_config(config_path)
-        
-    def load_config(self, config_path):
+            self.load(config_path)
+
+    def __call__(self, section_name = None):
+        if section_name is None:
+            return self.config
+        return self.parse_section(section_name, {})
+
+    def load(self, config_path):
         '''
         only takes in absolute path to the config file or dir
         '''
@@ -46,20 +51,7 @@ class config:
         
         # TODO: figure out what to do with hash if the config is updated, right now hash stays the same as the original one
 
-    def __call__(self, section_name = None):
-        if section_name is None:
-            return self.config
-        return self.parse_section(section_name, {})
-    
-    def validate_config(self):
-        # validate the structure of the whole config, not implemented yet due to configs are being changed frequently
-        # TODO: impmlement this when the config structure is finalized
-        raise NotImplementedError("Not implemented yet")
-
-    def parse_section(self, section_name):
-        return parse_verify_config(self.config, section_name)
-
-    def update_value(self, key_path: str, value: Any, merge) -> None:
+    def update(self, key_path: str, value: Any, merge) -> None:
         '''
         Set a value in the configuration using dot notation. Saves update to history
 
@@ -69,16 +61,15 @@ class config:
             merge (bool): Whether to merge the value with existing data or replace it.
         '''
         OmegaConf.update(self.config, key_path, value, merge=merge)
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         history = pd.DataFrame({
+            'timestamp': [current_time],
             'entry': [key_path],
             'operation': [{'value': value, 'merge': merge}]
         })
         self.update_history = pd.concat([self.update_history, history], ignore_index=True)
 
-    def get_history(self):
-        return self.update_history
-    
-    def save_config(self, file_path = None, file_name = None):
+    def save(self, file_path = None, file_name = None):
         '''
         if file path not given, save to config directory with timestamp
         '''
@@ -109,14 +100,25 @@ class config:
 
         with open(fpath, 'w') as f:
             OmegaConf.save(self.config, f)
+        current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         history = pd.DataFrame({
+            'timestamp': [current_time],
             'entry': [fpath],
             'operation': ["SAVE"]
         })
         self.update_history = pd.concat([self.update_history, history], ignore_index=True)
 
-    def reset_to_original(self):
+    def validate(self):
+        # validate the structure of the whole config, not implemented yet due to configs are being changed frequently
+        # TODO: impmlement this when the config structure is finalized
+        raise NotImplementedError("config.validate is not implemented yet")
+
+    def reset(self):
         self.config = copy.deepcopy(self.original_config)
+        self.update_history = pd.DataFrame(columns=['timestamp', 'entry', 'operation'])
+
+    def parse(self, section_name):
+        return parse_verify_config(self.config, section_name)
     
     def has_changes(self, comparison_config = None):
         if comparison_config is None:
@@ -125,6 +127,9 @@ class config:
             if isinstance(comparison_config, config):
                 comparison_config = comparison_config.config
             return self.config != comparison_config # apparently you can do this to dicts ^_^
+
+    def get_history(self):
+        return self.update_history
 
     def get_hash(self):
         return self.hash
