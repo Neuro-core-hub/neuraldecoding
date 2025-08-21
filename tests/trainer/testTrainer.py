@@ -5,7 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from omegaconf import OmegaConf
-from neuraldecoding.trainer.NeuralNetworkTrainer import NNTrainer, LSTMTrainer
+from neuraldecoding.trainer.NeuralNetworkTrainer import NNTrainer
 from neuraldecoding.trainer.LinearTrainer import LinearTrainer
 from neuraldecoding.utils import parse_verify_config
 from neuraldecoding.preprocessing import Preprocessing
@@ -31,10 +31,10 @@ class testNNTrainer(unittest.TestCase):
 
     def test_results(self):
         self.assertIsInstance(self.results, dict, "Results should be a dict.")
-        self.assertEqual(len(self.results['loss'][0]), 5)
-        self.assertEqual(len(self.results['correlation'][0]), 5)
-        self.assertEqual(len(self.results['loss'][1]), 5)
-        self.assertEqual(len(self.results['correlation'][1]), 5)
+        self.assertEqual(len(self.results['loss']['train']), 5)
+        self.assertEqual(len(self.results['correlation']['train']), 5)
+        self.assertEqual(len(self.results['loss']['valid']), 5)
+        self.assertEqual(len(self.results['correlation']['valid']), 5)
     
     def test_model(self):
         self.assertIsInstance(self.model, torch.nn.Module, "Model should be an instance of torch.nn.Module.")
@@ -60,8 +60,8 @@ class testLinearTrainer(unittest.TestCase):
 
     def test_results(self):
         self.assertIsInstance(self.results, dict, "Results should be a dict.")
-        self.assertEqual(len(self.results['correlation'][0]), 1)
-        self.assertEqual(len(self.results['correlation'][0][0]), 4)
+        self.assertEqual(len(self.results['correlation']['train']), 1)
+        self.assertEqual(len(self.results['correlation']['train'][0]), 4)
 
     def test_save(self):
         save_path = "tests/trainer/results/test_trainer_results.csv"
