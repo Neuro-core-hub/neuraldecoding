@@ -551,21 +551,6 @@ class AddHistoryBlock(DataProcessingBlock):
 
 		return data, interpipe
 
-class OutputScalerBlock(DataProcessingBlock):
-	def __init__(self, location, is_scale = False):
-		super().__init__()
-		self.location = location
-		self.is_scale = is_scale
-
-	def transform(self, data, interpipe):
-		scaler = OutputScaler(interpipe['gains'], interpipe['biases'])
-		for loc in self.location:
-			if self.is_scale:
-				data[loc] = scaler.scale(data[loc])
-			else:
-				data[loc] = scaler.unscale(data[loc])
-		return data, interpipe
-
 class NormalizationBlock(DataProcessingBlock):
 	def __init__(self, location, method, normalizer_params):
 		super().__init__()
