@@ -19,6 +19,11 @@ class OutputScaler:
         self.gains = gains
         self.biases = biases
 
+    def fit(self, model, loader, device = 'cpu', dtype = torch.float32, num_outputs=2, verbose=True):
+        self.device = device
+        self.dtype = dtype
+        self.gains, self.biases = generate_output_scaler(model, loader, device = device, dtype = dtype, num_outputs=num_outputs, verbose=verbose, get_param = True)
+
     def scale(self, data):
         """
         data should be an numpy array/tensor of shape [N, NumOutputs]
@@ -46,11 +51,17 @@ class OutputScaler:
         """Data should be an numpy array/tensor of shape [N, NumOutputs].
             Performs the inverse of the scale function (used in Refit)"""
         N = data.shape[0]
+        is_tensor = False
+        if type(data) is torch.Tensor:
+            is_tensor = True
+            data = data.cpu().detach().numpy()
         # unscaled_data = (data / np.tile(self.gains, (N, 1))) - np.tile(self.biases, (N, 1))
         unscaled_data = (data - np.tile(self.biases, (N, 1))) / np.tile(self.gains, (N, 1))
+        if is_tensor:
+            unscaled_data = torch.from_numpy(unscaled_data).to(device=self.device, dtype=self.dtype)
         return unscaled_data
 
-def generate_output_scaler(model, loader, device = 'cpu', dtype = 'float32', num_outputs=2, verbose=True):
+def generate_output_scaler(model, loader, device = 'cpu', dtype = 'float32', num_outputs=2, verbose=True, get_param = False):
     """Returns a scaler object that scales the output of a decoder
 
     Args:
@@ -100,4 +111,7 @@ def generate_output_scaler(model, loader, device = 'cpu', dtype = 'float32', num
         gains[0, i] = theta[i, i]
         biases[0, i] = theta[num_outputs, i]
 
-    return OutputScaler(gains, biases)
+    if get_param:
+        return gains, biases
+    else:
+        return OutputScaler(gains, biases)

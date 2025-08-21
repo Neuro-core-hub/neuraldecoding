@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.utils.training_utils import OutputScaler
 import os
 
 def flatten(x, start_dim=1, end_dim=-1):
@@ -21,6 +22,7 @@ class TCN(nn.Module, NeuralNetworkModel):
         self.num_states = params['num_states']
         self.dropout_p = params['dropout_p']
         self.denormalize = params['denormalize']
+        self.scaler = OutputScaler(None, None)
 
         # convolutional input layer
         self.bncn = nn.BatchNorm1d(self.input_size)
@@ -36,7 +38,7 @@ class TCN(nn.Module, NeuralNetworkModel):
         # linear output layer
         self.bnout = nn.BatchNorm1d(self.layer_size_list[-1])
         self.fcout = nn.Linear(self.layer_size_list[-1], self.num_states)
-
+        self.bnfinal = nn.BatchNorm1d(self.num_states)
         # init weights
         nn.init.kaiming_normal_(self.cn.weight, nonlinearity='relu')
         nn.init.kaiming_normal_(self.fcout.weight, nonlinearity='relu')
@@ -61,8 +63,7 @@ class TCN(nn.Module, NeuralNetworkModel):
 
         # output 
         if self.denormalize:
-            scores = (self.bnout(x) - self.bnout.bias) / self.bnout.weight
-            scores = self.fcout(scores)
+            scores = (self.bnfinal(self.fcout(x)) - self.bnfinal.bias) / self.bnfinal.weight
         else:
             scores = self.bnout(x)
             scores = self.fcout(scores)
@@ -71,6 +72,7 @@ class TCN(nn.Module, NeuralNetworkModel):
     def save_model(self, filepath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
+            "model_scaler": self.scaler,
             "model_params": self.model_params,
             "model_type": "TCN"
         }
@@ -89,7 +91,7 @@ class TCN(nn.Module, NeuralNetworkModel):
             raise ValueError("Model parameters do not match the checkpoint parameters")
 
         self.load_state_dict(checkpoint["model_state_dict"])
-
+        self.scaler = checkpoint["model_scaler"]
         self.model_params = checkpoint["model_params"]
 
 class TCN_old(nn.Module, NeuralNetworkModel):
