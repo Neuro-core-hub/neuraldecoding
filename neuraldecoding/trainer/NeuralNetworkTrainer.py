@@ -130,14 +130,14 @@ class NNTrainer(Trainer):
             # Calculate and populate metrics
             for metric in self.metrics:
                 if metric == "loss":
-                    self.logger[metric][0].append(train_loss)
-                    self.logger[metric][1].append(val_loss)
+                    self.logger[metric]['train'].append(train_loss)
+                    self.logger[metric]['valid'].append(val_loss)
                 else:
                     metric_param = self.metric_params.get(metric, None)
                     metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
-                    self.logger[metric][0].append(metric_class(train_all_predictions, train_all_targets, metric_param))
-                    self.logger[metric][1].append(metric_class(val_all_predictions, val_all_targets, metric_param))
-           
+                    self.logger[metric]['train'].append(metric_class(train_all_predictions, train_all_targets, metric_param))
+                    self.logger[metric]['valid'].append(metric_class(val_all_predictions, val_all_targets, metric_param))
+
             # Logging
             self.save_print_log(epoch, train_loss, val_loss)
 
