@@ -1,0 +1,9 @@
+type: TCN  
+params:
+  input_size: 96
+  conv_size: 20
+  conv_size_out: 8
+  num_states: 4
+  layer_size_list: [256, 256, 256, 256]
+  dropout_p: 0.5
+  denormalize: True

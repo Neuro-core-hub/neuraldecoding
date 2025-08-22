@@ -1,0 +1,34 @@
+defaults:
+  - /model@model: model
+
+optimizer:
+  type: Adam
+  params:
+    lr: 0.0002
+    weight_decay: 0.001
+
+scheduler:
+  type: StepLR
+  params:
+    step_size: 50
+    gamma: 0.4472
+
+loss_func:
+  type: MSELoss
+  params: {}
+
+training:
+  num_epochs: 5
+  batch_size: [64, 16]
+  device: cuda # cuda , if avail 
+  print_results: False
+  print_every: 1
+  clear_cache: False
+
+evaluation:
+  metrics: ["loss", "correlation"]
+  save_path: "tests/trainer/results/test_trainer_results.csv"
+  params: {}
+
+data:
+  params: {}
