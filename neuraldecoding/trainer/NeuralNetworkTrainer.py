@@ -1,6 +1,5 @@
 from omegaconf import DictConfig
 import torch
-import json
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
@@ -11,22 +10,9 @@ from omegaconf import open_dict
 from ..model import neural_network_models
 import warnings
 import copy
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.data import DataLoader, TensorDataset
-from neuraldecoding.utils import prep_data_and_split, load_one_nwb
-import neuraldecoding.model.neural_network_models
-from neuraldecoding.trainer.Trainer import Trainer
-import neuraldecoding.stabilization.latent_space_alignment
-from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
-from neuraldecoding.model.neural_network_models.LSTM import LSTM
-import neuraldecoding.utils.eval_metrics
-from neuraldecoding.utils.training_utils import generate_output_scaler, OutputScaler
-from neuraldecoding.utils.eval_metrics import *
-import os
-import collections
 
 class NNTrainer(Trainer):
-    def __init__(self, preprocessor, config, dataset = None):
+    def __init__(self, dataset, preprocessor, config):
         super().__init__(config)
         # General training params
         self.device = torch.device(config.training.device)
@@ -45,13 +31,6 @@ class NNTrainer(Trainer):
                     self.batch_size = 1  # Override batch size to 1 for trial input support
         else:
             self.batch_size = config.training.get('batch_size', 64)
-        self.full_batch_valid = config.training.get('full_batch_valid', False)
-        if isinstance(self.batch_size, collections.abc.Iterable):
-            self.train_batch_size = self.batch_size[0]
-            self.valid_batch_size = self.batch_size[1]
-        else:
-            self.train_batch_size = self.batch_size
-            self.valid_batch_size = self.batch_size
         self.clear_cache = config.training.clear_cache
         # Evaluation and logging params
         self.print_results = config.training.get("print_results", True)
@@ -61,22 +40,16 @@ class NNTrainer(Trainer):
         self.only_val = config.evaluation.get("only_val", [False]*len(self.metrics))
         self.logger = {metric: [[], []] for metric in self.metrics}
         self.preprocessor = preprocessor
+        self.train_ds, self.valid_ds, self.test_ds = None, None, None
+        self.interpipe_save_keys = config.interpipe_save_keys
+        self.interpipe_save_dict = None
         self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders(dataset)
 
         assert self.scheduler is not None or self.max_iters is not None or self.num_epochs is not None, "At least one of scheduler, max_iters, or num_epochs must be defined."
 
-    def load_data(self, data): # TODO, finalize this when dataset is merged to main
-        data_dict = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
-        # you should have Dict2TrainerBlock in your pipeline
-        # from block Dict2TrainerBlock, outputing A dictionary containing either:
-		#                               - 'X' and 'Y' if 2 keys are present
-		#                               - 'X_train', 'X_val', 'Y_train', 'Y_val' if 4 keys are present
-        # Typically it is 4 keys for NN trainer, so it will be 'X_train', 'X_val', 'Y_train', 'Y_val'.
-        return data_dict
-
     def create_dataloaders(self, dataset):
         """Creates PyTorch DataLoaders for training and validation data."""
-        data_tuple = self.preprocessor.preprocess_pipeline(dataset, params={'is_train': True})
+        data_tuple, self.interpipe_save_dict = self.preprocessor.preprocess_pipeline(dataset, self.interpipe_save_keys, params={'is_train': True})
 
         if len(data_tuple) == 2:
             self.train_ds, self.valid_ds = data_tuple
@@ -103,8 +76,6 @@ class NNTrainer(Trainer):
         if scheduler_config is None:
             return None
         scheduler_params = {}
-        if scheduler_config is None or not scheduler_config or len(scheduler_config) == 0:
-            return None
         scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         if scheduler_config.type == 'ReduceLROnPlateau':
             learning_rate = optimizer.param_groups[0]['lr']
@@ -289,30 +260,3 @@ class NNTrainer(Trainer):
             print(f"    {metric:>12}{'  val = ':>12}{val_metric}")
 
         return self.model
-    def validate_model(self):
-        # Validate
-        self.model.eval()
-        running_val_loss = 0.0
-        val_all_predictions = []
-        val_all_targets = []
-        
-        self.model.scaler.fit(self.model, self.train_loader, device=self.device, dtype=torch.float32, num_outputs=self.model.num_states, verbose=False)
-
-        with torch.no_grad():
-            for x_val, y_val in self.valid_loader:
-                x_val = x_val.to(self.device)
-                y_val = y_val.to(self.device)
-                yhat_val = self.model.scaler.unscale(self.model(x_val))
-                val_loss = self.loss_func(yhat_val, y_val)
-
-                running_val_loss += val_loss.item()
-                val_all_predictions.append(yhat_val.cpu().numpy())
-                val_all_targets.append(y_val.cpu().numpy())
-                if(self.clear_cache):
-                    del y_val, yhat_val
-
-        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
-        val_all_targets = np.concatenate(val_all_targets, axis=0)
-        val_loss = running_val_loss / len(self.valid_loader)
-
-        return val_loss, val_all_predictions, val_all_targets

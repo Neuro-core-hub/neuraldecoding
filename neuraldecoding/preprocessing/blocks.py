@@ -521,12 +521,12 @@ class NormalizationBlock(DataProcessingBlock):
 			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params)
 			if self.retain_denorm:
 				denorm_key = 'denorm_' + self.fit_location
-				interpipe[denorm_key] = data[self.fit_location].copy()
+				interpipe[denorm_key] = data[self.fit_location]
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
 			for loc in self.apply_location:
 				if self.retain_denorm:
 					denorm_key = 'denorm_' + loc
-					interpipe[denorm_key] = data[loc].copy()
+					interpipe[denorm_key] = data[loc]
 				data[loc] = normalizer.transform(data[loc])
 		elif self.normalizer_method == 'sequence_scaler':	
 			normalizer = SequenceScaler()
@@ -537,7 +537,7 @@ class NormalizationBlock(DataProcessingBlock):
 			for loc in self.apply_location:
 				if self.retain_denorm:
 					denorm_key = 'denorm_' + loc
-					interpipe[denorm_key] = data[loc].copy()
+					interpipe[denorm_key] = data[loc]
 				data[loc] = normalizer.transform(data[loc])
 		else:
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")

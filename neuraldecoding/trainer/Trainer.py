@@ -28,7 +28,9 @@ class Trainer(ABC):
         # Save log
         if self.logger_save_path:
             with open(self.logger_save_path, 'a') as f:
-                entries = [epoch] + [f'"{self.logger[metric]['train'][-1]}"' for metric in self.metrics] + [f'"{self.logger[metric]['valid'][-1]}"' for metric in self.metrics]
+                entries = [epoch] \
+                    + [f"\"{self.logger[metric]['train'][-1]}\"" for metric in self.metrics] \
+                    + [f"\"{self.logger[metric]['valid'][-1]}\"" for metric in self.metrics]
                 f.write(','.join(map(str, entries)) + '\n')
 
         # Print log

@@ -6,13 +6,13 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import DataLoader, TensorDataset
-from neuraldecoding.utils import data_split_trial, load_one_nwb
-from neuraldecoding.model.Model import Model
-from neuraldecoding.trainer.Trainer import Trainer
-import neuraldecoding.model.linear_models
-from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression, KalmanFilter
-from neuraldecoding.dataset import Dataset
-from neuraldecoding.preprocessing import Preprocessing
+from ..utils import data_split_trial, load_one_nwb, eval_metrics
+from ..model.Model import Model
+from ..trainer.Trainer import Trainer
+from ..model import linear_models as linear_models
+from ..model.linear_models import LinearRegression, RidgeRegression, KalmanFilter
+from ..dataset import Dataset
+from ..preprocessing import Preprocessing
 import os
 import pickle
 
@@ -35,7 +35,7 @@ class LinearTrainer(Trainer):
 
     def create_model(self, config):
         """Creates and returns a loss function based on the configuration."""
-        model_class = getattr(neuraldecoding.model.linear_models, config.type)
+        model_class = getattr(linear_models, config.type)
         model = model_class(config.params)
         return model
     
@@ -51,7 +51,7 @@ class LinearTrainer(Trainer):
         train_prediction = self.model(self.train_X)
         valid_prediction = self.model(self.valid_X)
         for metric in self.metrics:
-            metric_method = getattr(neuraldecoding.utils.eval_metrics, metric)
+            metric_method = getattr(eval_metrics, metric)
             self.logger[metric]['train'].append(metric_method(train_prediction, self.train_Y))
             self.logger[metric]['valid'].append(metric_method(valid_prediction, self.valid_Y))
 
