@@ -515,30 +515,37 @@ class NormalizationBlock(DataProcessingBlock):
 		self.normalizer_params = normalizer_params
 		self.sklearn_type = sklearn_type
 		self.save_path = save_path
-		self.scaler = None
 		self.retain_denorm = retain_denorm
-		self.denorm_data = {}
 	def transform(self, data, interpipe):
 		if self.normalizer_method == 'sklearn':
 			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params)
+			if self.retain_denorm:
+				denorm_key = 'denorm_' + self.fit_location
+				interpipe[denorm_key] = data[self.fit_location].copy()
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
 			for loc in self.apply_location:
 				if self.retain_denorm:
-					self.denorm_data[loc] = data[loc].copy()
+					denorm_key = 'denorm_' + loc
+					interpipe[denorm_key] = data[loc].copy()
 				data[loc] = normalizer.transform(data[loc])
 		elif self.normalizer_method == 'sequence_scaler':	
 			normalizer = SequenceScaler()
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location], **self.normalizer_params)
+			if self.retain_denorm:
+				denorm_key = 'denorm_' + self.fit_location
+				interpipe[denorm_key] = data[self.fit_location].copy()
 			for loc in self.apply_location:
 				if self.retain_denorm:
-					self.denorm_data[loc] = data[loc].copy()
+					denorm_key = 'denorm_' + loc
+					interpipe[denorm_key] = data[loc].copy()
 				data[loc] = normalizer.transform(data[loc])
 		else:
 			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
 		if self.save_path is not None:
 			with open(self.save_path, 'wb') as f:
 				pickle.dump(normalizer, f)
-		self.scaler = normalizer
+		normalizer_key = 'normalizer_' + self.fit_location
+		interpipe[normalizer_key] = normalizer
 		return data, interpipe
 
 class LoadNormalizationBlock(DataProcessingBlock):
@@ -1188,5 +1195,3 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		plt.tight_layout()
 		plt.show(block=True)
-
-
