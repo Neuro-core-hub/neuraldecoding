@@ -247,7 +247,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behavior data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, apply_trial_filtering = True, continuous_time_scaler=None, trial_time_scaler=None,
+			  nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -261,6 +262,13 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
 		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
 		self.nwb_targets_loc = nwb_targets_loc
+		if continuous_time_scaler is None:
+			continuous_time_scaler = 1
+		self.continuous_time_scaler = continuous_time_scaler
+		if trial_time_scaler is None:
+			trial_time_scaler = 1
+		self.trial_time_scaler = trial_time_scaler
+
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -280,19 +288,16 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
-		trial_start_times = trial_start_times[:] 
-		trial_end_times = trial_end_times[:]
+		trial_start_times = trial_start_times[:]*self.trial_time_scaler
+		trial_end_times = trial_end_times[:]*self.trial_time_scaler
 		# Convert timestamps to milliseconds
-		neural_ts, behavior_ts = neural_nwb.timestamps[:] * 1000, behavior_nwb.timestamps[:] * 1000
+		neural_ts, behavior_ts = neural_nwb.timestamps[:] * self.continuous_time_scaler, behavior_nwb.timestamps[:] * self.continuous_time_scaler
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
-
-		trial_idx = np.searchsorted(neural_ts, trial_start_times, side='left')
 
 		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behavior, 'behavior_ts': behavior_ts}
 		interpipe['trial_start_times'] = trial_start_times
 		interpipe['trial_end_times'] = trial_end_times
-		interpipe['trial_idx'] = trial_idx
 		interpipe['targets'] = targets[:]
 		return data_out, interpipe
 
@@ -500,23 +505,28 @@ class FeatureExtractionBlock(DataProcessingBlock):
 
 	def transform(self, data, interpipe):
 		if self.target_filter is None:
-			self.target_filter = np.arange(data['targets'].shape[1])
+			self.target_filter = np.arange(interpipe['targets'].shape[1])
 		for loc in self.location_data + self.location_ts:
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
-		features_list = self.feature_extractor.extract_binned_features(data=[data[loc] for loc in self.location_data], timestamps_ms=[data[loc] for loc in self.location_ts], return_array=True)
+		trial_starts_ends = (interpipe['trial_start_times'], interpipe['trial_end_times'])
+		features_list, interpipe['trial_idx'] = self.feature_extractor.extract_binned_features(
+			data=[data[loc] for loc in self.location_data],
+			timestamps_ms=[data[loc] for loc in self.location_ts],
+			return_array=True,
+			trial_starts_ends=trial_starts_ends
+		)
 		for loc in self.location_ts:
 			del data[loc]
 		for i, loc in enumerate(self.location_data):
 			data[loc] = features_list[i]
-		if 'trial_idx' in interpipe:
-			interpipe['trial_idx'] = np.astype((interpipe['trial_idx'] / self.feature_extractor.bin_size_ms), np.int32)
-			interpipe['trial_filt'] = np.zeros(len(data[self.location_data[0]]), dtype=np.int32)
-			interpipe['targets_filt'] = np.zeros((len(data[self.location_data[0]]), self.target_filter.shape[0]), dtype=np.float32)
-			for i, start in enumerate(interpipe['trial_idx']):
-				end = interpipe['trial_idx'][i + 1] if i + 1 < len(interpipe['trial_idx']) else len(data[self.location_data[0]])
-				interpipe['trial_filt'][start:end] = i
-				interpipe['targets_filt'][start:end] = interpipe['targets'][i][self.target_filter]
+			
+		interpipe['trial_filt'] = np.zeros(len(data[self.location_data[0]]), dtype=np.int32)
+		interpipe['targets_filt'] = np.zeros((len(data[self.location_data[0]]), self.target_filter.shape[0]), dtype=np.float32)
+		for i, start in enumerate(interpipe['trial_idx']):
+			end = interpipe['trial_idx'][i + 1] if i + 1 < len(interpipe['trial_idx']) else len(data[self.location_data[0]])
+			interpipe['trial_filt'][start:end] = i
+			interpipe['targets_filt'][start:end] = interpipe['targets'][i][self.target_filter]
 		return data, interpipe
 	
 class LabelModificationBlock(DataProcessingBlock):

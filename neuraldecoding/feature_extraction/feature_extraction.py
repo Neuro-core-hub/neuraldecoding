@@ -163,7 +163,8 @@ class FeatureExtractor:
     def extract_binned_features(self,
                                data: Union[np.ndarray, List[np.ndarray]],
                                timestamps_ms: Union[np.ndarray, List[np.ndarray]],
-                               return_array: bool = False) -> Union[List[Dict], np.ndarray, List[np.ndarray]]:
+                               return_array: bool = False,
+                               trial_starts_ends: Tuple = ()) -> Union[Tuple[List[Dict], np.ndarray], Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], np.ndarray]]:
         """
         Extract features from timestamped data by dividing it into time bins.
         
@@ -183,6 +184,7 @@ class FeatureExtractor:
         else:
             data_list = data
             timestamps_list = timestamps_ms
+
         
         # --- Start of new validation section ---
         is_multistream_config = isinstance(self.feature_type, list) and \
@@ -216,7 +218,7 @@ class FeatureExtractor:
                 raise ValueError(f"Data and timestamps must have same number of samples for array {i}")
         
         if len(data_list) == 0 or any(len(t) == 0 for t in timestamps_list):
-            return np.array([]) if return_array else []
+            return np.array([]), np.array([]) if return_array else [], np.array([])
         
         # Determine global time range across all arrays
         min_time = min(t.min() for t in timestamps_list)
@@ -236,6 +238,7 @@ class FeatureExtractor:
             should_skip = False
             for chans, d, t in zip(channels_per_array, data_list, timestamps_list):
                 bin_mask = (t >= bin_start) & (t < bin_end)
+
                 if np.any(bin_mask):
                     bin_data_list.append(d[bin_mask].reshape(-1, chans))
                 else:
@@ -308,6 +311,8 @@ class FeatureExtractor:
                     bin_features.append(features)
             
             current_time += self.bin_size_ms
+
+        trial_idx = self.obtain_trial_idx(bin_features, trial_starts_ends)
         
         # Post-process velocity features to use lookahead (vel_t = pos_t+1 - pos_t)
         self._postprocess_velocity_features(bin_features, is_multistream_config)
@@ -315,7 +320,7 @@ class FeatureExtractor:
         # Return array of features if requested
         if return_array:
             if not bin_features:
-                return np.array([])
+                return np.array([]), np.array([])
             
             # Handle both single arrays and lists of arrays
             first_features = bin_features[0]['features']
@@ -326,13 +331,37 @@ class FeatureExtractor:
                 for array_idx in range(num_arrays):
                     array_features = [bf['features'][array_idx] for bf in bin_features]
                     result_arrays.append(np.array(array_features))
-                return result_arrays
+                return result_arrays, trial_idx
             else:
                 # Single array case - return single array
                 feature_arrays = [bf['features'] for bf in bin_features]
-                return np.array(feature_arrays)
+                return np.array(feature_arrays), trial_idx
         
-        return bin_features
+        return bin_features, trial_idx
+    
+    def obtain_trial_idx(self, bin_features: List[Dict], trial_starts_ends: Tuple) -> np.ndarray:
+        """Obtain trial indices for each bin based on provided trial start/end times."""
+        
+        trial_starts, _ = trial_starts_ends
+        
+        trial_idx = np.zeros(len(trial_starts), dtype=int)
+        current_trial_start = trial_starts[0] if len(trial_starts) > 0 else None
+        current_trial = 0
+
+        count = 0
+
+        for bf in bin_features:
+            bin_start = bf['bin_start_ms']
+            if bin_start >= current_trial_start:
+                trial_idx[current_trial] = count
+                current_trial += 1
+                current_trial_start = trial_starts[current_trial] if current_trial < len(trial_starts) else None
+                if current_trial_start is None:
+                    break
+            count += 1
+
+        return trial_idx
+            
 
     def compute_bin_features(self, 
                             data: np.ndarray,

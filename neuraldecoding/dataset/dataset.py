@@ -54,7 +54,7 @@ class Dataset:
         if self.cfg.dataset_type == "zstruct":
             self._load_data_zstruct()
         elif self.cfg.dataset_type == "nwb":
-            self.load_data_nwb()
+            self._load_data_nwb()
         else:
             raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
     
@@ -64,7 +64,7 @@ class Dataset:
 
         """
         io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
-        self.dataset = self.io.read()
+        self.dataset = io.read()
 
     def _load_data_zstruct(self):
         """
@@ -135,17 +135,3 @@ class Dataset:
         print(f"Saving NWB file to {path}...")
         with NWBHDF5IO(path, mode="w") as io:
             io.write(self.dataset)
-
-    def close(self):
-        """
-        Close the NWB file if it was opened.
-        """
-        if self.io:
-            self.io.close()
-            self.io = None
-
-    def __del__(self):
-        """
-        Ensure the NWB file is closed when the object is destroyed.
-        """
-        self.close()
