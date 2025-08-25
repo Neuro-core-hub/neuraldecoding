@@ -2,6 +2,8 @@ from ..dataaugmentation import SequenceScaler
 from ..feature_extraction import FeatureExtractor
 from ..utils.utils_general import resolve_path
 from ..utils.data_tools import load_one_nwb
+from ..utils.training_utils import OutputScaler
+from ..preprocessing.onset_detection import MovementOnsetDetector
 import sklearn.preprocessing
 from .. import utils
 from .. import stabilization
@@ -10,9 +12,14 @@ import torch
 
 from abc import ABC, abstractmethod
 
+import warnings
 import time
 import pickle
 import numpy as np
+from typing import Union, List
+import numpy as np
+import matplotlib.pyplot as plt
+
 
 class PreprocessingBlock(ABC):
 	"""
@@ -116,6 +123,7 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 
 	Assumes the dictionary contains keys 'X_train', 'y_train', 'X_test', and 'y_test'.
 	Returns a tuple of (neural, behavior) for training or testing based on the 'is_train' key in the interpipe dictionary.
+	Returns a tuple of (neural, behaviour) for training or testing based on the 'is_train' key in the interpipe dictionary.
 	"""
 	def __init__(self):
 		super().__init__()
@@ -127,7 +135,7 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
 			data_out (tuple): A tuple containing either:
-				- (neural, behavior) , contains either training or testing data depending on 'is_train' in interpipe.
+				- (neural, behaviour) , contains either training or testing data depending on 'is_train' in interpipe.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
 		if 'is_train' not in interpipe:
@@ -140,23 +148,90 @@ class ClassificationDict2TupleBlock(DataFormattingBlock):
 		data_out = (neural, behavior)
 		return data_out, interpipe
 
+class DataKeyRenameBlock(DataFormattingBlock):
+	"""
+	A block for renaming keys in the data dictionary.
+	"""
+	def __init__(self, rename_map):
+		"""
+		Initializes the KeyRenameBlock.
+		Args:
+			rename_map (dict): A dictionary mapping old keys to new keys. Keys represent the old names, and values represent the new names.
+		"""
+		super().__init__()
+		self.rename_map = rename_map
+
+	def transform(self, data, interpipe):
+		"""
+		Renames keys in the data dictionary according to the rename_map.
+		Args:
+			data (dict): Input data dictionary.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with renamed keys.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		for old_key, new_key in self.rename_map.items():
+			if old_key in data:
+				data[new_key] = data.pop(old_key)
+			else:
+				raise KeyError(f"Key '{old_key}' not found in data dictionary.")
+		return data, interpipe
+
+class InterpipeKeyRenameBlock(DataFormattingBlock):
+	"""
+	A block for renaming keys in the interpipe dictionary.
+	"""
+	def __init__(self, rename_map):
+		"""
+		Initializes the InterpipeKeyRenameBlock.
+		Args:
+			rename_map (dict): A dictionary mapping old keys to new keys. Keys represent the old names, and values represent the new names.
+		"""
+		super().__init__()
+		self.rename_map = rename_map
+
+	def transform(self, data, interpipe):
+		"""
+		Renames keys in the interpipe dictionary according to the rename_map.
+		Args:
+			data (dict): Input data dictionary.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary remains unchanged.
+			interpipe (dict): The interpipe dictionary with renamed keys.
+		"""
+		for old_key, new_key in self.rename_map.items():
+			if old_key in interpipe:
+				interpipe[new_key] = interpipe.pop(old_key)
+			else:
+				raise KeyError(f"Key '{old_key}' not found in interpipe dictionary.")
+		return data, interpipe
+
 class DataSplitBlock(DataFormattingBlock):
 	"""
 	A block for splitting data into training and testing sets based on trial indices.
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behaviour'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test']):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
 			split_ratio (float, tuple): The ratio of training data to total data. Default is 0.8. If tuple, 
 				will be in the form of [train, validation, test] as a fraction of 1 (e.g. [0.7, 0.1, 0.2]).
 			split_seed (int): Seed for random number generator to ensure reproducibility. Default is 42.
+			location (list): List of 2 keys names in the data dictionary to be split. Default is ['neural', 'behaviour'].
+			interpipe_location (list): List of 1 key name in the interpipe dictionary containing the trial indices. Default is ['trial_idx'].
+			data_keys (list): List of 4 keys names to store the split data in the output dictionary. Default is ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test'].
 		"""
 		super().__init__()
+		self.location = location
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
+		self.location = location
+		self.interpipe_location = interpipe_location
+		self.data_keys = data_keys
 
 	def transform(self, data, interpipe):
 		"""
@@ -167,7 +242,7 @@ class DataSplitBlock(DataFormattingBlock):
 			data (dict): Input data dictionary containing 'neural' and 'behavior' keys.
 			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
 		Returns:
-			data_out (dict): A dictionary containing:
+			data_out (dict): A dictionary containing (by default data keys):
 				- 'neural_train': Training neural data
 				- 'neural_test': Testing neural data
 				- 'behavior_train': Training behavior data
@@ -251,7 +326,11 @@ class Dataset2DictBlock(DataFormattingBlock):
 			  nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
 		"""
 		Initializes the Dataset2DictBlock.
+		Initializes the Dataset2DictBlock.
 		Args:
+			neural_nwb_loc (str): Location path for neural data in the NWB file.
+			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
+			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
 			neural_nwb_loc (str): Location path for neural data in the NWB file.
 			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
 			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
@@ -301,6 +380,20 @@ class Dataset2DictBlock(DataFormattingBlock):
 		interpipe['targets'] = targets[:]
 		return data_out, interpipe
 
+class RoundToIntegerBlock(DataFormattingBlock):
+	"""
+	A block for rounding data to integers.
+	"""
+	def __init__(self, location):
+		super().__init__()
+		self.location = location
+	def transform(self, data, interpipe):
+		data_out = data.copy()
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			data_out[loc] = np.round(data[loc])
+		return data_out, interpipe
 
 # Wrappers that Modify Data
 class StabilizationBlock(DataProcessingBlock):
@@ -498,6 +591,8 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		super().__init__()
 		self.location_data = location_data
 		self.location_ts = location_ts
+		self.location_data = location_data
+		self.location_ts = location_ts
 		self.feature_extractor = FeatureExtractor(feature_extractor_config)
 		self.target_filter = feature_extractor_config.get('target_filter', None)
 		if self.target_filter is not None:
@@ -575,3 +670,523 @@ class LabelModificationBlock(DataProcessingBlock):
 		
 		return data, interpipe
 	
+
+class RegressionToClassificationBlock(DataProcessingBlock):
+	"""
+	A block for converting regression data into classification data by applying conditions to define classes.
+	Each class is defined by a list of conditions (lambda functions) that must all be true for each column.
+	Samples that don't match any defined conditions are automatically assigned to an additional "other" class.
+	"""
+	def __init__(self, location: str, conditions: List[List], output_key: str = None):
+		"""
+		Initializes the RegressionToClassificationBlock.
+		Args:
+			location (str): Key for the regression data array in the data dictionary.
+			conditions (List[List]): List of class definitions. Each inner list contains conditions
+									 for each column that define when a sample belongs to that class.
+									 Conditions can be either lambda functions or strings.
+									 String examples: "x < 0.2", "(x >= 0.2) & (x < 0.5)", "x > 0.8"
+									 Lambda examples: lambda x: x < 0.2, lambda x: (x >= 0.2) & (x < 0.5)
+									 Example: [
+									 	["x < 0.2", "x < 0.2"],  # class 0
+									 	["(x >= 0.2) & (x < 0.5)", "x < 0.2"],  # class 1
+									 ]
+									 Note: Samples not matching any conditions get assigned to an additional "other" class.
+			output_key (str): Key for the output classification data. If None, uses same location (overwrites input).
+		"""
+		super().__init__()
+		self.location = location
+		self.conditions = self._convert_conditions(conditions)
+		self.output_key = output_key if output_key is not None else location
+		self.n_classes = len(conditions)
+	
+	def _convert_conditions(self, conditions):
+		"""
+		Convert string conditions to lambda functions if needed.
+		Args:
+			conditions: List of lists containing either strings or lambda functions
+		Returns:
+			List of lists containing lambda functions
+		"""
+		converted_conditions = []
+		for class_conditions in conditions:
+			converted_class = []
+			for condition in class_conditions:
+				if isinstance(condition, str):
+					# Convert string to lambda function
+					try:
+						lambda_func = eval(f"lambda x: {condition}")
+						converted_class.append(lambda_func)
+					except Exception as e:
+						raise ValueError(f"Invalid condition string '{condition}': {e}")
+				else:
+					# Assume it's already a callable (lambda function)
+					converted_class.append(condition)
+			converted_conditions.append(converted_class)
+		return converted_conditions
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform regression data into classification labels.
+		Args:
+			data (dict): Input data dictionary containing the regression data.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks.
+		Returns:
+			data_out (dict): Copy of input data with added classification labels.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if self.location not in data:
+			raise ValueError(f"RegressionToClassificationBlock requires '{self.location}' key in data dictionary.")
+		
+		regression_data = data[self.location]
+		n_samples, n_features = regression_data.shape
+		
+		# Validate conditions don't exceed number of features
+		if self.conditions:
+			n_conditions = len(self.conditions[0])
+			if n_conditions > n_features:
+				raise ValueError(f"Number of conditions per class ({n_conditions}) cannot exceed number of features ({n_features})")
+			
+			# Use only the first n_conditions features
+			features_to_use = min(n_conditions, n_features)
+		else:
+			features_to_use = n_features
+		
+		# Initialize class labels (default to -1 for unclassified)
+		class_labels = np.full(n_samples, -1, dtype=int)
+		
+		# Apply conditions for each class
+		for class_idx, class_conditions in enumerate(self.conditions):
+			# Create boolean mask for each feature condition (only use first features_to_use features)
+			feature_masks = []
+			for feature_idx, condition in enumerate(class_conditions[:features_to_use]):
+				# Skip None conditions (no constraint on this feature)
+				if condition is not None:
+					feature_data = regression_data[:, feature_idx]
+					feature_mask = condition(feature_data)
+					feature_masks.append(feature_mask)
+			
+			# Combine all non-None feature conditions with AND logic
+			# If no conditions were specified (all None), all samples match this class
+			if feature_masks:
+				class_mask = np.all(feature_masks, axis=0)
+			else:
+				class_mask = np.ones(n_samples, dtype=bool)  # All samples match if no conditions
+			
+			# Assign class label (prioritize earlier classes in case of overlap)
+			unassigned_mask = class_labels == -1
+			final_mask = class_mask & unassigned_mask
+			class_labels[final_mask] = class_idx
+		
+		# Assign remaining unmatched samples to an "other" class
+		unmatched_mask = class_labels == -1
+		if np.any(unmatched_mask):
+			other_class_idx = len(self.conditions)  # Next available class number
+			class_labels[unmatched_mask] = other_class_idx
+			self.n_classes = len(self.conditions) + 1
+		else:
+			self.n_classes = len(self.conditions)
+		
+		# Copy input data and add classification labels
+		data_out = data.copy()
+		data_out[self.output_key] = class_labels
+		
+		return data_out, interpipe
+	
+ 
+class MovementOnsetDetectionBlock(DataProcessingBlock):
+	"""
+	A block for detecting movement onset in the EMG data.
+	"""
+	def __init__(self, location_emg: str, location_times:str , detection_config: dict, neural_indices: list = None, output_key: str = 'onset_indices'):
+		super().__init__()
+		self.location_emg = location_emg
+		self.location_times = location_times
+		self.detection_config = detection_config
+		self.neural_indices = neural_indices
+		self.output_key = output_key
+		self.movement_onset_detection = MovementOnsetDetector(detection_config)
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by detecting movement onset in the EMG data.
+		"""
+		# Grab timestamps and EMG
+		emg = data[self.location_emg]
+		times = interpipe[self.location_times]
+		trial_start_times = interpipe['trial_start_times']
+		trial_end_times = interpipe['trial_end_times']
+
+		# Select specific neural channels if indices are provided
+		if self.neural_indices is not None:
+			emg = emg[:, self.neural_indices]
+
+		# Detect movement onsets
+		onsets = self.movement_onset_detection.detect_movement_onsets(emg, times, trial_start_times, trial_end_times)
+
+		# Add onsets to data dictionary
+		interpipe[self.output_key] = onsets
+
+		# Plot all channels together with onset markers
+		n_channels = emg.shape[1]
+		fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+		
+		# Plot all EMG channels
+		for ch in range(n_channels):
+			ax.plot(times, emg[:, ch], alpha=0.7, linewidth=0.8, label=f'Channel {ch}')
+		
+		# Add vertical lines for onsets
+		for onset_time in onsets:
+			if onset_time is not None and not np.isnan(onset_time):
+				ax.axvline(x=onset_time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time == onsets[0] else "")
+		
+		# Add trial boundaries for context
+		for i, start_time in enumerate(trial_start_times):
+			ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.5, linewidth=1.5, 
+					  label='Trial Start' if i == 0 else "")
+		for i, end_time in enumerate(trial_end_times):
+			ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.5, linewidth=1.5, 
+					  label='Trial End' if i == 0 else "")
+		
+		ax.set_xlabel('Time (ms)')
+		ax.set_ylabel('EMG Amplitude')
+		ax.set_title('EMG Channels with Movement Onsets')
+		ax.grid(True, alpha=0.3)
+		ax.legend()
+		plt.tight_layout()
+		plt.show(block=True)
+
+		return data, interpipe
+
+class TemplateBehaviorReplacementBlock(DataProcessingBlock):
+	"""
+	A block for replacing the behavior data with a template behavior.
+	"""
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict, kinematic_indices: list = None):
+		super().__init__()
+		self.location_behavior = location_behavior
+		self.location_out = location_out
+		self.location_onsets = location_onsets
+		self.template_config = template_config
+		self.kinematic_indices = kinematic_indices
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by replacing the behavior data with a template behavior.
+		"""
+		# Get behavior data and timestamps
+		kinematics = data[self.location_behavior]
+		behavior_ts = data.get(f'{self.location_behavior}_ts', data.get('behavior_ts'))
+		
+		if behavior_ts is None:
+			raise ValueError(f"Could not find timestamps for behavior data. Expected '{self.location_behavior}_ts' or 'behavior_ts' in data.")
+		
+		# Get onsets from interpipe
+		movement_onsets = interpipe[self.location_onsets]
+		
+		# Get trial timing information from interpipe
+		trial_start_times = interpipe['trial_start_times']
+		trial_end_times = interpipe['trial_end_times']
+		
+		# Get targets and other parameters from template config
+		targets = data['targets']
+		template_type = self.template_config.get('template_type', 'sigmoid')
+		
+		# Convert behavior data to numpy array if not already
+		if not isinstance(kinematics, np.ndarray):
+			kinematics = np.array(kinematics, dtype=np.float32)
+		
+		# Index the second axis of kinematics if kinematic_indices is provided
+		if self.kinematic_indices is not None:
+			kinematics = kinematics[:, self.kinematic_indices]
+			targets = targets[:, self.kinematic_indices]
+		
+		# Apply template behavior
+		templated_kinematics = self._apply_template_kinematics(
+			kinematics=kinematics,
+			behavior_ts=behavior_ts,
+			trial_start_times=trial_start_times,
+			trial_end_times=trial_end_times,
+			movement_onsets=movement_onsets,
+			targets=targets,
+			template_type=template_type,
+			template_params=self.template_config.get('template_params', {})
+		)
+		
+		# Plot original vs templated kinematics
+		self._plot_kinematics_comparison(
+			original_kinematics=kinematics,
+			templated_kinematics=templated_kinematics,
+			behavior_ts=behavior_ts,
+			trial_start_times=trial_start_times,
+			trial_end_times=trial_end_times,
+			movement_onsets=movement_onsets,
+			kinematic_indices=self.kinematic_indices
+		)
+		
+		# Update the behavior data in the data dictionary
+		if self.kinematic_indices is not None:
+			if self.location_out in data:
+				data[self.location_out][:, self.kinematic_indices] = templated_kinematics
+			else:
+				# Copy input kinematics to output location and then modify the desired indices
+				data[self.location_out] = kinematics.copy()
+				data[self.location_out][:, self.kinematic_indices] = templated_kinematics
+		else:
+			data[self.location_out] = templated_kinematics
+		
+		return data, interpipe
+	
+	def _apply_template_kinematics(
+		self,
+		kinematics: np.ndarray,
+		behavior_ts: np.ndarray,
+		trial_start_times: np.ndarray,
+		trial_end_times: np.ndarray,
+		movement_onsets: np.ndarray,
+		targets: np.ndarray,
+		template_type: str = 'sigmoid',
+		template_params: dict = None
+	) -> np.ndarray:
+		"""
+		Apply template kinematics based on movement onsets and targets.
+
+		Args:
+			kinematics: np.ndarray - Array of shape (T, N) where N is the number of position variables
+			behavior_ts: np.ndarray - Array of behavior timestamps (must be sorted)
+			trial_start_times: np.ndarray - Array of trial start times
+			trial_end_times: np.ndarray - Array of trial end times
+			movement_onsets: np.ndarray - Array of shape (n_trials,) containing onset times for each trial
+			targets: np.ndarray - Array of shape (n_trials, D) containing target positions for each trial
+			template_type: str - Type of template to apply ('sigmoid', 'linear', 'step', etc.)
+			template_params: dict - Additional parameters for the template function
+
+		Returns:
+			np.ndarray - Templated kinematics array of the same shape
+		"""
+		if template_params is None:
+			template_params = {}
+			
+		templated = kinematics.copy()
+
+		# All columns are position data
+		N = kinematics.shape[1]
+		
+		# Find trial boundaries using searchsorted
+		trial_start_indices = np.searchsorted(behavior_ts, trial_start_times, side='left')
+		trial_end_indices = np.searchsorted(behavior_ts, trial_end_times, side='right')
+
+		for trial_idx, (trial_start_idx, trial_end_idx) in enumerate(zip(trial_start_indices, trial_end_indices)):
+			# Ensure indices are within bounds
+			trial_start_idx = max(0, trial_start_idx)
+			trial_end_idx = min(len(behavior_ts), trial_end_idx)
+			
+			if trial_start_idx >= trial_end_idx:
+				continue  # Skip empty trials
+
+			for i in range(N):  # Apply to all position dimensions
+				# Check if we have an onset for this trial
+				if trial_idx >= len(movement_onsets) or movement_onsets[trial_idx] is None or np.isnan(movement_onsets[trial_idx]):
+					# If we don't know the onset, keep original kinematics in trial
+					continue
+				
+				# Find onset index within this trial using the onset time
+				onset_time = movement_onsets[trial_idx]
+				onset_idx = np.searchsorted(behavior_ts[trial_start_idx:trial_end_idx], onset_time, side='left')
+				onset_idx = trial_start_idx + onset_idx
+				onset_idx = np.clip(onset_idx, trial_start_idx, trial_end_idx - 1)
+				
+				# Get target for this trial and dimension
+				if trial_idx >= len(targets) or i >= targets.shape[1]:
+					continue
+				target = targets[trial_idx, i]
+				
+				# Set constant value before onset
+				templated[trial_start_idx:onset_idx+1, i] = (
+					templated[trial_start_idx - 1, i]
+					if trial_start_idx > 0
+					else templated[trial_start_idx, i]
+				)
+				
+				# Get initial value at onset
+				initial_value = templated[onset_idx, i]
+				
+				if trial_end_idx <= onset_idx:
+					continue  # No samples after onset
+				
+				# Apply template from onset to end of trial
+				num_samples = trial_end_idx - onset_idx
+				duration_s = (behavior_ts[trial_end_idx - 1] - behavior_ts[onset_idx]) / 1000  # Convert ms to seconds
+				
+				template_values = self._generate_template(
+					template_type=template_type,
+					num_samples=num_samples,
+					initial_value=initial_value,
+					final_value=target,
+					duration_s=duration_s,
+					**template_params
+				)
+				
+				templated[onset_idx:trial_end_idx, i] = template_values
+
+		return templated
+	
+	def _generate_template(
+		self,
+		template_type: str,
+		num_samples: int,
+		initial_value: float,
+		final_value: float,
+		duration_s: float,
+		**kwargs
+	) -> np.ndarray:
+		"""
+		Generate template values based on the specified template type.
+		
+		Args:
+			template_type: Type of template ('sigmoid', 'linear', 'step', 'exponential')
+			num_samples: Number of samples to generate
+			initial_value: Starting value
+			final_value: Target value
+			duration_s: Duration in seconds
+			**kwargs: Additional parameters specific to each template type
+		
+		Returns:
+			np.ndarray: Array of template values
+		"""
+		t = np.linspace(0, 1, num_samples)
+		
+		if template_type == 'sigmoid':
+			return self._sigmoid_template(t, initial_value, final_value, duration_s, **kwargs)
+		elif template_type == 'linear':
+			return self._linear_template(t, initial_value, final_value)
+		elif template_type == 'step':
+			return self._step_template(t, initial_value, final_value, **kwargs)
+		elif template_type == 'exponential':
+			return self._exponential_template(t, initial_value, final_value, **kwargs)
+		else:
+			raise ValueError(f"Unknown template type: {template_type}")
+	
+	def _sigmoid_template(
+		self,
+		t: np.ndarray,
+		initial_value: float,
+		final_value: float,
+		duration_s: float,
+		steepness: float = 10,
+		start_point: float = 0,
+		start_threshold_percentage: float = 0.005,
+		**kwargs
+	) -> np.ndarray:
+		"""Sigmoid template function."""
+		# Normalized steepness
+		s_norm = steepness * duration_s
+		# Amplitude
+		amplitude = final_value - initial_value
+		# Calculate the normalized time midpoint t0_norm using s_norm
+		log_arg = start_threshold_percentage / (1 - start_threshold_percentage)
+		if log_arg <= 0:
+			raise ValueError("Logarithm argument non-positive.")
+		logit_val = np.log(log_arg)
+		t0_norm = start_point - (1 / s_norm) * logit_val
+		# Calculate the sigmoid value(s) using normalized time and s_norm
+		exponent = -s_norm * (t - t0_norm)
+		sigmoid_val = 1 / (1 + np.exp(exponent))
+		return initial_value + amplitude * sigmoid_val
+	
+	def _linear_template(self, t: np.ndarray, initial_value: float, final_value: float) -> np.ndarray:
+		"""Linear template function."""
+		return initial_value + (final_value - initial_value) * t
+	
+	def _step_template(self, t: np.ndarray, initial_value: float, final_value: float, step_time: float = 0.5, **kwargs) -> np.ndarray:
+		"""Step template function."""
+		values = np.full_like(t, initial_value)
+		values[t >= step_time] = final_value
+		return values
+	
+	def _exponential_template(self, t: np.ndarray, initial_value: float, final_value: float, time_constant: float = 0.3, **kwargs) -> np.ndarray:
+		"""Exponential template function."""
+		amplitude = final_value - initial_value
+		return initial_value + amplitude * (1 - np.exp(-t / time_constant))
+
+	def _plot_kinematics_comparison(
+		self,
+		original_kinematics: np.ndarray,
+		templated_kinematics: np.ndarray,
+		behavior_ts: np.ndarray,
+		trial_start_times: np.ndarray,
+		trial_end_times: np.ndarray,
+		movement_onsets: np.ndarray,
+		kinematic_indices: list = None
+	):
+		"""
+		Plot comparison between original and templated kinematics.
+		
+		Args:
+			original_kinematics: Original kinematic data
+			templated_kinematics: Templated kinematic data  
+			behavior_ts: Behavior timestamps
+			trial_start_times: Trial start times
+			trial_end_times: Trial end times
+			movement_onsets: Movement onset times
+			kinematic_indices: Indices of kinematic dimensions to plot
+		"""
+		# Determine which dimensions to plot
+		# Note: original_kinematics and templated_kinematics are already sliced if kinematic_indices was provided
+		n_dims = original_kinematics.shape[1]
+		
+		if kinematic_indices is not None:
+			# Data is already sliced, so plot indices 0, 1, 2, ... but label with original indices
+			plot_indices = list(range(n_dims))
+			plot_labels = [f'Dimension {kinematic_indices[i]}' for i in range(n_dims)]
+		else:
+			# Data contains all dimensions
+			plot_indices = list(range(n_dims))
+			plot_labels = [f'Dimension {i}' for i in plot_indices]
+		
+		# Create subplots - one for each kinematic dimension
+		fig, axes = plt.subplots(n_dims, 1, figsize=(14, 4*n_dims), sharex=True)
+		if n_dims == 1:
+			axes = [axes]  # Make it iterable for single subplot
+		
+		fig.suptitle('Original vs Templated Kinematics Comparison', fontsize=16, fontweight='bold')
+		
+		for i, (dim_idx, ax, label) in enumerate(zip(plot_indices, axes, plot_labels)):
+			# Plot original kinematics
+			ax.plot(behavior_ts, original_kinematics[:, dim_idx], 
+				   color='blue', alpha=0.7, linewidth=1.5, label='Original')
+			
+			# Plot templated kinematics
+			ax.plot(behavior_ts, templated_kinematics[:, dim_idx], 
+				   color='red', alpha=0.8, linewidth=2, label='Templated')
+			
+			# Add trial boundaries
+			for j, start_time in enumerate(trial_start_times):
+				ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.6, linewidth=1,
+						  label='Trial Start' if i == 0 and j == 0 else "")
+			
+			for j, end_time in enumerate(trial_end_times):
+				ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.6, linewidth=1,
+						  label='Trial End' if i == 0 and j == 0 else "")
+			
+			# Add movement onsets
+			for j, onset_time in enumerate(movement_onsets):
+				if onset_time is not None and not np.isnan(onset_time):
+					ax.axvline(x=onset_time, color='purple', linestyle='--', alpha=0.8, linewidth=2,
+							  label='Movement Onset' if i == 0 and j == 0 else "")
+			
+			# Formatting
+			ax.set_ylabel(f'{label}\nPosition')
+			ax.grid(True, alpha=0.3)
+			ax.legend(loc='upper right')
+			
+			# Set title for each subplot
+			ax.set_title(f'{label} - Original vs Templated', fontweight='bold')
+		
+		# Set common x-label
+		axes[-1].set_xlabel('Time (ms)')
+		
+		plt.tight_layout()
+		plt.show(block=True)
+
+

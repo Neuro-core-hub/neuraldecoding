@@ -82,6 +82,51 @@ def parse_verify_config(config: DictConfig, section_name: str) -> dict:
     
     return section_content
 
+def compare_configs(current, original):
+    differences = {}
+    
+    def recursive_compare(curr, orig, path=""):
+        # Handle case where one is None and other isn't
+        if curr is None and orig is not None:
+            differences[path] = (orig, curr)
+            return
+        elif curr is not None and orig is None:
+            differences[path] = (orig, curr)
+            return
+        elif curr is None and orig is None:
+            return
+            
+        # Handle different types
+        if type(curr) != type(orig):
+            differences[path] = (orig, curr)
+            return
+            
+        # Handle DictConfig/dict
+        if isinstance(curr, (DictConfig, dict)) and isinstance(orig, (DictConfig, dict)):
+            all_keys = set(curr.keys()) | set(orig.keys())
+            for key in all_keys:
+                new_path = f"{path}.{key}" if path else key
+                curr_val = curr.get(key) if key in curr else None
+                orig_val = orig.get(key) if key in orig else None
+                recursive_compare(curr_val, orig_val, new_path)
+                
+        # Handle ListConfig/list
+        elif isinstance(curr, (ListConfig, list)) and isinstance(orig, (ListConfig, list)):
+            max_len = max(len(curr), len(orig))
+            for i in range(max_len):
+                new_path = f"{path}[{i}]" if path else f"[{i}]"
+                curr_val = curr[i] if i < len(curr) else None
+                orig_val = orig[i] if i < len(orig) else None
+                recursive_compare(curr_val, orig_val, new_path)
+                
+        # Handle primitive values
+        else:
+            if curr != orig:
+                differences[path] = (orig, curr)
+    
+    recursive_compare(current, original)
+    return differences
+
 if __name__ == "__main__":
     from hydra import initialize, compose
 

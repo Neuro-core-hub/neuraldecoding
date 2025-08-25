@@ -1,0 +1,28 @@
+preprocessing_trainer:
+  order: [loadnwb, dict1, split1, add_history1, tensor1, trainer_out]
+  content:
+    loadnwb:
+      type: LoadNWBBlock
+      params: {}
+    dict1:
+      type: Dict2DataDictBlock
+      params:
+        neural_type: sbp
+    split1:
+      type: DataSplitBlock
+      params:
+        split_ratio: 0.8
+        split_seed: 42
+    add_history1:
+      type: AddHistoryBlock
+      params:
+        location: ['neural_train', 'neural_test']
+        seq_length: 20
+    tensor1:
+      type: EnforceTensorBlock
+      params:
+        device: cuda
+        dtype: float32
+    trainer_out:
+      type: Dict2TrainerBlock
+      params: {}
