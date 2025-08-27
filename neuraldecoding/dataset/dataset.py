@@ -2,7 +2,7 @@ import os
 from pynwb import NWBHDF5IO, NWBFile
 from datetime import datetime
 from dateutil.tz import tzlocal
-from neuraldecoding.dataset.dataset import zstruct_loader
+from neuraldecoding.dataset import zstruct_loader
 
 from omegaconf import DictConfig
 
