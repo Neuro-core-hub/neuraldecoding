@@ -3,11 +3,11 @@ import torch
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
-from ..utils import loss_functions
-from ..trainer.Trainer import Trainer
-from ..utils import eval_metrics
+from neuraldecoding.utils import loss_functions
+from neuraldecoding.trainer.Trainer import Trainer
+from neuraldecoding.utils import eval_metrics
 from omegaconf import open_dict
-from ..model import neural_network_models
+from neuraldecoding.model import neural_network_models
 import warnings
 import copy
 
@@ -41,15 +41,15 @@ class NNTrainer(Trainer):
         self.logger = {metric: [[], []] for metric in self.metrics}
         self.preprocessor = preprocessor
         self.train_ds, self.valid_ds, self.test_ds = None, None, None
-        self.interpipe_save_keys = config.interpipe_save_keys
-        self.interpipe_save_dict = None
+        self.saved_data = None
         self.train_loader, self.valid_loader, self.test_loader = self.create_dataloaders(dataset)
 
         assert self.scheduler is not None or self.max_iters is not None or self.num_epochs is not None, "At least one of scheduler, max_iters, or num_epochs must be defined."
 
     def create_dataloaders(self, dataset):
         """Creates PyTorch DataLoaders for training and validation data."""
-        data_tuple, self.interpipe_save_dict = self.preprocessor.preprocess_pipeline(dataset, self.interpipe_save_keys, params={'is_train': True})
+        data_tuple, self.saved_data = self.preprocessor.preprocess_pipeline(dataset, params={'is_train': True})
+        print("Saved data keys from preprocessing: ", self.saved_data.keys())
 
         if len(data_tuple) == 2:
             self.train_ds, self.valid_ds = data_tuple

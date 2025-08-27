@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch.utils.data import random_split
 from sklearn.preprocessing import StandardScaler
-from ..dataaugmentation import SequenceScaler
+from neuraldecoding.dataaugmentation import SequenceScaler
 import pandas as pd
 import glob
 import os

@@ -1,2 +1,2 @@
 # neuraldecoding/dataset/__init__.py
-from .dataset import Dataset
+from neuraldecoding.dataset.dataset import Dataset

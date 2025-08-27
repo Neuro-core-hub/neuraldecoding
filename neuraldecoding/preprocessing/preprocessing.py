@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from . import blocks
+from neuraldecoding.preprocessing import blocks
 
 import time
 
@@ -30,23 +30,19 @@ class Preprocessing:
                 'instance': preprocessing_instance
             })
     
-    def preprocess_pipeline(self, data, interpipe_save_keys = None, params = {'is_train': True}):
+    def preprocess_pipeline(self, data, params = {'is_train': True}):
         current_data = data
-        inter_pipeline_data = {}
+        inter_pipeline_data = {'save_keys': []}
         inter_pipeline_data.update(params)
         for step in self.pipeline:
             step_instance = step['instance']
             current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data)
 
-        final_interpipe_data = {}
-        if interpipe_save_keys is not None:
-            for key in interpipe_save_keys:
-                if key in inter_pipeline_data:
-                    final_interpipe_data[key] = inter_pipeline_data[key]
-                else:
-                    raise ValueError(f"Key '{key}' not found in inter-pipeline data")
+        final_save_data = {}
+        for key in inter_pipeline_data['save_keys']:
+            final_save_data[key] = inter_pipeline_data[key]
 
-        return current_data
+        return current_data, final_save_data
 
     def preprocess_step(self, data, step_name, inter_pipeline_data = {'is_train': True}):
         for step in self.pipeline:

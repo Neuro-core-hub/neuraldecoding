@@ -3,7 +3,7 @@ import numpy as np
 import pickle
 import torch
 from typing import Any
-from .LinearModel import LinearModel
+from neuraldecoding.model.linear_models.LinearModel import LinearModel
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
 class LDA(LinearModel):

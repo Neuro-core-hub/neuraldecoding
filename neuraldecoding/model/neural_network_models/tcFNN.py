@@ -1,8 +1,8 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
-from .NeuralNetworkModel import NeuralNetworkModel
-from ...utils.training_utils import OutputScaler
+from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.utils.training_utils import OutputScaler
 import os
 
 def flatten(x, start_dim=1, end_dim=-1):

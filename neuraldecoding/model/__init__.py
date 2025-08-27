@@ -1,1 +1,1 @@
-from .Model import Model
+from neuraldecoding.model.Model import Model

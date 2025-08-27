@@ -1,6 +1,6 @@
 import numpy as np
 import pickle
-from .LinearModel import LinearModel
+from neuraldecoding.model.linear_models.LinearModel import LinearModel
 
 class KalmanFilter(LinearModel):
     def __init__(self, model_params):

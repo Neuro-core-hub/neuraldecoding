@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union
 from pathlib import Path
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from hydra import initialize_config_dir, compose, initialize
-from ..utils import verify_structure, parse_verify_config, compare_configs
+from neuraldecoding.utils import verify_structure, parse_verify_config, compare_configs
 import pandas as pd
 from datetime import datetime
 import hashlib

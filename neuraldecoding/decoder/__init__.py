@@ -1,1 +1,1 @@
-from .Decoder import *
+from neuraldecoding.decoder.Decoder import *

@@ -1,1 +1,1 @@
-from .stabilization import *
+from neuraldecoding.stabilization import *

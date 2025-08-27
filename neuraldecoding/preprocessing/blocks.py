@@ -1,12 +1,13 @@
-from ..dataaugmentation import SequenceScaler
-from ..feature_extraction import FeatureExtractor
-from ..utils.utils_general import resolve_path
-from ..utils.data_tools import load_one_nwb
-from ..utils.training_utils import OutputScaler
-from ..preprocessing.onset_detection import MovementOnsetDetector
+import neuraldecoding.utils
+import neuraldecoding.stabilization.latent_space_alignment
+import neuraldecoding.dataaugmentation.DataAugmentation
+from neuraldecoding.dataaugmentation import SequenceScaler
+from neuraldecoding.feature_extraction import FeatureExtractor
+from neuraldecoding.utils.utils_general import resolve_path
+from neuraldecoding.utils.data_tools import load_one_nwb
+from neuraldecoding.utils.training_utils import OutputScaler
+from neuraldecoding.preprocessing.onset_detection import MovementOnsetDetector
 import sklearn.preprocessing
-from .. import utils
-from .. import stabilization
 
 import torch
 
@@ -255,7 +256,7 @@ class DataSplitBlock(DataFormattingBlock):
 		if 'trial_idx' not in interpipe:
 			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataDictBlock).")
 
-		data = utils.data_split_trial(data['neural'], 
+		data = neuraldecoding.utils.data_split_trial(data['neural'], 
 										data['behavior'], 
 										interpipe, 
 										split_ratio=self.split_ratio, 
@@ -310,9 +311,9 @@ class Dict2BehaviorDatasetBlock(DataFormattingBlock):
 		datasets = ()
 		for xkey, ykey, otherdatakeys in zip(self.xkey, self.ykey, self.otherdatakeys_list):
 			if otherdatakeys is None:
-				dataset = utils.datasets.BehaviorDataset(data, xkey, ykey)
+				dataset = neuraldecoding.utils.datasets.BehaviorDataset(data, xkey, ykey)
 			else:
-				dataset = utils.datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
+				dataset = neuraldecoding.utils.datasets.BehaviorDatasetCustom(data, interpipe, xkey, ykey, otherdatakeys)
 			datasets += (dataset,)
 		
 		return datasets, interpipe
@@ -410,7 +411,7 @@ class StabilizationBlock(DataProcessingBlock):
 			stabilization_config (dict): Configuration for the stabilization method.
 		"""
 		super().__init__()
-		stabilization_method = getattr(stabilization.latent_space_alignment, stabilization_config["type"])
+		stabilization_method = getattr(neuraldecoding.stabilization.latent_space_alignment, stabilization_config["type"])
 		self.stabilization = stabilization_method(stabilization_config["params"])
 		self.location = location
 
@@ -466,7 +467,7 @@ class AddHistoryBlock(DataProcessingBlock):
 			self.location = [self.location]
 
 		for loc in self.location:
-			data[loc] = utils.add_history_numpy(data[loc], self.seq_length)
+			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
 
@@ -496,7 +497,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 		"""
 		trial_filt_train = interpipe['trial_filt'][interpipe['train_mask']]
 		data['neural_train'], data['behavior_train'], trial_lengths_train = \
-			utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_filt_train, self.leadup)
+			neuraldecoding.utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_filt_train, self.leadup)
 		data['trial_lengths_train'] = trial_lengths_train
 		interpipe['leadup'] = self.leadup
 
@@ -505,7 +506,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 
 class NormalizationBlock(DataProcessingBlock):
 	def __init__(self, fit_location, apply_locations, normalizer_method, 
-			  normalizer_params, sklearn_type=None, save_path=None, retain_denorm=False):
+			  normalizer_params, sklearn_type=None, save_path=None, save_denorm_data=False, save_normalizer=False):
 		super().__init__()
 		self.fit_location = fit_location
 		if isinstance(apply_locations, str):
@@ -515,27 +516,31 @@ class NormalizationBlock(DataProcessingBlock):
 		self.normalizer_params = normalizer_params
 		self.sklearn_type = sklearn_type
 		self.save_path = save_path
-		self.retain_denorm = retain_denorm
+		self.save_denorm_data = save_denorm_data
+		self.save_normalizer = save_normalizer
 	def transform(self, data, interpipe):
 		if self.normalizer_method == 'sklearn':
 			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params)
-			if self.retain_denorm:
+			if self.save_denorm_data:
 				denorm_key = 'denorm_' + self.fit_location
 				interpipe[denorm_key] = data[self.fit_location]
+				interpipe['save_keys'].append(denorm_key)
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
 			for loc in self.apply_location:
-				if self.retain_denorm:
+				if self.save_denorm_data:
 					denorm_key = 'denorm_' + loc
 					interpipe[denorm_key] = data[loc]
+					interpipe['save_keys'].append(denorm_key)
 				data[loc] = normalizer.transform(data[loc])
 		elif self.normalizer_method == 'sequence_scaler':	
 			normalizer = SequenceScaler()
 			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location], **self.normalizer_params)
-			if self.retain_denorm:
+			if self.save_denorm_data:
 				denorm_key = 'denorm_' + self.fit_location
 				interpipe[denorm_key] = data[self.fit_location].copy()
+				interpipe['save_keys'].append(denorm_key)
 			for loc in self.apply_location:
-				if self.retain_denorm:
+				if self.save_denorm_data:
 					denorm_key = 'denorm_' + loc
 					interpipe[denorm_key] = data[loc]
 				data[loc] = normalizer.transform(data[loc])
@@ -544,8 +549,10 @@ class NormalizationBlock(DataProcessingBlock):
 		if self.save_path is not None:
 			with open(self.save_path, 'wb') as f:
 				pickle.dump(normalizer, f)
-		normalizer_key = 'normalizer_' + self.fit_location
-		interpipe[normalizer_key] = normalizer
+		if self.save_normalizer:
+			normalizer_key = 'normalizer_' + self.fit_location
+			interpipe[normalizer_key] = normalizer
+			interpipe['save_keys'].append(normalizer_key)
 		return data, interpipe
 
 class LoadNormalizationBlock(DataProcessingBlock):
@@ -636,7 +643,7 @@ class LabelModificationBlock(DataProcessingBlock):
 	A block to add label modifications to training data.
 	"""
 
-	def __init__(self, nicknames, param_dict, retain_unmodified=False):
+	def __init__(self, nicknames, param_dict, save_unmodified=False, save_name=None):
 		"""
 		Initializes the LabelModificationBlock. Below are modification options and the required parameters in param_dict.
 		See the apply_modifications function in utils/label_mods.py function and hover over each individual modification 
@@ -653,9 +660,12 @@ class LabelModificationBlock(DataProcessingBlock):
 			leadup (int): The length of the history to be added before the first bin of each trial. Default is 10.
 		"""
 		self.param_dict = param_dict
-		self.nicknames = nicknames
-		self.retain_unmodified = retain_unmodified
-		self.unmodified_data = None
+		if isinstance(nicknames, str):
+			self.nicknames = [nicknames]
+		else:
+			self.nicknames = nicknames
+		self.save_unmodified = save_unmodified
+		self.save_name = save_name
 	
 	def transform(self, data, interpipe):
 		"""
@@ -666,17 +676,43 @@ class LabelModificationBlock(DataProcessingBlock):
 		Returns:
 			data (dict): The data dictionary with labels modified at the specified locations
 			interpipe (dict): The interpipe dictionary remains unchanged
-		"""
-		if isinstance(self.nicknames, str):
-			self.nicknames = [self.nicknames]
-		
-		if self.retain_unmodified:
-			self.unmodified_data = data['behavior_train'].copy()
+		"""		
+		if self.save_unmodified:
+			if self.save_name is None:
+				curmod_num = 0
+				while True:
+					curmod_name = f"unmodified_{curmod_num}"
+					if curmod_name not in interpipe['save_keys']:
+						break
+					curmod_num += 1
+				self.save_name = curmod_name
+			interpipe['save_keys'].append(self.save_name)
+			interpipe[self.save_name] = data['behavior_train']
 
-		data['behavior_train'] = utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)
+		data['behavior_train'] = neuraldecoding.utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)
 		
 		return data, interpipe
+
+class SaveDataBlock(DataProcessingBlock):
+	def __init__(self, locs, keys):
+		super().__init__()
+		if isinstance(locs, str):
+			locs = [locs]
+		if isinstance(keys, str):
+			keys = [keys]
+		if len(locs) != len(keys):
+			raise ValueError("locs and keys must be the same length.")
+		self.locs = locs
+		self.keys = keys
 	
+	def transform(self, data, interpipe):
+		for loc, key in zip(self.locs, self.keys):
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			interpipe[key] = data[loc]
+			interpipe['save_keys'].append(key)
+			print(f"Saved data at location '{loc}' with key '{key}'.")
+		return data, interpipe
 
 class RegressionToClassificationBlock(DataProcessingBlock):
 	"""

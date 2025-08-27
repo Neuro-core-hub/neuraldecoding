@@ -6,13 +6,13 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import DataLoader, TensorDataset
-from ..utils import data_split_trial, load_one_nwb, eval_metrics
-from ..model.Model import Model
-from ..trainer.Trainer import Trainer
-from ..model import linear_models as linear_models
-from ..model.linear_models import LinearRegression, RidgeRegression, KalmanFilter
-from ..dataset import Dataset
-from ..preprocessing import Preprocessing
+from neuraldecoding.utils import data_split_trial, load_one_nwb, eval_metrics
+from neuraldecoding.model.Model import Model
+from neuraldecoding.trainer.Trainer import Trainer
+from neuraldecoding.model import linear_models as linear_models
+from neuraldecoding.model.linear_models import LinearRegression, RidgeRegression, KalmanFilter
+from neuraldecoding.dataset import Dataset
+from neuraldecoding.preprocessing import Preprocessing
 import os
 import pickle
 

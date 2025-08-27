@@ -1,6 +1,6 @@
 import torch
-from . import soft_dtw
-from . import path_soft_dtw 
+from neuraldecoding.utils.loss_functions import soft_dtw
+from neuraldecoding.utils.loss_functions import path_soft_dtw 
 
 class DILATELoss:
     def __init__(self, alpha=0.5, gamma=0.001, device='cuda', individuate_dofs=False, only_final_loss=True):

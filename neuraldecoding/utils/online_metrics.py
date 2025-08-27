@@ -1,6 +1,6 @@
 import numpy as np
 from pynwb import NWBFile
-from .utils_general import resolve_path
+from neuraldecoding.utils.utils_general import resolve_path
 from typing import Union, Optional
 
 def success_rate(nwb_file: NWBFile, success_field: str = 'success', exclude_trials: Optional[Union[list, np.ndarray]] = None) -> float:

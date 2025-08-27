@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 import numpy as np
 import os
 
