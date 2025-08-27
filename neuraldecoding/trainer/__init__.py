@@ -1,3 +1,3 @@
-from .LinearTrainer import LinearTrainer
-from .NeuralNetworkTrainer import NNTrainer
-from .Trainer import Trainer
+from neuraldecoding.trainer.LinearTrainer import LinearTrainer
+from neuraldecoding.trainer.NeuralNetworkTrainer import NNTrainer
+from neuraldecoding.trainer.Trainer import Trainer

@@ -1,3 +1,3 @@
-from .filter import GenericFilter
+from neuraldecoding.filter import GenericFilter
 
 __all__ = ['GenericFilter'] 

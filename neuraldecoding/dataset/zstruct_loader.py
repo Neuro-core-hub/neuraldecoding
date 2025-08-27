@@ -23,7 +23,7 @@ import heapq
 from omegaconf import OmegaConf
 
 # from ..utils import *
-from ..utils.utils_general import get_creation_path_time, int_to_string, is_collection
+from neuraldecoding.utils.utils_general import get_creation_path_time, int_to_string, is_collection
 
 # Registry of known types
 SERIES_CLASSES = {
