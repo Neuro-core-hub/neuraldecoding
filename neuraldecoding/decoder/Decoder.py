@@ -56,7 +56,7 @@ class Decoder(ABC):
         # Load model from path
         self.load_model()
 
-    def load_model(self, fpath : str = None) -> None:
+    def load_model(self, fpath : str = None, running_online : bool = False) -> None:
         """
         Load decoder's model parameters from a specified location
 
@@ -64,7 +64,7 @@ class Decoder(ABC):
             fpath: Override path to the parameters
         """
         self.fpath = fpath if fpath is not None else self.fpath
-        self.model.load_model(self.fpath)
+        self.model.load_model(fpath=self.fpath, running_online=running_online)
 
     def get_decoder(self) -> Self:
         """

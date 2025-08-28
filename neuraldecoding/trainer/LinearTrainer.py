@@ -41,6 +41,12 @@ class LinearTrainer(Trainer):
         return model
     
     def train_model(self, plot_results = False):
+        if self.cfg.model.params.get("is_refit", False):
+            if self.cfg.model.params.get("prev_model_path", None) is None:
+                raise ValueError("model.params.prev_model_path is not set in config. Necessary for refit training.")
+            else:
+                # Load the model first
+                self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
         self.model.train_step((self.train_X, self.train_Y))
         # Validate model
         self.validate_model(plot_results)

@@ -20,6 +20,8 @@ class KalmanFilter(LinearModel):
         self.start_y = model_params.get("start_y", None)
         self.last_yhat = None
         self.zero_position_uncertainty = model_params.get("zero_position_uncertainty", True)
+        self.is_refit = model_params.get("is_refit", False)
+        self.running_online = False
 
     def __call__(self, data):
         """
@@ -50,12 +52,22 @@ class KalmanFilter(LinearModel):
         self.input_size = x.shape[1]
         self.output_size = y.shape[1]
         self.start_y = self.start_y if self.start_y is not None else np.array([0] * self.output_size)
-
-        if self.A is not None:
-            raise ValueError("Tried to train a model that's already trained ")
+        num_samples = y.shape[0]
         
         if self.append_ones_y:
             y = np.concatenate((y, np.ones([y.shape[0], 1], dtype=y.dtype)), axis=1)
+        
+        # Compute the neural observation matrix C via least squares:
+        # C = (x.T @ y) @ inv(y.T @ y)
+        self.C = (x.T @ y) @ np.linalg.inv(y.T @ y)
+
+        # Compute observation noise covariance Q.
+        Q_resid = x - y @ self.C.T
+        self.Q = (Q_resid.T @ Q_resid) / num_samples
+        
+        # If doing refit, skip all the other steps
+        if self.is_refit:
+            return
         
         # Build the state transition matrix A.
         self.A = np.zeros((self.output_size, self.output_size), dtype=y.dtype)
@@ -83,7 +95,6 @@ class KalmanFilter(LinearModel):
         self.A[vel_idx[0] : vel_idx[-1] + 1, vel_idx[0] : vel_idx[-1] + 1] = vel_transition
         
         # Compute trajectory noise covariance W.
-        num_samples = y.shape[0]
         y_tm1 = y[:-1, :].T  # shape: (output_size, num_samples - 1)
         y_t = y[1:, :].T  # shape: (output_size, num_samples - 1)
         resid = y_t - self.A @ y_tm1
@@ -97,13 +108,6 @@ class KalmanFilter(LinearModel):
         self.W[pos_and_bias_idx, :] = 0
         self.W[:, pos_and_bias_idx] = 0
 
-        # Compute the neural observation matrix C via least squares:
-        # C = (x.T @ y) @ inv(y.T @ y)
-        self.C = (x.T @ y) @ np.linalg.inv(y.T @ y)
-
-        # Compute observation noise covariance Q.
-        Q_resid = x - y @ self.C.T
-        self.Q = (Q_resid.T @ Q_resid) / num_samples
         
         self.reinitialize()
 
@@ -168,9 +172,12 @@ class KalmanFilter(LinearModel):
         for t in range(x.shape[0]):
             yt = self.last_yhat @ self.A.T                                # predict new state
             self.Pt = self.A @ self.Pt @ self.A.T + self.W                        # compute error covariance
-            if self.zero_position_uncertainty:
+            if self.zero_position_uncertainty and self.running_online:
+                # Only appropriate when running online
                 # Assuming the first half of the outputs are position and the second half are velocity
                 self.Pt[:self.output_size // 2, :self.output_size // 2] = 0
+                self.Pt[:self.output_size // 2,:] = 0
+                self.Pt[:,:self.output_size // 2] = 0
             K = np.linalg.lstsq((self.C @ self.Pt @ self.C.T + self.Q).T,
                                 (self.Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
             all_yhat[t, :] = yt + K @ (x[t, :] - self.C @ yt)	        # update state estimate
@@ -228,7 +235,7 @@ class KalmanFilter(LinearModel):
         with open(fpath, "wb") as file:
             pickle.dump(model_dict, file)
 
-    def load_model(self, fpath):
+    def load_model(self, fpath, running_online=False):
         """
         Load model parameters from a specified location
 
@@ -249,6 +256,7 @@ class KalmanFilter(LinearModel):
         self.input_size = model_dict['input_size']
         self.output_size = model_dict['output_size']
         self.start_y = model_dict['start_y']
+        self.running_online = running_online
         self.reinitialize()
 
     def reinitialize(self):

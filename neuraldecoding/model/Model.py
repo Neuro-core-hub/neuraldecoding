@@ -22,7 +22,7 @@ class Model(ABC):
         pass
     
     @abstractmethod
-    def load_model(self, filepath: str) -> None:
+    def load_model(self, filepath: str, running_online: bool = False) -> None:
         pass
 
 
@@ -36,9 +36,6 @@ class DummyModel(Model):
     
     def save_model(self, filepath: str) -> None:
         print("this model is saving itself for marriage")
-
-    def load_model(self, filepath: str) -> None:
-        print("Sarcastic comment loading.. :P XD ROFLcopter!!!")
     
     def __call__(self, data: Any) -> Any:
         self.forward(data)

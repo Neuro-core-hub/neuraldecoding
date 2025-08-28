@@ -677,9 +677,37 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		for loc in self.location_ts:
 			if loc not in interpipe:
 				raise ValueError(f"Location '{loc}' not found in interpipe dictionary.")
-		features_list = self.feature_extractor.extract_binned_features(data=[data[loc] for loc in self.location_data], timestamps_ms=[interpipe[loc] for loc in self.location_ts], return_array=True)
-		for i, loc in enumerate(self.location_data):
-			data[loc] = features_list[i]
+		
+		# Extract binned features with full metadata (return_array=False)
+		bin_features = self.feature_extractor.extract_binned_features(
+			data=[data[loc] for loc in self.location_data], 
+			timestamps_ms=[interpipe[loc] for loc in self.location_ts], 
+			return_array=False
+		)
+		
+		# Extract feature arrays and update data
+		if len(self.location_data) > 1:
+			# Multiple data streams - features is a list of arrays per bin
+			features_per_stream = [[] for _ in self.location_data]
+			for bin_feat in bin_features:
+				for i, stream_features in enumerate(bin_feat['features']):
+					features_per_stream[i].append(stream_features)
+			
+			# Convert to numpy arrays and update data
+			for i, loc in enumerate(self.location_data):
+				data[loc] = np.array(features_per_stream[i])
+		else:
+			# Single data stream - features is a single array per bin
+			feature_arrays = [bin_feat['features'] for bin_feat in bin_features]
+			data[self.location_data[0]] = np.array(feature_arrays)
+		
+		# Extract bin center timestamps and update interpipe
+		bin_timestamps = np.array([bin_feat['bin_center_ms'] for bin_feat in bin_features])
+		
+		# Update timestamps for all location_ts entries with the new binned timestamps
+		for ts_loc in self.location_ts:
+			interpipe[ts_loc] = bin_timestamps
+		
 		return data, interpipe
 	
 
@@ -1287,3 +1315,97 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		plt.show(block=True)
 
 
+class ReFITTransformationBlock(DataProcessingBlock):
+
+	def __init__(self, location_data: str,location_data_ts:str, location_targets: str, location_out: str, location_trial_start_times: str, location_trial_end_times: str, target_radius: float = 0.075):
+		self.location_data = location_data
+		self.location_data_ts = location_data_ts
+		self.location_targets = location_targets
+		self.location_out = location_out
+		self.location_trial_start_times = location_trial_start_times
+		self.location_trial_end_times = location_trial_end_times
+		self.target_radius = target_radius
+
+	def transform(self, data, interpipe):
+		targets = interpipe[self.location_targets]
+		trial_start_times = interpipe[self.location_trial_start_times]
+		trial_end_times = interpipe[self.location_trial_end_times]
+		
+		kinematics = data[self.location_data]
+		kinematics_ts = interpipe[self.location_data_ts]
+		# Assume kinematics has 2*n columns, first n are position, last n are velocity
+		Ndofs = kinematics.shape[1] // 2
+		pos = kinematics[:, :Ndofs]
+		vel = kinematics[:, Ndofs:]
+		# Apply ReFIT transformation
+		transformed_vel = self._apply_refit_transformation(vel, pos, targets, kinematics_ts, trial_start_times, trial_end_times)
+		# Combine transformed pos and vel
+		transformed_kinematics = np.concatenate([pos, transformed_vel], axis=1)
+		data[self.location_out] = transformed_kinematics
+		return data, interpipe
+
+	def _apply_refit_transformation(self, vel: np.ndarray, pos: np.ndarray, targets: np.ndarray, kinematics_ts: np.ndarray, trial_start_times: np.ndarray, trial_end_times: np.ndarray):
+		"""
+		Apply ReFIT transformation to velocity data.
+		ReFIT rotates velocity vectors to point towards the target while preserving magnitude.
+		Sets velocity to zero when position is within target_radius of the target.
+		
+		Args:
+			vel: Velocity data with shape (time_points, n_dofs)
+			pos: Position data with shape (time_points, n_dofs)
+			targets: Target positions with shape (n_trials, n_dofs)
+			kinematics_ts: Timestamps for kinematic data
+			trial_start_times: Start times for each trial
+			trial_end_times: End times for each trial
+		
+		Returns:
+			Transformed velocity data with same shape as input
+		"""
+		# Get dimensions
+		n_timepoints, n_dofs = vel.shape
+		n_trials = len(targets)
+		
+		# Create time-aligned target vector
+		target_vector = np.zeros((n_timepoints, n_dofs))
+		
+		# For each trial, find the time indices that belong to it and assign the target
+		for trial_idx in range(n_trials):
+			# Find timestamps that fall within this trial
+			trial_mask = (kinematics_ts >= trial_start_times[trial_idx]) & (kinematics_ts <= trial_end_times[trial_idx])
+			
+			# Assign the target for this trial to all timepoints within the trial
+			target_vector[trial_mask, :] = targets[trial_idx, :]
+		
+		# Apply ReFIT transformation: rotate velocity to point towards target
+		transformed_vel = vel.copy()
+		
+		for t in range(n_timepoints):
+			current_vel = vel[t, :]
+			current_pos = pos[t, :]
+			current_target = target_vector[t, :]
+			
+			# Check if position is within target radius
+			distance_to_target = np.linalg.norm(current_pos - current_target)
+			if distance_to_target <= self.target_radius:
+				# Set velocity to zero when within target radius
+				transformed_vel[t, :] = 0.0
+				continue
+			
+			# Skip if velocity is zero
+			if np.allclose(current_vel, 0):
+				continue
+			
+			# Calculate velocity magnitude (preserve this)
+			vel_magnitude = np.linalg.norm(current_vel)
+			
+			# Calculate target direction (unit vector towards target)
+			target_direction = (current_target - current_pos)
+			target_magnitude = np.linalg.norm(target_direction)
+			if target_magnitude > 1e-8:
+				target_direction = target_direction / target_magnitude
+				
+				# Rotate velocity: preserve magnitude but point towards target
+				transformed_vel[t, :] = vel_magnitude * target_direction
+		
+		return transformed_vel
+		
