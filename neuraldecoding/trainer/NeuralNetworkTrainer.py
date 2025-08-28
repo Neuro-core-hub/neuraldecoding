@@ -15,8 +15,10 @@ import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
 from neuraldecoding.model.neural_network_models.LSTM import LSTM
 import neuraldecoding.utils.eval_metrics
+from neuraldecoding.utils.training_utils import generate_output_scaler, OutputScaler
 from neuraldecoding.utils.eval_metrics import *
 import os
+import collections
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
@@ -29,6 +31,7 @@ class NNTrainer(Trainer):
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.num_epochs
         self.batch_size = config.training.batch_size
+        self.full_batch_valid = config.training.get('full_batch_valid', False)
         if isinstance(self.batch_size, collections.abc.Iterable):
             self.train_batch_size = self.batch_size[0]
             self.valid_batch_size = self.batch_size[1]
@@ -58,7 +61,10 @@ class NNTrainer(Trainer):
         valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
                                     self.data_dict['Y_val'].detach().clone().to(torch.float32))
         train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
+        if self.full_batch_valid:
+            valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
+        else:
+            valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
         return train_loader, valid_loader
 
     def create_optimizer(self, optimizer_config: DictConfig, model_params) -> Optimizer:
@@ -68,6 +74,8 @@ class NNTrainer(Trainer):
 
     def create_scheduler(self, scheduler_config: DictConfig, optimizer: Optimizer) -> _LRScheduler:
         """Creates and returns a learning rate scheduler based on the configuration."""
+        if scheduler_config is None or not scheduler_config or len(scheduler_config) == 0:
+            return None
         scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         return scheduler_class(optimizer, **scheduler_config.params)
 
@@ -124,14 +132,14 @@ class NNTrainer(Trainer):
             # Calculate and populate metrics
             for metric in self.metrics:
                 if metric == "loss":
-                    self.logger[metric][0].append(train_loss)
-                    self.logger[metric][1].append(val_loss)
+                    self.logger[metric]['train'].append(train_loss)
+                    self.logger[metric]['valid'].append(val_loss)
                 else:
                     metric_param = self.metric_params.get(metric, None)
                     metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
-                    self.logger[metric][0].append(metric_class(train_all_predictions, train_all_targets, metric_param))
-                    self.logger[metric][1].append(metric_class(val_all_predictions, val_all_targets, metric_param))
-           
+                    self.logger[metric]['train'].append(metric_class(train_all_predictions, train_all_targets, metric_param))
+                    self.logger[metric]['valid'].append(metric_class(val_all_predictions, val_all_targets, metric_param))
+
             # Logging
             self.save_print_log(epoch, train_loss, val_loss)
 
@@ -196,8 +204,8 @@ class IterationNNTrainer(NNTrainer):
 
     Based on Joey's training code for LINK dataset BCI-decoding section.
     '''
-    def __init__(self, preprocessor, config):
-        super().__init__(preprocessor, config)
+    def __init__(self, preprocessor, config, dataset = None):
+        super().__init__(preprocessor, config, dataset = None)
     
     def train_model(self, train_loader=None, valid_loader=None):
         # Override loaders if provided
@@ -243,3 +251,95 @@ class IterationNNTrainer(NNTrainer):
                         self.scheduler.step()
                 iteration += 1
         return self.model, self.logger
+
+class TCFNNTrainer(NNTrainer):
+    '''
+    Trainer for the tcFNN model.
+    '''
+    def __init__(self, preprocessor, config, dataset = None):
+        super().__init__(preprocessor, config, dataset = dataset)
+    
+
+    def train_model(self, train_loader = None, valid_loader = None):
+        # Override loaders if provided
+        if(train_loader is not None):
+            self.train_loader = train_loader
+        if(valid_loader is not None):
+            self.valid_loader = valid_loader
+
+        for epoch in range(self.num_epochs):
+            # Train
+            self.model.train()
+            running_loss = 0.0
+            train_all_predictions = []
+            train_all_targets = []
+
+            for x,y in self.train_loader:
+                self.optimizer.zero_grad()
+
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+
+                running_loss += loss.item()
+                train_all_predictions.append(yhat.detach().cpu().numpy())
+                train_all_targets.append(y.detach().cpu().numpy())
+                if(self.clear_cache):
+                    del y, yhat
+
+            train_all_predictions = np.concatenate(train_all_predictions, axis=0)
+            train_all_targets = np.concatenate(train_all_targets, axis=0)
+            train_loss = running_loss / len(self.train_loader)
+
+            # Validate
+            val_loss, val_all_predictions, val_all_targets = self.validate_model()
+
+            # Scheduler step
+            if self.scheduler:
+                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                    self.scheduler.step(val_loss)
+                else:
+                    self.scheduler.step()
+
+            # Calculate and populate metrics
+            for metric in self.metrics:
+                if metric == "loss":
+                    self.logger[metric]['train'].append(train_loss)
+                    self.logger[metric]['valid'].append(val_loss)
+                else:
+                    metric_param = self.metric_params.get(metric, None)
+                    metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
+                    self.logger[metric]['train'].append(metric_class(train_all_predictions, train_all_targets, metric_param))
+                    self.logger[metric]['valid'].append(metric_class(val_all_predictions, val_all_targets, metric_param))
+            
+            # Logging
+            self.save_print_log(epoch, train_loss, val_loss)
+
+        self.model.scaler.fit(self.model, self.train_loader, device=self.device, dtype=torch.float32, num_outputs=self.model.num_states, verbose=False)
+        return self.model, self.logger
+
+    def validate_model(self):
+        # Validate
+        self.model.eval()
+        running_val_loss = 0.0
+        val_all_predictions = []
+        val_all_targets = []
+        
+        self.model.scaler.fit(self.model, self.train_loader, device=self.device, dtype=torch.float32, num_outputs=self.model.num_states, verbose=False)
+
+        with torch.no_grad():
+            for x_val, y_val in self.valid_loader:
+                x_val = x_val.to(self.device)
+                y_val = y_val.to(self.device)
+                yhat_val = self.model.scaler.unscale(self.model(x_val))
+                val_loss = self.loss_func(yhat_val, y_val)
+
+                running_val_loss += val_loss.item()
+                val_all_predictions.append(yhat_val.cpu().numpy())
+                val_all_targets.append(y_val.cpu().numpy())
+                if(self.clear_cache):
+                    del y_val, yhat_val
+
+        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+        val_all_targets = np.concatenate(val_all_targets, axis=0)
+        val_loss = running_val_loss / len(self.valid_loader)
+
+        return val_loss, val_all_predictions, val_all_targets

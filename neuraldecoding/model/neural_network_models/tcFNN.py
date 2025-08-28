@@ -2,12 +2,100 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
+from neuraldecoding.utils.training_utils import OutputScaler
 import os
 
 def flatten(x, start_dim=1, end_dim=-1):
     return x.flatten(start_dim=start_dim, end_dim=end_dim)
 
 class TCN(nn.Module, NeuralNetworkModel):
+    '''
+    Willsey's Convolutional Net, with more parameters for setting number of layers (eg. [256, 200, 100, 50, 20])
+    '''
+    def __init__(self, params):
+        super().__init__()
+        self.model_params = params
+        self.input_size = params['input_size']
+        self.conv_size = params['conv_size']
+        self.conv_size_out = params['conv_size_out']
+        self.layer_size_list = params['layer_size_list']
+        self.num_states = params['num_states']
+        self.dropout_p = params['dropout_p']
+        self.denormalize = params['denormalize']
+        self.scaler = OutputScaler(None, None)
+
+        # convolutional input layer
+        self.bncn = nn.BatchNorm1d(self.input_size)
+        self.cn = nn.Conv1d(self.conv_size, self.conv_size_out, 1, bias=True)
+
+        # middle layer(s)
+        middle_size_list = [self.input_size*self.conv_size_out] + self.layer_size_list
+        self.hiddenlayers = nn.ModuleList([nn.Sequential(nn.BatchNorm1d(prevsize),
+                                                         nn.Linear(prevsize, nextsize),
+                                                         nn.Dropout(p=self.dropout_p))
+                                           for prevsize, nextsize in zip(middle_size_list[:-1], middle_size_list[1:])])
+
+        # linear output layer
+        self.bnout = nn.BatchNorm1d(self.layer_size_list[-1])
+        self.fcout = nn.Linear(self.layer_size_list[-1], self.num_states)
+        self.bnfinal = nn.BatchNorm1d(self.num_states)
+        # init weights
+        nn.init.kaiming_normal_(self.cn.weight, nonlinearity='relu')
+        nn.init.kaiming_normal_(self.fcout.weight, nonlinearity='relu')
+        nn.init.zeros_(self.cn.bias)
+        nn.init.zeros_(self.fcout.bias)
+        for layer in self.hiddenlayers:
+            # "layer" is a ModuleList, defined above
+            nn.init.kaiming_normal_(layer[1].weight, nonlinearity='relu')
+            nn.init.zeros_(layer[1].bias)
+
+    def forward(self, x, BadChannels=[]):
+        x[:, BadChannels, :] = 0
+
+        # conv layer
+        x = self.bncn(x)
+        x = self.cn(x.permute(0, 2, 1))
+        x = flatten(x)
+
+        # middle layers
+        for layer in self.hiddenlayers:
+            x = F.relu( layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
+
+        # output 
+        if self.denormalize:
+            scores = (self.bnfinal(self.fcout(x)) - self.bnfinal.bias) / self.bnfinal.weight
+        else:
+            scores = self.bnout(x)
+            scores = self.fcout(scores)
+        return scores
+    
+    def save_model(self, filepath):
+        checkpoint_dict = {
+            "model_state_dict": self.state_dict(),
+            "model_scaler": self.scaler,
+            "model_params": self.model_params,
+            "model_type": "TCN"
+        }
+        folder = os.path.dirname(filepath)
+        if folder and not os.path.exists(folder):
+            os.makedirs(folder)
+        torch.save(checkpoint_dict, filepath)
+    
+    def load_model(self, filepath):
+        checkpoint = torch.load(filepath)
+
+        if checkpoint["model_type"] != "TCN":
+            raise Exception("Tried to load model that isn't a TCN Instance")
+        
+        if self.model_params != checkpoint["model_params"]:
+            raise ValueError("Model parameters do not match the checkpoint parameters")
+
+        self.load_state_dict(checkpoint["model_state_dict"])
+        self.scaler = checkpoint["model_scaler"]
+        self.model_params = checkpoint["model_params"]
+
+class TCN_old(nn.Module, NeuralNetworkModel):
+    # Old version
     def __init__(self, params):
         '''
         Initializes a TCFNN
@@ -15,8 +103,8 @@ class TCN(nn.Module, NeuralNetworkModel):
             model_params: dict containing the following model params:
                 input_size:         number of input features
                 hidden_size:        size of hidden state in model
-                ConvSize:         number of convolutional filters
-                ConvSizeOut:      number of output channels for convolutional layer
+                conv_size:         number of convolutional filters
+                conv_size_out:      number of output channels for convolutional layer
                 num_states:        number of output features
                 use_batch_norm:    whether to use batch normalization
                 use_dropout:        whether to use dropout
@@ -26,21 +114,21 @@ class TCN(nn.Module, NeuralNetworkModel):
         self.model_params = params
         self.input_size = params["input_size"]
         self.hidden_size = params["hidden_size"]
-        self.ConvSize = params["ConvSize"]
-        self.ConvSizeOut = params["ConvSizeOut"]
+        self.conv_size = params["conv_size"]
+        self.conv_size_out = params["conv_size_out"]
         self.num_states = params["num_states"]
         self.use_batchnorm = params.get("use_batch_norm", True)
         self.use_dropout = params.get("use_dropout", True)
         self.drop_prob = params.get("drop_prob", 0.5)
         # assign layer objects to class attributes
-        self.cn1 = nn.Conv1d(self.ConvSize, self.ConvSizeOut, 1, bias=True)
-        self.fc1 = nn.Linear(self.input_size * self.ConvSizeOut, self.hidden_size)
+        self.cn1 = nn.Conv1d(self.conv_size, self.conv_size_out, 1, bias=True)
+        self.fc1 = nn.Linear(self.input_size * self.conv_size_out, self.hidden_size)
         self.fc2 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc3 = nn.Linear(self.hidden_size, self.hidden_size)
         self.fc4 = nn.Linear(self.hidden_size, self.num_states)
         if self.use_batchnorm:
             self.bn0 = nn.BatchNorm1d(self.input_size)
-            self.bn1 = nn.BatchNorm1d(self.input_size * self.ConvSizeOut)
+            self.bn1 = nn.BatchNorm1d(self.input_size * self.conv_size_out)
             self.bn2 = nn.BatchNorm1d(self.hidden_size)
             self.bn3 = nn.BatchNorm1d(self.hidden_size)
             self.bn4 = nn.BatchNorm1d(self.hidden_size)
@@ -120,7 +208,7 @@ class TCN(nn.Module, NeuralNetworkModel):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
-            "model_type": "TCFNN"
+            "model_type": "TCFNN_old"
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -130,8 +218,8 @@ class TCN(nn.Module, NeuralNetworkModel):
     def load_model(self, filepath):
         checkpoint = torch.load(filepath)
 
-        if checkpoint["model_type"] != "TCFNN":
-            raise Exception("Tried to load model that isn't a TCFNN Instance")
+        if checkpoint["model_type"] != "TCFNN_old":
+            raise Exception("Tried to load model that isn't an old TCFNN Instance")
         
         if self.model_params != checkpoint["model_params"]:
             raise ValueError("Model parameters do not match the checkpoint parameters")

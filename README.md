@@ -14,6 +14,7 @@ The core way data gets used in this repo is through the `dataset` module. Datase
 Install environment: `conda env create -f environment.yaml`
 
 # Running Tests
+To run all tests, in root folder run:
 
 Run `python -m unittest discover -s tests -p "test*.py"`
 
