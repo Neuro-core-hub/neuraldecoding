@@ -31,4 +31,4 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest 
+          python3 -m unittest discover -s tests -p "test*.py"
