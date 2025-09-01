@@ -82,7 +82,7 @@ class TCN(nn.Module, NeuralNetworkModel):
         torch.save(checkpoint_dict, filepath)
     
     def load_model(self, filepath):
-        checkpoint = torch.load(filepath)
+        checkpoint = torch.load(filepath, weights_only = False)
 
         if checkpoint["model_type"] != "TCN":
             raise Exception("Tried to load model that isn't a TCN Instance")
