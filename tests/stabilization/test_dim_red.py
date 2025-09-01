@@ -1,6 +1,6 @@
 from sklearn.decomposition import FactorAnalysis, PCA
 import numpy as np
-from ..stabilization.latent_space_alignment import dim_red
+from neuraldecoding.stabilization.latent_space_alignment import dim_red
 
 def test_factor_analysis():
     ## TODO: change ds to actual dataset
