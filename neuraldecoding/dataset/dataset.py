@@ -94,21 +94,29 @@ class Dataset:
         #         print(f"\t+ Loading run {run}")
         # check is nwb file exists at location
         dpars = self.dataset_parameters
-        nwb_exists = os.path.isfile(zstruct_loader.get_save_path(self.dataset_parameters))
-        if nwb_exists:
-            if dpars.overwrite:
-                print("NWB file exists but overwriting")
-                self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
-                self.save_data()
-            else:
-                print("NWB file already exists, loading")
-                self.io = NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters), mode="r")
-                self.dataset = self.io.read()
-                
-        else:
-            print("No existing NWB file, creating...")
-            self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
-            self.save_data()
+        dates_and_runs = dpars.get("dates_and_runs", None)
+        for date, runs in dates_and_runs.items():
+            for run in runs:
+                print(f"Loading date {date}, run {run}")
+                self.dataset_parameters.date = date
+                self.dataset_parameters.run = run
+                self._load_single_zstruct_run(dpars)
+
+                nwb_exists = os.path.isfile(zstruct_loader.get_save_path(self.dataset_parameters, date, run))
+                if nwb_exists:
+                    if dpars.overwrite:
+                        print("NWB file exists but overwriting")
+                        self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters, date, run, self.dataset)
+                        self.save_data()
+                    else:
+                        print("NWB file already exists, loading")
+                        self.io = NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters, date, run), mode="r")
+                        self.dataset = self.io.read()
+                        
+                else:
+                    print("No existing NWB file, creating...")
+                    self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters, date, run, self.dataset)
+                    self.save_data()
 
     def save_data(self):
         """
