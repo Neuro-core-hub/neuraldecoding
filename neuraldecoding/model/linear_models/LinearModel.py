@@ -14,6 +14,3 @@ class LinearModel(Model):
 
     def save_model(self, filepath: str) -> None:
         pass
-    
-    def load_model(self, filepath: str) -> None:
-        pass

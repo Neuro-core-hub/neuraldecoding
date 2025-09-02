@@ -88,7 +88,7 @@ class FeatureExtractor:
     
     def _validate_config(self):
         """Validate the configuration parameters."""
-        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel']
+        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length']
         
         # Flatten nested feature types for validation
         def flatten_feature_types(ft):
@@ -749,6 +749,11 @@ class FeatureExtractor:
             mean_pos = np.mean(data, axis=0)
             vel = np.diff(data, axis=0).mean(axis=0) if data.shape[0] > 1 else np.zeros(data.shape[1])
             return np.concatenate((mean_pos, vel))
+        elif feature_type == "line_length":
+            # Line length
+            if data.shape[0] <= 1:
+                return np.zeros(data.shape[1])
+            return np.sum(np.abs(np.diff(data, axis=0)), axis=0)
         else:
             raise ValueError(f"Unsupported feature type: {feature_type}")
     

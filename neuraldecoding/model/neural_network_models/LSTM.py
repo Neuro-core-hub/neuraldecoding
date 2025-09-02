@@ -186,6 +186,8 @@ class LSTM(nn.Module, NeuralNetworkModel):
             raise Exception("Tried to load model that isn't a LSTM Instance")
         
         self.load_state_dict(checkpoint["model_state_dict"])
+        
+        self.to(self.device)
 
         model_params = checkpoint["model_params"]
         self.hidden_size = model_params["hidden_size"]

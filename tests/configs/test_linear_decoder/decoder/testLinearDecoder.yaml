@@ -1,17 +1,6 @@
 model:
-  name: "LinearRegression" # Names defined in model module
-  parameters:
+  type: "LinearRegression" # Names defined in model module
+  params:
     fit_intercept: True # arbitrary parameters feeding into the model
-  input_shape: [2,1] # input shape in list
-  output_shape: [2,] # output shape in list
 
-stabilization:
-  name: "LatentSpaceAlignment"
-  parameters:
-    dim_red_method: "FactorAnalysis"
-    alignment_method: "ProcrustesAlignment"
-    ndims: 10
-  date_0: '2024-08-23'
-  date_k: '2024-11-11'
-
-fpath: "tests/decoder/models/linear_regression_model.pkl" # directory to saved model
+  fpath: "tests/decoder/models/linear_regression_model.pkl" # directory to saved model

@@ -8,8 +8,7 @@ scheduler_struct = {
 }
 
 decoder_struct = {
-        'model': DictConfig,
-        'fpath': str
+        'model': DictConfig
 }
 trainer_struct_nn = {
         'model': DictConfig,

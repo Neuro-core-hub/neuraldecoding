@@ -215,7 +215,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behaviour'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test']):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behaviour'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test'], shuffle = False):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -233,6 +233,7 @@ class DataSplitBlock(DataFormattingBlock):
 		self.location = location
 		self.interpipe_location = interpipe_location
 		self.data_keys = data_keys
+		self.shuffle = shuffle
 
 	def transform(self, data, interpipe):
 		"""
@@ -253,8 +254,9 @@ class DataSplitBlock(DataFormattingBlock):
 				- 'behavior_val': Validation behavior data
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		if 'trial_idx' not in interpipe:
-			raise ValueError("DataSplitBlock requires 'trial_idx' in interpipe from other wrappers (Dict2DataDictBlock).")
+		trial_idxs = interpipe.get(self.interpipe_location[0], None)
+		if trial_idxs is None:
+			print(f"Warning: DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock).")
 
 		data = neuraldecoding.utils.data_split_trial(data['neural'], 
 										data['behavior'], 
@@ -626,17 +628,126 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			trial_starts_ends=trial_starts_ends
 		)
 		for loc in self.location_ts:
-			del data[loc]
-		for i, loc in enumerate(self.location_data):
-			data[loc] = features_list[i]
+			if loc not in interpipe:
+				raise ValueError(f"Location '{loc}' not found in interpipe dictionary.")
+		
+		# Extract binned features with full metadata (return_array=False)
+		bin_features = self.feature_extractor.extract_binned_features(
+			data=[data[loc] for loc in self.location_data], 
+			timestamps_ms=[interpipe[loc] for loc in self.location_ts], 
+			return_array=False
+		)
+		
+		# Extract feature arrays and update data
+		if len(self.location_data) > 1:
+			# Multiple data streams - features is a list of arrays per bin
+			features_per_stream = [[] for _ in self.location_data]
+			for bin_feat in bin_features:
+				for i, stream_features in enumerate(bin_feat['features']):
+					features_per_stream[i].append(stream_features)
 			
-		interpipe['trial_filt'] = np.zeros(len(data[self.location_data[0]]), dtype=np.int32)
-		interpipe['targets_filt'] = np.zeros((len(data[self.location_data[0]]), self.target_filter.shape[0]), dtype=np.float32)
-		for i, start in enumerate(interpipe['trial_idx']):
-			end = interpipe['trial_idx'][i + 1] if i + 1 < len(interpipe['trial_idx']) else len(data[self.location_data[0]])
-			interpipe['trial_filt'][start:end] = i
-			interpipe['targets_filt'][start:end] = interpipe['targets'][i][self.target_filter]
+			# Convert to numpy arrays and update data
+			for i, loc in enumerate(self.location_data):
+				data[loc] = np.array(features_per_stream[i])
+		else:
+			# Single data stream - features is a single array per bin
+			feature_arrays = [bin_feat['features'] for bin_feat in bin_features]
+			data[self.location_data[0]] = np.array(feature_arrays)
+		
+		# Extract bin center timestamps and update interpipe
+		bin_timestamps = np.array([bin_feat['bin_center_ms'] for bin_feat in bin_features])
+		
+		# Update timestamps for all location_ts entries with the new binned timestamps
+		for ts_loc in self.location_ts:
+			interpipe[ts_loc] = bin_timestamps
+		
 		return data, interpipe
+	
+
+class RawToXPC(DataProcessingBlock):
+	"""
+	Downsample a raw signal by rectifying and summing over contiguous windows of n samples,
+	where n = sampling_rate_hz / 1000. Also updates timestamps to the average of each window.
+
+	- Input data is expected to be shaped as (time, channels) or (time,).
+	- Timestamps in interpipe at `location_ts` must have length equal to the time dimension.
+	- Output replaces the data at `location_data` (or `output_location` if provided) and
+	  updates the timestamps at `location_ts` (or `output_ts_key`).
+	"""
+	def __init__(self, location_data: str, location_ts: str, sampling_rate_hz: float = 2000.0, output_location: str = None, output_ts_key: str = None):
+		super().__init__()
+		self.location_data = location_data
+		self.location_ts = location_ts
+		self.sampling_rate_hz = float(sampling_rate_hz)
+		self.output_location = output_location if output_location is not None else location_data
+		self.output_ts_key = output_ts_key if output_ts_key is not None else location_ts
+
+	def transform(self, data, interpipe):
+		# Validate inputs
+		if self.location_data not in data:
+			raise ValueError(f"RawToXPC requires '{self.location_data}' in data dictionary.")
+		if self.location_ts not in interpipe:
+			raise ValueError(f"RawToXPC requires '{self.location_ts}' in interpipe dictionary.")
+
+		samples = data[self.location_data]
+		times = interpipe[self.location_ts]
+
+		# Convert to numpy arrays
+		if isinstance(samples, torch.Tensor):
+			samples_np = samples.detach().cpu().numpy()
+		else:
+			samples_np = np.asarray(samples)
+		times_np = np.asarray(times).reshape(-1)
+
+		if samples_np.ndim == 1:
+			samples_np = samples_np.reshape(-1, 1)
+
+		if samples_np.shape[0] != times_np.shape[0]:
+			raise ValueError(
+				f"Length mismatch between data time dimension ({samples_np.shape[0]}) and timestamps ({times_np.shape[0]})."
+			)
+
+		# Determine window size n = fs / 1000
+		n_float = self.sampling_rate_hz / 1000.0
+		n = int(round(n_float))
+		if not np.isclose(n_float, n):
+			warnings.warn(
+				f"sampling_rate_hz/1000 is not an integer ({n_float:.6f}); rounding to nearest integer n={n}.",
+				UserWarning,
+			)
+		if n <= 0:
+			raise ValueError("Computed window size n must be positive.")
+
+		T = samples_np.shape[0]
+		M = T // n
+		if M == 0:
+			raise ValueError(
+				f"Input has only {T} samples which is insufficient for a single window of size n={n}."
+			)
+		trim_T = M * n
+		if trim_T != T:
+			warnings.warn(
+				f"Discarding last {T - trim_T} samples that do not fit into {n}-sample windows.",
+				UserWarning,
+			)
+
+		# Trim to full windows and reshape
+		s_trim = samples_np[:trim_T, :]
+		t_trim = times_np[:trim_T]
+
+		s_reshaped = s_trim.reshape(M, n, samples_np.shape[1])
+		t_reshaped = t_trim.reshape(M, n)
+
+		# Rectify and sum per window; average timestamps per window
+		downsampled = np.abs(s_reshaped).sum(axis=1)  # (M, channels)
+		t_downsampled = t_reshaped.mean(axis=1)       # (M,)
+
+		# Write back
+		data[self.output_location] = downsampled
+		interpipe[self.output_ts_key] = t_downsampled
+
+		return data, interpipe
+
 	
 class LabelModificationBlock(DataProcessingBlock):
 	"""
@@ -731,8 +842,8 @@ class RegressionToClassificationBlock(DataProcessingBlock):
 									 String examples: "x < 0.2", "(x >= 0.2) & (x < 0.5)", "x > 0.8"
 									 Lambda examples: lambda x: x < 0.2, lambda x: (x >= 0.2) & (x < 0.5)
 									 Example: [
-									 	["x < 0.2", "x < 0.2"],  # class 0
-									 	["(x >= 0.2) & (x < 0.5)", "x < 0.2"],  # class 1
+										["x < 0.2", "x < 0.2"],  # class 0
+										["(x >= 0.2) & (x < 0.5)", "x < 0.2"],  # class 1
 									 ]
 									 Note: Samples not matching any conditions get assigned to an additional "other" class.
 			output_key (str): Key for the output classification data. If None, uses same location (overwrites input).
@@ -919,7 +1030,7 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		"""
 		# Get behavior data and timestamps
 		kinematics = data[self.location_behavior]
-		behavior_ts = data.get(f'{self.location_behavior}_ts', data.get('behavior_ts'))
+		behavior_ts = interpipe.get(f'{self.location_behavior}_ts', interpipe.get('behavior_ts'))
 		
 		if behavior_ts is None:
 			raise ValueError(f"Could not find timestamps for behavior data. Expected '{self.location_behavior}_ts' or 'behavior_ts' in data.")
@@ -932,7 +1043,7 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		trial_end_times = interpipe['trial_end_times']
 		
 		# Get targets and other parameters from template config
-		targets = data['targets']
+		targets = interpipe['targets']
 		template_type = self.template_config.get('template_type', 'sigmoid')
 		
 		# Convert behavior data to numpy array if not already
@@ -1231,3 +1342,99 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		plt.tight_layout()
 		plt.show(block=True)
+
+
+class ReFITTransformationBlock(DataProcessingBlock):
+
+	def __init__(self, location_data: str,location_data_ts:str, location_targets: str, location_out: str, location_trial_start_times: str, location_trial_end_times: str, target_radius: float = 0.075):
+		self.location_data = location_data
+		self.location_data_ts = location_data_ts
+		self.location_targets = location_targets
+		self.location_out = location_out
+		self.location_trial_start_times = location_trial_start_times
+		self.location_trial_end_times = location_trial_end_times
+		self.target_radius = target_radius
+
+	def transform(self, data, interpipe):
+		targets = interpipe[self.location_targets]
+		trial_start_times = interpipe[self.location_trial_start_times]
+		trial_end_times = interpipe[self.location_trial_end_times]
+		
+		kinematics = data[self.location_data]
+		kinematics_ts = interpipe[self.location_data_ts]
+		# Assume kinematics has 2*n columns, first n are position, last n are velocity
+		Ndofs = kinematics.shape[1] // 2
+		pos = kinematics[:, :Ndofs]
+		vel = kinematics[:, Ndofs:]
+		# Apply ReFIT transformation
+		transformed_vel = self._apply_refit_transformation(vel, pos, targets, kinematics_ts, trial_start_times, trial_end_times)
+		# Combine transformed pos and vel
+		transformed_kinematics = np.concatenate([pos, transformed_vel], axis=1)
+		data[self.location_out] = transformed_kinematics
+		return data, interpipe
+
+	def _apply_refit_transformation(self, vel: np.ndarray, pos: np.ndarray, targets: np.ndarray, kinematics_ts: np.ndarray, trial_start_times: np.ndarray, trial_end_times: np.ndarray):
+		"""
+		Apply ReFIT transformation to velocity data.
+		ReFIT rotates velocity vectors to point towards the target while preserving magnitude.
+		Sets velocity to zero when position is within target_radius of the target.
+		
+		Args:
+			vel: Velocity data with shape (time_points, n_dofs)
+			pos: Position data with shape (time_points, n_dofs)
+			targets: Target positions with shape (n_trials, n_dofs)
+			kinematics_ts: Timestamps for kinematic data
+			trial_start_times: Start times for each trial
+			trial_end_times: End times for each trial
+		
+		Returns:
+			Transformed velocity data with same shape as input
+		"""
+		# Get dimensions
+		n_timepoints, n_dofs = vel.shape
+		n_trials = len(targets)
+		
+		# Create time-aligned target vector
+		target_vector = np.zeros((n_timepoints, n_dofs))
+		
+		# For each trial, find the time indices that belong to it and assign the target
+		for trial_idx in range(n_trials):
+			# Find timestamps that fall within this trial
+			trial_mask = (kinematics_ts >= trial_start_times[trial_idx]) & (kinematics_ts <= trial_end_times[trial_idx])
+			
+			# Assign the target for this trial to all timepoints within the trial
+			target_vector[trial_mask, :] = targets[trial_idx, :]
+		
+		# Apply ReFIT transformation: rotate velocity to point towards target
+		transformed_vel = vel.copy()
+		
+		for t in range(n_timepoints):
+			current_vel = vel[t, :]
+			current_pos = pos[t, :]
+			current_target = target_vector[t, :]
+			
+			# Check if position is within target radius
+			distance_to_target = np.linalg.norm(current_pos - current_target)
+			if distance_to_target <= self.target_radius:
+				# Set velocity to zero when within target radius
+				transformed_vel[t, :] = 0.0
+				continue
+			
+			# Skip if velocity is zero
+			if np.allclose(current_vel, 0):
+				continue
+			
+			# Calculate velocity magnitude (preserve this)
+			vel_magnitude = np.linalg.norm(current_vel)
+			
+			# Calculate target direction (unit vector towards target)
+			target_direction = (current_target - current_pos)
+			target_magnitude = np.linalg.norm(target_direction)
+			if target_magnitude > 1e-8:
+				target_direction = target_direction / target_magnitude
+				
+				# Rotate velocity: preserve magnitude but point towards target
+				transformed_vel[t, :] = vel_magnitude * target_direction
+		
+		return transformed_vel
+		

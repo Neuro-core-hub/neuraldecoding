@@ -34,16 +34,20 @@ class Trainer(ABC):
                 f.write(','.join(map(str, entries)) + '\n')
 
         # Print log
+        text = ""
         if self.print_results and (epoch % self.print_every == 0 or epoch == self.num_epochs - 1):
             if train_loss is None and val_loss is None:
-                print(f"Epoch {epoch}/{self.num_epochs - 1}")
+                text += f"Epoch {epoch}/{self.num_epochs - 1}\n"
             else:
-                print(f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+                text += f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n"
             for metric in self.logger:
                 train_metric = self.logger[metric]['train'][-1]
                 val_metric = self.logger[metric]['valid'][-1]
-                print(f"    {metric:>12}{': train = ':>12}{train_metric}")
-                print(f"    {'':>12}{'  val = ':>12}{val_metric}")
+                text += f"    {metric:>12}{': train = ':>12}{train_metric}\n"
+                text += f"    {'':>12}{'  val = ':>12}{val_metric}\n"
+        if text:
+            print(text)
+        return text
 
 
     
