@@ -15,6 +15,7 @@ from neuraldecoding.dataset import Dataset
 from neuraldecoding.preprocessing import Preprocessing
 import os
 import pickle
+import matplotlib.pyplot as plt
 
 class LinearTrainer(Trainer):
     def __init__(self, preprocessor: Preprocessing, config: DictConfig, dataset = None):
@@ -39,15 +40,21 @@ class LinearTrainer(Trainer):
         model = model_class(config.params)
         return model
     
-    def train_model(self):
+    def train_model(self, plot_results = False):
+        if self.cfg.model.params.get("is_refit", False):
+            if self.cfg.model.params.get("prev_model_path", None) is None:
+                raise ValueError("model.params.prev_model_path is not set in config. Necessary for refit training.")
+            else:
+                # Load the model first
+                self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
         self.model.train_step((self.train_X, self.train_Y))
         # Validate model
-        self.validate_model()
+        self.validate_model(plot_results)
         print("Model trained, metrics:")
         self.save_print_log()
         return self.model, self.logger
     
-    def validate_model(self):
+    def validate_model(self, plot_results = False):
         train_prediction = self.model(self.train_X)
         valid_prediction = self.model(self.valid_X)
         for metric in self.metrics:

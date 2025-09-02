@@ -3,6 +3,7 @@ from omegaconf import DictConfig
 import numpy as np
 import torch
 import json
+import collections
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import Dataset, DataLoader
@@ -175,6 +176,26 @@ class NNTrainer(Trainer):
         val_loss = running_val_loss / len(self.valid_loader)
 
         return val_loss, val_all_predictions, val_all_targets
+
+class LSTMTrainer(NNTrainer):
+    def __init__(self, preprocessor, config, dataset = None):
+        super().__init__(preprocessor, config, dataset)
+
+    def validate_model(self):
+        # Validate
+        self.model.eval()
+        running_val_loss = 0.0
+        val_all_predictions = []
+        val_all_targets = []
+        h = None
+
+        with torch.no_grad():
+            all_x = self.valid_loader.dataset.tensors[0][:,:,-1]
+            val_all_targets = self.valid_loader.dataset.tensors[1]
+            val_all_predictions = self.model.forward(all_x, return_all_tsteps=True)
+            val_loss = self.loss_func(val_all_predictions, val_all_targets).item()
+
+        return val_loss, val_all_predictions.detach().cpu().numpy(), val_all_targets.detach().cpu().numpy()
 
 class IterationNNTrainer(NNTrainer):
     '''

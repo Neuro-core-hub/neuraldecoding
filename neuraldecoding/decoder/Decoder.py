@@ -41,7 +41,7 @@ class Decoder(ABC):
             self.model = MODEL_REGISTRY[self.cfg.model.type](self.cfg.model.params)
         else:
             raise ValueError(f"Model {cfg.model.type} either does not exist or is not registered in the model registry (in Decoder module).")
-        self.device = self.cfg.model.get("device", "cpu")
+        self.device = self.cfg.model.params.get("device", "cpu")
 
         # Get model path
         self.fpath = self.cfg.model.fpath
@@ -56,7 +56,7 @@ class Decoder(ABC):
         # Load model from path
         self.load_model()
 
-    def load_model(self, fpath : str = None) -> None:
+    def load_model(self, fpath : str = None, running_online : bool = False) -> None:
         """
         Load decoder's model parameters from a specified location
 
@@ -64,7 +64,7 @@ class Decoder(ABC):
             fpath: Override path to the parameters
         """
         self.fpath = fpath if fpath is not None else self.fpath
-        self.model.load_model(self.fpath)
+        self.model.load_model(fpath=self.fpath, running_online=running_online)
 
     def get_decoder(self) -> Self:
         """
@@ -125,6 +125,8 @@ class NeuralNetworkDecoder(Decoder):
     def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
     def predict(self, input):
+        if not isinstance(input, torch.Tensor):
+            input = torch.tensor(input, dtype=torch.float32)
         with torch.no_grad():
             input = input.to(self.device)
             prediction = self.model(input)
