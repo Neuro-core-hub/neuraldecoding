@@ -25,7 +25,7 @@ preprocessing_decoder:
     tensor1:
       type: EnforceTensorBlock
       params:
-        device: cuda
+        device: cpu
         dtype: float32
     tuple_out:
       type: Dict2TupleBlock
