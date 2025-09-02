@@ -59,7 +59,7 @@ class NNTrainer(Trainer):
         train_loader = DataLoader(self.train_ds, batch_size=self.batch_size, shuffle=True, drop_last=True)
         valid_loader = DataLoader(self.valid_ds, batch_size=len(self.valid_ds), shuffle=False)
 
-        if hasattr(self, 'test_ds'):
+        if self.test_ds is not None:
             test_loader = DataLoader(self.test_ds, batch_size=len(self.test_ds), shuffle=False)
         else:
             test_loader = None
