@@ -607,8 +607,6 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		super().__init__()
 		self.location_data = location_data
 		self.location_ts = location_ts
-		self.location_data = location_data
-		self.location_ts = location_ts
 		self.feature_extractor = FeatureExtractor(feature_extractor_config)
 		self.target_filter = feature_extractor_config.get('target_filter', None)
 		if self.target_filter is not None:
@@ -621,21 +619,13 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
 		trial_starts_ends = (interpipe['trial_start_times'], interpipe['trial_end_times'])
-		features_list, interpipe['trial_idx'] = self.feature_extractor.extract_binned_features(
-			data=[data[loc] for loc in self.location_data],
-			timestamps_ms=[data[loc] for loc in self.location_ts],
-			return_array=True,
-			trial_starts_ends=trial_starts_ends
-		)
-		for loc in self.location_ts:
-			if loc not in interpipe:
-				raise ValueError(f"Location '{loc}' not found in interpipe dictionary.")
 		
 		# Extract binned features with full metadata (return_array=False)
-		bin_features = self.feature_extractor.extract_binned_features(
+		bin_features, interpipe['trial_idx'] = self.feature_extractor.extract_binned_features(
 			data=[data[loc] for loc in self.location_data], 
-			timestamps_ms=[interpipe[loc] for loc in self.location_ts], 
-			return_array=False
+			timestamps_ms=[data[loc] for loc in self.location_ts], 
+			return_array=False,
+			trial_starts_ends=trial_starts_ends
 		)
 		
 		# Extract feature arrays and update data
@@ -659,8 +649,15 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		
 		# Update timestamps for all location_ts entries with the new binned timestamps
 		for ts_loc in self.location_ts:
-			interpipe[ts_loc] = bin_timestamps
-		
+			data[ts_loc] = bin_timestamps
+			
+		interpipe['trial_filt'] = np.zeros(len(data[self.location_data[0]]), dtype=np.int32)
+		interpipe['targets_filt'] = np.zeros((len(data[self.location_data[0]]), self.target_filter.shape[0]), dtype=np.float32)
+		for i, start in enumerate(interpipe['trial_idx']):
+			end = interpipe['trial_idx'][i + 1] if i + 1 < len(interpipe['trial_idx']) else len(data[self.location_data[0]])
+			interpipe['trial_filt'][start:end] = i
+			interpipe['targets_filt'][start:end] = interpipe['targets'][i][self.target_filter]
+
 		return data, interpipe
 	
 
