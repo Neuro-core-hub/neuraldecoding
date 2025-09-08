@@ -21,7 +21,7 @@ loss_func:
 training:
   num_epochs: 2000
   batch_size: 64
-  device: cuda # cuda , if avail 
+  device: cpu # cuda , if avail 
   print_results: True
   print_every: 200
   clear_cache: False
