@@ -695,7 +695,7 @@ def add_run_data(
 
         nwb_file.add_trial(**nwb_trial_dict)
 
-def load_xpc_run(cfg, date, run, dataset):
+def load_xpc_run(cfg):
     """
     Create and populate an NWB file from experimental run data.
 
@@ -728,17 +728,17 @@ def load_xpc_run(cfg, date, run, dataset):
 
     # TODO: loading multiple runs
     if cfg.alt_filepath == None:
-        data_path = os.path.join(cfg.server_dir, cfg.subject, date)
+        data_path = os.path.join(cfg.server_dir, cfg.subject, cfg.date)
     else:
         data_path = os.path.join(cfg.alt_filepath)
 
-    print(f"Loading Run {run} from {cfg.subject_id} on {date}")
+    print(f"Loading Run {cfg.run} from {cfg.subject_id} on {cfg.date}")
     # normalizing the path to be OS independent
     data_path = os.path.normpath(data_path)
-    run_path = os.path.join(data_path, f"Run-{run:03d}")
+    run_path = os.path.join(data_path, f"Run-{cfg.run:03d}")
 
     # Initialize the NWB file
-    nwb_file = initialize_nwb_file(data_path, cfg.subject, date, run, exp_cfg)
+    nwb_file = initialize_nwb_file(data_path, cfg.subject, cfg.date, cfg.run, exp_cfg)
 
     # Read in the binary files
     data_dict = read_xpc_data(run_path, exp_cfg)
@@ -754,77 +754,9 @@ def load_xpc_run(cfg, date, run, dataset):
         exp_cfg
     )
 
-    if dataset is None:
-        return nwb_file
-    else:
-        return merge_nwb_files(dataset, nwb_file)
-    
-def merge_nwb_files(file_a, file_b):
-    """
-    Merge two NWB files into one, combining their data and metadata.
+    return nwb_file
 
-    Parameters
-    ----------
-    file_a : pynwb.NWBFile
-        The first NWB file to merge.
-    file_b : pynwb.NWBFile
-        The second NWB file to merge.
-
-    Returns
-    -------
-    pynwb.NWBFile
-        The merged NWB file containing data from both input files.
-    """
-    # Create a new NWB file with metadata from file_a
-    merged_file = NWBFile(
-        session_description=file_a.session_description,
-        identifier=f"{file_a.identifier}_merged_{file_b.identifier}",
-        session_start_time=file_a.session_start_time,
-        file_create_date=datetime.now(tzlocal()),
-        experimenter=file_a.experimenter,
-        institution=file_a.institution,
-        notes=f"{file_a.notes}\nMerged with:\n{file_b.notes}",
-        lab=file_a.lab,
-        subject=file_a.subject,
-    )
-
-    # Merge trials
-    for trial in file_a.trials:
-        merged_file.add_trial(**trial.to_dict())
-    for trial in file_b.trials:
-        merged_file.add_trial(**trial.to_dict())
-
-    # Merge acquisitions
-    for acquisition_name, acquisition in file_a.acquisition.items():
-        merged_file.add_acquisition(acquisition)
-    for acquisition_name, acquisition in file_b.acquisition.items():
-        if acquisition_name not in merged_file.acquisition:
-            merged_file.add_acquisition(acquisition)
-        else:
-            warnings.warn(f"Acquisition {acquisition_name} already exists in merged file. Skipping.")
-
-    # Merge processing modules
-    for module_name, module in file_a.processing.items():
-        merged_file.create_processing_module(name=module_name, description=module.description)
-        for data_interface_name, data_interface in module.data_interfaces.items():
-            merged_file.processing[module_name].add(data_interface)
-    for module_name, module in file_b.processing.items():
-        if module_name not in merged_file.processing:
-            merged_file.create_processing_module(name=module_name, description=module.description)
-        for data_interface_name, data_interface in module.data_interfaces.items():
-            merged_file.processing[module_name].add(data_interface)
-
-    # Merge units
-    if file_a.units is not None:
-        for unit in file_a.units.to_dataframe().to_dict(orient="records"):
-            merged_file.add_unit(**unit)
-    if file_b.units is not None:
-        for unit in file_b.units.to_dataframe().to_dict(orient="records"):
-            merged_file.add_unit(**unit)
-
-    return merged_file
-
-def get_save_path(cfg, date, run):
+def get_save_path(cfg):
     """
     Generate a file path for saving zstruct data as NWB.
 
@@ -836,11 +768,11 @@ def get_save_path(cfg, date, run):
     """
     # # Create a string representation of the runs
     # runs_str = "_".join([f"Run-{run:03d}" for run in sorted(run)])\
-    runs_str = f"Run-{run:03d}"
+    runs_str = f"Run-{cfg.run:03d}"
     return os.path.join(
         cfg.server_dir,
         cfg.subject,
-        date,
+        cfg.date,
         runs_str,
-        f"{cfg.subject}_{date}_{runs_str}.nwb",
+        f"{cfg.subject}_{cfg.date}_{runs_str}.nwb",
     )
