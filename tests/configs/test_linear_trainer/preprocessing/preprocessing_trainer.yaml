@@ -21,7 +21,7 @@ preprocessing_trainer:
     tensor1:
       type: EnforceTensorBlock
       params:
-        device: cuda
+        device: cpu
         dtype: float32
     trainer_out:
       type: Dict2TrainerBlock

@@ -27,7 +27,7 @@ class testConfig(unittest.TestCase):
         self.assertTrue(self.conf.has_changes(conf_old), "Expected changes to be detected compared to old config")
         self.assertTrue(self.readable != self.conf.get_readable(), "Expected readable config to change after modification")
         self.assertTrue(new_hash == self.ini_hash, f"Expected the same hash {self.ini_hash}, got {new_hash}")
-        self.assertTrue(self.conf.get_changes() == {'decoder.model': ({'type': 'LSTM', 'params': {'input_size': 96, 'num_outputs': 4, 'hidden_size': 300, 'num_layers': 1, 'rnn_type': 'lstm', 'device': 'cuda', 'hidden_noise_std': 0.0, 'dropout_input': False, 'drop_prob': 0.0, 'sequence_length': 20}}, None), 'trainer.model.type': ('LSTM', 'SLMT')}, f"Unexpected changes detected: {self.conf.get_changes()}")
+        self.assertTrue(self.conf.get_changes() == {'decoder.model': ({'type': 'LSTM', 'params': {'input_size': 96, 'num_outputs': 4, 'hidden_size': 300, 'num_layers': 1, 'rnn_type': 'lstm', 'device': 'cpu', 'hidden_noise_std': 0.0, 'dropout_input': False, 'drop_prob': 0.0, 'sequence_length': 20}}, None), 'trainer.model.type': ('LSTM', 'SLMT')}, f"Unexpected changes detected: {self.conf.get_changes()}")
 
     def test_revert(self):
         self.conf.reset()
