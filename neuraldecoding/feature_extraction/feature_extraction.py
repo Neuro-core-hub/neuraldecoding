@@ -175,9 +175,6 @@ class FeatureExtractor:
             data: Data array of shape [n_samples, dimensions] or list of such arrays
             timestamps_ms: Timestamps for data of shape [n_samples] or list of such arrays
             return_array: If True, return array of features instead of list of dictionaries
-            data: Data array of shape [n_samples, dimensions] or list of such arrays
-            timestamps_ms: Timestamps for data of shape [n_samples] or list of such arrays
-            return_array: If True, return array of features instead of list of dictionaries
             
         Returns:
             List of feature dictionaries (default), single array [n_bins, n_features] (single input),
@@ -228,9 +225,6 @@ class FeatureExtractor:
         if len(data_list) == 0 or any(len(t) == 0 for t in timestamps_list):
             return np.array([]), np.array([]) if return_array else [], np.array([])
         
-        # Determine global time range across all arrays
-        min_time = min(t.min() for t in timestamps_list)
-        max_time = max(t.max() for t in timestamps_list)
         # Determine global time range across all arrays
         min_time = min(t.min() for t in timestamps_list)
         max_time = max(t.max() for t in timestamps_list)

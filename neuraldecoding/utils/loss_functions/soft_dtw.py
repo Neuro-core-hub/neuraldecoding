@@ -6,7 +6,7 @@ from torch.autograd import Function
 def pairwise_distances(x, y=None):
     '''
     Input: x is a Nxd matrix
-           y is an optional Mxd matirx
+           y is an optional Mxd matrix
     Output: dist is a NxM matrix where dist[i,j] is the square norm between x[i,:] and y[j,:]
             if y is not given then use 'y=x'.
     i.e. dist[i,j] = ||x[i,:]-y[j,:]||^2

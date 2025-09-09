@@ -329,11 +329,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 			  nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
 		"""
 		Initializes the Dataset2DictBlock.
-		Initializes the Dataset2DictBlock.
 		Args:
-			neural_nwb_loc (str): Location path for neural data in the NWB file.
-			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
-			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
 			neural_nwb_loc (str): Location path for neural data in the NWB file.
 			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
 			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
