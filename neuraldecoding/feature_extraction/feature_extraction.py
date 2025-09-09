@@ -228,9 +228,6 @@ class FeatureExtractor:
         # Determine global time range across all arrays
         min_time = min(t.min() for t in timestamps_list)
         max_time = max(t.max() for t in timestamps_list)
-        # Determine global time range across all arrays
-        min_time = min(t.min() for t in timestamps_list)
-        max_time = max(t.max() for t in timestamps_list)
         
         # Create bins
         bin_features = []
