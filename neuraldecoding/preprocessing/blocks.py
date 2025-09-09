@@ -800,24 +800,23 @@ class LabelModificationBlock(DataProcessingBlock):
 		return data, interpipe
 
 class SaveDataBlock(DataProcessingBlock):
-	def __init__(self, locs, keys):
+	def __init__(self, save_path):
 		super().__init__()
-		if isinstance(locs, str):
-			locs = [locs]
-		if isinstance(keys, str):
-			keys = [keys]
-		if len(locs) != len(keys):
-			raise ValueError("locs and keys must be the same length.")
-		self.locs = locs
-		self.keys = keys
+		self.save_path = save_path
 	
 	def transform(self, data, interpipe):
-		for loc, key in zip(self.locs, self.keys):
-			if loc not in data:
-				raise ValueError(f"Location '{loc}' not found in data dictionary.")
-			interpipe[key] = data[loc]
-			interpipe['save_keys'].append(key)
-			print(f"Saved data at location '{loc}' with key '{key}'.")
+		with open(self.save_path, 'wb') as f:
+			pickle.dump([data, interpipe], f)
+		return data, interpipe
+
+class LoadDataBlock(DataProcessingBlock):
+	def __init__(self, load_path):
+		super().__init__()
+		self.load_path = load_path
+	
+	def transform(self, data, interpipe):
+		with open(self.load_path, 'rb') as f:
+			data, interpipe = pickle.load(f)
 		return data, interpipe
 
 class RegressionToClassificationBlock(DataProcessingBlock):
