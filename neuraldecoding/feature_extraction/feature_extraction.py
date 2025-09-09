@@ -175,9 +175,6 @@ class FeatureExtractor:
             data: Data array of shape [n_samples, dimensions] or list of such arrays
             timestamps_ms: Timestamps for data of shape [n_samples] or list of such arrays
             return_array: If True, return array of features instead of list of dictionaries
-            data: Data array of shape [n_samples, dimensions] or list of such arrays
-            timestamps_ms: Timestamps for data of shape [n_samples] or list of such arrays
-            return_array: If True, return array of features instead of list of dictionaries
             
         Returns:
             List of feature dictionaries (default), single array [n_bins, n_features] (single input),
