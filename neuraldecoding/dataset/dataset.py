@@ -2,7 +2,7 @@ import os
 from pynwb import NWBHDF5IO, NWBFile
 from datetime import datetime
 from dateutil.tz import tzlocal
-from . import zstruct_loader
+from neuraldecoding.dataset import zstruct_loader
 
 from omegaconf import DictConfig
 
@@ -24,13 +24,13 @@ class Dataset:
         self.cfg: DictConfig = cfg
         self.dataset_parameters: DictConfig = self.cfg.dataset_parameters
         self.verbose: bool = verbose
+        self.io: NWBHDF5IO = None  # IO handler for NWB files
         # Initialize empty NWB file
         self.dataset: NWBFile = NWBFile(
             session_description="",
             identifier="",
             session_start_time=datetime.now(tzlocal()),
         )
-        self.io = None # Added file handle storage
 
         # if self.cfg.dataset_type == "zstruct":
         #     self._initialize_zstruct()
@@ -64,8 +64,8 @@ class Dataset:
         Load data from NWB file
 
         """
-        self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
-        self.dataset = self.io.read()
+        io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
+        self.dataset = io.read()
 
     def _load_data_zstruct(self):
         """
@@ -100,6 +100,7 @@ class Dataset:
             if dpars.overwrite:
                 print("NWB file exists but overwriting")
                 self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
+                self.save_data()
             else:
                 print("NWB file already exists, loading")
                 self.io = NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters), mode="r")
@@ -108,6 +109,7 @@ class Dataset:
         else:
             print("No existing NWB file, creating...")
             self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
+            self.save_data()
 
     def save_data(self):
         """
@@ -133,7 +135,7 @@ class Dataset:
             path = self.cfg.save_path
         print(f"Saving NWB file to {path}...")
         with NWBHDF5IO(path, mode="w") as io:
-            io.write(self.dataset)
+            self.io.write(self.dataset)
 
     def close(self):
         """

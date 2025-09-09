@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from omegaconf import DictConfig
+from torch.utils.data import DataLoader
+from neuraldecoding.model import Model
+
 import os
 class Trainer(ABC):
     def __init__(self, cfg: DictConfig):

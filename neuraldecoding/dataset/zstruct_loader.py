@@ -23,7 +23,7 @@ import heapq
 from omegaconf import OmegaConf
 
 # from ..utils import *
-from ..utils.utils_general import get_creation_path_time, int_to_string, is_collection
+from neuraldecoding.utils.utils_general import get_creation_path_time, int_to_string, is_collection
 
 # Registry of known types
 SERIES_CLASSES = {
@@ -767,7 +767,7 @@ def get_save_path(cfg):
         based on subject, date, and run information
     """
     # # Create a string representation of the runs
-    # runs_str = "_".join([f"Run-{run:03d}" for run in sorted(cfg.run)])\
+    # runs_str = "_".join([f"Run-{run:03d}" for run in sorted(run)])\
     runs_str = f"Run-{cfg.run:03d}"
     return os.path.join(
         cfg.server_dir,

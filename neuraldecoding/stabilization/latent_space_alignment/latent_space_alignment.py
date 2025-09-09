@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import neuraldecoding.stabilization.latent_space_alignment.dim_red
 import neuraldecoding.stabilization.latent_space_alignment.alignment
-from neuraldecoding.stabilization import Stabilization
+from neuraldecoding.stabilization.stabilization import Stabilization
 import pickle
 
 import time
