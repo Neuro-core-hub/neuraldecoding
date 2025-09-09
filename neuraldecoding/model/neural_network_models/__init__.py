@@ -1,6 +1,6 @@
-from neuraldecoding.model.neural_network_models.LSTM import LSTM, LSTMTrialInput
-from neuraldecoding.model.neural_network_models.RNN import RecurrentModel
-from neuraldecoding.model.neural_network_models.tcFNN import TCN
+from .LSTM import LSTM, LSTMTrialInput
+from .RNN import RecurrentModel
+from .tcFNN import TCN
 import warnings
 try:
     import einops

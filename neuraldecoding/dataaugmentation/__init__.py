@@ -1,1 +1,1 @@
-from neuraldecoding.dataaugmentation.DataAugmentation import *
+from .DataAugmentation import *
