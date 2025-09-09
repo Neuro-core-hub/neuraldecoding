@@ -24,6 +24,7 @@ class Dataset:
         self.cfg: DictConfig = cfg
         self.dataset_parameters: DictConfig = self.cfg.dataset_parameters
         self.verbose: bool = verbose
+        self.io: NWBHDF5IO = None  # IO handler for NWB files
         # Initialize empty NWB file
         self.dataset: NWBFile = NWBFile(
             session_description="",
@@ -134,4 +135,18 @@ class Dataset:
             path = self.cfg.save_path
         print(f"Saving NWB file to {path}...")
         with NWBHDF5IO(path, mode="w") as io:
-            io.write(self.dataset)
+            self.io.write(self.dataset)
+
+    def close(self):
+        """
+        Close the NWB file if it was opened.
+        """
+        if self.io:
+            self.io.close()
+            self.io = None
+
+    def __del__(self):
+        """
+        Ensure the NWB file is closed when the object is destroyed.
+        """
+        self.close()
