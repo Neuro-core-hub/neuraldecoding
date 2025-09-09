@@ -617,12 +617,14 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		trial_starts_ends = (interpipe['trial_start_times'], interpipe['trial_end_times'])
 		
 		# Extract binned features with full metadata (return_array=False)
-		bin_features, interpipe['trial_idx'] = self.feature_extractor.extract_binned_features(
+		bin_features = self.feature_extractor.extract_binned_features(
 			data=[data[loc] for loc in self.location_data], 
 			timestamps_ms=[data[loc] for loc in self.location_ts], 
 			return_array=False,
 			trial_starts_ends=trial_starts_ends
 		)
+
+		interpipe['trial_idx'] = neuraldecoding.utils.obtain_trial_idx(bin_features, trial_starts_ends)
 		
 		# Extract feature arrays and update data
 		if len(self.location_data) > 1:

@@ -8,6 +8,7 @@ import glob
 import os
 import re
 from pynwb import NWBFile, TimeSeries, NWBHDF5IO
+from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import pickle
 
@@ -310,3 +311,26 @@ def add_hist(X, Y, hist=10):
 
     adjX = adjX.reshape(adjX.shape[0],-1)
     return adjX, adjY
+
+def obtain_trial_idx(self, bin_features: List[Dict], trial_starts_ends: Tuple) -> np.ndarray:
+    """Obtain trial indices for each bin based on provided trial start/end times."""
+    
+    trial_starts, _ = trial_starts_ends
+    
+    trial_idx = np.zeros(len(trial_starts), dtype=int)
+    current_trial_start = trial_starts[0] if len(trial_starts) > 0 else None
+    current_trial = 0
+
+    count = 0
+
+    for bf in bin_features:
+        bin_start = bf['bin_start_ms']
+        if bin_start >= current_trial_start:
+            trial_idx[current_trial] = count
+            current_trial += 1
+            current_trial_start = trial_starts[current_trial] if current_trial < len(trial_starts) else None
+            if current_trial_start is None:
+                break
+        count += 1
+
+    return trial_idx

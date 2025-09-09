@@ -316,8 +316,6 @@ class FeatureExtractor:
                     bin_features.append(features)
             
             current_time += self.bin_size_ms
-
-        trial_idx = self.obtain_trial_idx(bin_features, trial_starts_ends)
         
         # Post-process velocity features to use lookahead (vel_t = pos_t+1 - pos_t)
         self._postprocess_velocity_features(bin_features, is_multistream_config)
@@ -336,38 +334,14 @@ class FeatureExtractor:
                 for array_idx in range(num_arrays):
                     array_features = [bf['features'][array_idx] for bf in bin_features]
                     result_arrays.append(np.array(array_features))
-                return result_arrays, trial_idx
+                return result_arrays
             else:
                 # Single array case - return single array
                 feature_arrays = [bf['features'] for bf in bin_features]
-                return np.array(feature_arrays), trial_idx
+                return np.array(feature_arrays)
         
-        return bin_features, trial_idx
-    
-    def obtain_trial_idx(self, bin_features: List[Dict], trial_starts_ends: Tuple) -> np.ndarray:
-        """Obtain trial indices for each bin based on provided trial start/end times."""
-        
-        trial_starts, _ = trial_starts_ends
-        
-        trial_idx = np.zeros(len(trial_starts), dtype=int)
-        current_trial_start = trial_starts[0] if len(trial_starts) > 0 else None
-        current_trial = 0
-
-        count = 0
-
-        for bf in bin_features:
-            bin_start = bf['bin_start_ms']
-            if bin_start >= current_trial_start:
-                trial_idx[current_trial] = count
-                current_trial += 1
-                current_trial_start = trial_starts[current_trial] if current_trial < len(trial_starts) else None
-                if current_trial_start is None:
-                    break
-            count += 1
-
-        return trial_idx
+        return bin_features
             
-
     def compute_bin_features(self, 
                             data: np.ndarray,
                             bin_end_timestamp_ms: Optional[float] = None,
