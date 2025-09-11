@@ -41,7 +41,7 @@ def get_timeseries_from_trial(nwb_file: NWBFile, trial_index: int, timeseries_pa
     stop_idx = np.searchsorted(timeseries.timestamps[:], stop_time)
     return timeseries.data[start_idx:stop_idx]
 
-def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "cue_time", trial_stop_label: str = "stop_time", target_label: str = "targets", target_radius_label: str = "target_radius", exclude_failed_trials: bool = True, exclude_intarget_trials: bool = True) -> float:
+def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "cue_time", trial_stop_label: str = "stop_time", target_label: str = "targets", target_radius_label: str = "target_radius", exclude_failed_trials: bool = True, exclude_intarget_trials: bool = True, pos_indices: list|np.ndarray|None = None) -> float:
     """
     Calculate the throughput/bitrate using the formula:
     Throughput = Σₖ log₂(1 + (Dₖ-S)/2S) / t_acq
@@ -69,6 +69,8 @@ def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "c
         Whether to exclude failed trials from the calculation (default: True)
     exclude_intarget_trials : bool, optional
         Whether to exclude trials where the initial value is within the target radius from the target (default: True)
+    pos_indices : list, optional
+        List of indices in timeseries to use for the position data (default: None)
     Returns:
     --------
     float
@@ -91,6 +93,8 @@ def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "c
         # Add extra index if ndim ==1
         if timeseries.ndim == 1:
             timeseries = timeseries[: , None]
+        if pos_indices is not None:
+            timeseries = timeseries[:, pos_indices]
         initial_value = timeseries[0, :]
         if exclude_intarget_trials:
             if np.all(np.abs(initial_value - target) <= target_radius):
