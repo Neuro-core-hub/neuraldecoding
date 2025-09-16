@@ -2,8 +2,8 @@ import os
 from pynwb import NWBHDF5IO, NWBFile
 from datetime import datetime
 from dateutil.tz import tzlocal
-from . import zstruct_loader
-from . import xds_loader
+import neuraldecoding.dataset.zstruct_loader as zstruct_loader
+import neuraldecoding.dataset.xds_loader as xds_loader
 from omegaconf import DictConfig
 
 class Dataset:
@@ -111,7 +111,13 @@ class Dataset:
     def _load_xds(self):
         """
         Load data from xds files used in limblab, specifically for data from cyclegan paper.
+        outputs DICTIONARY containing keys into dataset:
+          "day0_spike": list of arrays, each array is a trial. Each array is (number of time bins, number of channels/electrodes)
+          "dayk_spike": list of arrays, each array is a trial. Each array is (number of time bins, number of channels/electrodes)
+          "day0_EMG": list of arrays, each array is a trial. Each array is (number of time bins, number of EMG channels)
+          "dayk_EMG": list of arrays, each array is a trial. Each array is (number of time bins, number of EMG channels)
         """
+        self.dataset = xds_loader.load_xds(self.dataset_parameters)
         
 
     def save_data(self):
