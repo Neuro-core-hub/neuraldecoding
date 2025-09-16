@@ -3,9 +3,8 @@ from pynwb import NWBHDF5IO, NWBFile
 from datetime import datetime
 from dateutil.tz import tzlocal
 from . import zstruct_loader
-
+from . import xds_loader
 from omegaconf import DictConfig
-
 
 class Dataset:
     def __init__(self, cfg: DictConfig, verbose=True):
@@ -108,6 +107,12 @@ class Dataset:
         else:
             print("No existing NWB file, creating...")
             self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
+
+    def _load_xds(self):
+        """
+        Load data from xds files used in limblab, specifically for data from cyclegan paper.
+        """
+        
 
     def save_data(self):
         """
