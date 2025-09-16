@@ -23,10 +23,13 @@ class config:
         if config_path:
             self.load(config_path)
 
-    def __call__(self, section_name = None):
+    def __call__(self, section_name = None, readable = False):
         if section_name is None:
-            return self.config
-        return self.parse_section(section_name, {})
+            if readable:
+                return OmegaConf.to_yaml(self.config)
+            else:
+                return self.config        
+        return self.parse(section_name)
 
     def load(self, config_path):
         '''
@@ -38,8 +41,12 @@ class config:
         else:
             cfg = OmegaConf.load(config_path)
         
+        OmegaConf.set_struct(cfg, False)
         self.config = cfg
-        if self.config["hash_id"] is None:
+        if "hash_id" not in self.config:
+            self.hash = hashlib.md5(datetime.now().strftime("%Y%m%d%H%M%S").encode('ascii')).hexdigest()
+            self.config["hash_id"] = self.hash
+        elif self.config["hash_id"] is None:
             self.hash = hashlib.md5(datetime.now().strftime("%Y%m%d%H%M%S").encode('ascii')).hexdigest()
             self.config["hash_id"] = self.hash
         else:
