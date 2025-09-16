@@ -55,6 +55,8 @@ class Dataset:
             self._load_data_zstruct()
         elif self.cfg.dataset_type == "nwb":
             self._load_data_nwb()
+        elif self.cfg.dataset_type == "xds":
+            self._load_xds()
         else:
             raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
     
