@@ -47,3 +47,13 @@ def test_no_dim_red():
 def test_deg_fa():
     ## TODO
     raise NotImplementedError
+
+def test_cca():
+    ## TODO: change ds to actual dataset
+    ds_X = np.random.rand(100, 50)
+    ds_Y = np.random.rand(100, 60)
+    
+    package = dim_red.CanonicalCorrelationAnalysis()
+    X_c, Y_c, cca = package.reduce(ds_X, ds_Y)
+    
+    assert X_c.shape[1] == Y_c.shape[1] == min(ds_X.shape[1], ds_Y.shape[1])

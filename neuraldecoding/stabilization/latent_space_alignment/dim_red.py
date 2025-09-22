@@ -3,6 +3,8 @@ import math
 import numpy as np
 from sklearn.decomposition import FactorAnalysis as FA
 from sklearn.decomposition import PCA as PrincipalComponentAnalyisis
+from sklearn.cross_decomposition import CCA
+
 # sys.path.append('AdaptiveLatents')
 # import adaptive_latents.prosvd as psvd
 
@@ -155,4 +157,18 @@ class EMFactorAnalysis1(DimRed):
         regularized_lm, O = fa_stable.get_stabilization_matrices(lm, psi, d)
         reduced_data = data @ regularized_lm.T + np.expand_dims(O, axis = -1).T
         return reduced_data
+    
+
+class CanonicalCorrelationAnalysis(DimRed):
+    def __init__(self, ndims = None):
+        super().__init__(ndims)
+        if ndims is not None:
+            warnings.warn("Warning: CCA does not use ndims, argument will be ignored")
+    
+    def reduce(self, data_X, data_Y):
+        """Applies CCA to data_X and data_Y. Returns the transformed data (aligned trajectories) and the CCA object."""
+        cca = CCA(n_components=min(data_X.shape[1], data_Y.shape[1]))
+        cca.fit(data_X, data_Y)
+        X_c, Y_c = cca.transform(data_X, data_Y)
+        return X_c, Y_c, cca
     
