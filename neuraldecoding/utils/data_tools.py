@@ -312,7 +312,7 @@ def add_hist(X, Y, hist=10):
     adjX = adjX.reshape(adjX.shape[0],-1)
     return adjX, adjY
 
-def obtain_trial_idx(self, bin_features: List[Dict], trial_starts_ends: Tuple) -> np.ndarray:
+def obtain_trial_idx(bin_features: List[Dict], trial_starts_ends: Tuple) -> np.ndarray:
     """Obtain trial indices for each bin based on provided trial start/end times."""
     
     trial_starts, _ = trial_starts_ends
@@ -333,4 +333,5 @@ def obtain_trial_idx(self, bin_features: List[Dict], trial_starts_ends: Tuple) -
                 break
         count += 1
 
+    trial_idx = trial_idx[1:]
     return trial_idx

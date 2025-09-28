@@ -2,7 +2,7 @@ import os
 from pynwb import NWBHDF5IO, NWBFile
 from datetime import datetime
 from dateutil.tz import tzlocal
-from neuraldecoding.dataset import zstruct_loader
+from . import zstruct_loader
 
 from omegaconf import DictConfig
 
@@ -24,13 +24,13 @@ class Dataset:
         self.cfg: DictConfig = cfg
         self.dataset_parameters: DictConfig = self.cfg.dataset_parameters
         self.verbose: bool = verbose
-        self.io: NWBHDF5IO = None  # IO handler for NWB files
         # Initialize empty NWB file
         self.dataset: NWBFile = NWBFile(
             session_description="",
             identifier="",
             session_start_time=datetime.now(tzlocal()),
         )
+        self.io = None # Added file handle storage
 
         # if self.cfg.dataset_type == "zstruct":
         #     self._initialize_zstruct()
@@ -64,8 +64,8 @@ class Dataset:
         Load data from NWB file
 
         """
-        io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
-        self.dataset = io.read()
+        self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
+        self.dataset = self.io.read()
 
     def _load_data_zstruct(self):
         """
@@ -135,7 +135,7 @@ class Dataset:
             path = self.cfg.save_path
         print(f"Saving NWB file to {path}...")
         with NWBHDF5IO(path, mode="w") as io:
-            self.io.write(self.dataset)
+            io.write(self.dataset)
 
     def close(self):
         """
@@ -149,4 +149,7 @@ class Dataset:
         """
         Ensure the NWB file is closed when the object is destroyed.
         """
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass

@@ -166,8 +166,7 @@ class FeatureExtractor:
     def extract_binned_features(self,
                                data: Union[np.ndarray, List[np.ndarray]],
                                timestamps_ms: Union[np.ndarray, List[np.ndarray]],
-                               return_array: bool = False,
-                               trial_starts_ends: Tuple = ()) -> Union[Tuple[List[Dict], np.ndarray], Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], np.ndarray]]:
+                               return_array: bool = False) -> Union[Tuple[List[Dict], np.ndarray], Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], np.ndarray]]:
         """
         Extract features from timestamped data by dividing it into time bins.
         
