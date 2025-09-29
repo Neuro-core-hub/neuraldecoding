@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-import neuraldecoding.preprocessing.blocks
+from neuraldecoding.preprocessing import blocks
 
 import time
 
@@ -21,7 +21,7 @@ class Preprocessing:
             step_type = step_config['type']
             step_params = step_config.get('params', {})
             
-            preprocessing_class = getattr(neuraldecoding.preprocessing.blocks, step_type)
+            preprocessing_class = getattr(blocks, step_type)
             preprocessing_instance = preprocessing_class(**step_params)
             
             self.pipeline.append({
@@ -32,12 +32,17 @@ class Preprocessing:
     
     def preprocess_pipeline(self, data, params = {'is_train': True}):
         current_data = data
-        inter_pipeline_data = {}
+        inter_pipeline_data = {'save_keys': []}
         inter_pipeline_data.update(params)
         for step in self.pipeline:
             step_instance = step['instance']
             current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data)
-        return current_data
+
+        final_save_data = {}
+        for key in inter_pipeline_data['save_keys']:
+            final_save_data[key] = inter_pipeline_data[key]
+
+        return current_data, final_save_data
 
     def preprocess_step(self, data, step_name, inter_pipeline_data = {'is_train': True}):
         for step in self.pipeline:

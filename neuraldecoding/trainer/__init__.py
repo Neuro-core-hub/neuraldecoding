@@ -1,3 +1,3 @@
 from .LinearTrainer import LinearTrainer
-from .NeuralNetworkTrainer import NNTrainer, LSTMTrainer
+from .NeuralNetworkTrainer import NNTrainer
 from .Trainer import Trainer

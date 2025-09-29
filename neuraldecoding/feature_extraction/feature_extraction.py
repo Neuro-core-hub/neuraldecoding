@@ -166,7 +166,7 @@ class FeatureExtractor:
     def extract_binned_features(self,
                                data: Union[np.ndarray, List[np.ndarray]],
                                timestamps_ms: Union[np.ndarray, List[np.ndarray]],
-                               return_array: bool = False) -> Union[List[Dict], np.ndarray, List[np.ndarray]]:
+                               return_array: bool = False) -> Union[Tuple[List[Dict], np.ndarray], Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], np.ndarray]]:
         """
         Extract features from timestamped data by dividing it into time bins.
         
@@ -178,6 +178,8 @@ class FeatureExtractor:
         Returns:
             List of feature dictionaries (default), single array [n_bins, n_features] (single input),
             or list of arrays [n_bins, n_features] (multiple inputs) when return_array=True
+            List of feature dictionaries (default), single array [n_bins, n_features] (single input),
+            or list of arrays [n_bins, n_features] (multiple inputs) when return_array=True
         """
         # Normalize inputs to lists
         if isinstance(data, np.ndarray):
@@ -186,6 +188,7 @@ class FeatureExtractor:
         else:
             data_list = data
             timestamps_list = timestamps_ms
+
         
         # --- Start of new validation section ---
         is_multistream_config = isinstance(self.feature_type, list) and \
@@ -219,7 +222,7 @@ class FeatureExtractor:
                 raise ValueError(f"Data and timestamps must have same number of samples for array {i}")
         
         if len(data_list) == 0 or any(len(t) == 0 for t in timestamps_list):
-            return np.array([]) if return_array else []
+            return np.array([]), np.array([]) if return_array else [], np.array([])
         
         # Determine global time range across all arrays
         min_time = min(t.min() for t in timestamps_list)
@@ -239,6 +242,7 @@ class FeatureExtractor:
             should_skip = False
             for chans, d, t in zip(channels_per_array, data_list, timestamps_list):
                 bin_mask = (t >= bin_start) & (t < bin_end)
+
                 if np.any(bin_mask):
                     bin_data_list.append(d[bin_mask].reshape(-1, chans))
                 else:
@@ -318,7 +322,7 @@ class FeatureExtractor:
         # Return array of features if requested
         if return_array:
             if not bin_features:
-                return np.array([])
+                return np.array([]), np.array([])
             
             # Handle both single arrays and lists of arrays
             first_features = bin_features[0]['features']
@@ -336,7 +340,7 @@ class FeatureExtractor:
                 return np.array(feature_arrays)
         
         return bin_features
-
+            
     def compute_bin_features(self, 
                             data: np.ndarray,
                             bin_end_timestamp_ms: Optional[float] = None,

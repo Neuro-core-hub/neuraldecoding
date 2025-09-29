@@ -1,30 +1,48 @@
 from omegaconf import DictConfig, ListConfig
 from neuraldecoding.utils.config_structs import decoder_struct, trainer_struct_nn, trainer_struct_linear, preprocessing_struct
+from typing import Union, get_origin, get_args
 
 def verify_structure(content: DictConfig, struct: dict) -> tuple[bool, str]:
     """
-    Recursively verify if the content dictionary matches the structure and types defined in struct.
+    Recursively verify if the content DictConfig matches the structure and types defined in struct.
 
     Parameters:
-    content (DictConfig): The content to verify.
-    struct (dict): The structure definition where keys are expected keys and values are types or nested structures.
+    content (DictConfig): The config content to validate.
+    struct (dict): A nested structure definition with expected keys and types.
 
     Returns:
-    (bool, str):bool: True if the content matches the structure, False otherwise.
-                str: An error message if the content does not match the structure, None if it matches.
+    (bool, str | None): (True, None) if valid; (False, error message) otherwise.
     """
-    for key, value_type in struct.items():
+    for key, expected_type in struct.items():
         if key not in content:
-            return False, f"Missing key: {key}"
-        if isinstance(value_type, DictConfig) or isinstance(value_type, dict):
-            if not isinstance(content[key], DictConfig):
-                return False, f"Key '{key}' is not a dictionary as expected."
-            is_valid, error = verify_structure(content[key], value_type)
+            return False, f"Missing key: '{key}'"
+
+        val = content[key]
+
+        # Nested dicts: recurse
+        if isinstance(expected_type, dict):
+            if not isinstance(val, (DictConfig, dict)):
+                return False, f"Key '{key}' should be a dict or DictConfig."
+            is_valid, error = verify_structure(val, expected_type)
             if not is_valid:
-                return False, error
+                return False, f"In key '{key}': {error}"
+
+        # Handle Union[...] types
         else:
-            if not isinstance(content[key], value_type):
-                return False, f"Key '{key}' has incorrect type. Expected {value_type}, got {type(content[key])}."
+            origin = get_origin(expected_type)
+            args = get_args(expected_type)
+
+            if origin is Union:
+                if not any(
+                    (arg is type(None) and val is None) or isinstance(val, arg)
+                    for arg in args
+                ):
+                    expected_names = ", ".join(str(a) for a in args)
+                    return False, f"Key '{key}' has incorrect type. Expected one of [{expected_names}], got {type(val)}."
+            else:
+                if not isinstance(val, expected_type):
+                    return False, f"Key '{key}' has incorrect type. Expected {expected_type}, got {type(val)}."
+
     return True, None
 
 def parse_verify_config(config: DictConfig, section_name: str) -> dict:
