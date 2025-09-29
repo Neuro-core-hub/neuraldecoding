@@ -762,7 +762,6 @@ class LabelModificationBlock(DataProcessingBlock):
 		Args:
 			modifications (str or list): modification or modifications to add to labels
 			nicknames (str or list): nickname or nicknames for the modifications
-			leadup (int): The length of the history to be added before the first bin of each trial. Default is 10.
 		"""
 		self.param_dict = param_dict
 		if isinstance(nicknames, str):

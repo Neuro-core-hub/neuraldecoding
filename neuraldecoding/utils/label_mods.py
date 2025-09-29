@@ -17,7 +17,7 @@ def apply_modifications(nicknames, kinematics, interpipe, param_dict):
         elif mod == 'shift_by_trial':
             kinematics = shift_kinematics_by_trial(kinematics, trial_filt, current_params['shift_range'], current_params['individuate_dofs'])
         elif mod == 'warp_by_trial':
-            kinematics = warp_kinematics_by_trial(kinematics, trial_filt, current_params['warp_factor'], current_params['hold_time'])
+            kinematics = warp_kinematics_by_trial(kinematics, trial_filt, current_params['warp_factor'], current_params['hold_time'], current_params['individuate_dofs'])[0]
         elif mod == 'random_warp':
             kinematics = random_warp(kinematics, trial_filt, current_params['hold_time'], current_params['individuate_dofs'])
         elif mod == 'sigmoid_replacement':
@@ -280,8 +280,9 @@ def random_warp(
 def warp_kinematics_by_trial(
     kinematics: torch.Tensor,
     trial_indices: np.ndarray,
-    warp_factor: float,
+    warp_factor: Union[float, Tuple[float, float]],
     hold_time: int,
+    individuate_dofs: bool = False
 ) -> Tuple[torch.Tensor, float]:
     """
     Warp the kinematics data within each trial by making it faster or slower.
@@ -289,12 +290,13 @@ def warp_kinematics_by_trial(
     Args:
         kinematics: Tensor of shape (T, N) where N is the number of kinematic variables
         trial_indices: Array of shape (T,) containing trial indices for each time point
-        warp_factor: Float controlling the speed of the trajectory
+        warp_factor: Float controlling the speed of the trajectory, list [min, max] for random per-trial
                     Values < 1: slower (stretches the trajectory)
                     Values = 1: no change
                     Values > 1: faster (compresses the trajectory)
         hold_time: Number of time points at the end of each trial to consider as "hold time"
                   This is the period that will be adjusted when warping
+        individuate_dofs: If True, warp each degree of freedom independently
 
     Returns:
         Warped kinematics tensor of the same shape
@@ -308,6 +310,12 @@ def warp_kinematics_by_trial(
     # Get the number of dimensions and separate position and velocity
     N = kinematics.shape[1]
     pos_dim = N // 2  # First half is position
+
+    try:
+        warp_factor = float(warp_factor)
+        isnumeric = True
+    except:
+        isnumeric = False
 
     actual_warp_factors = []
     for trial in unique_trials:
@@ -331,43 +339,44 @@ def warp_kinematics_by_trial(
         # Get the final hold position (average of hold time points for stability)
         hold_position = trial_data[-hold_time:, :pos_dim].mean(dim=0)
 
-        if warp_factor == 1.0:
-            # No warping needed
-            actual_warp_factors.append(1.0)
-            continue
+        warped_trial_data = torch.zeros((trial_length, pos_dim), dtype=kinematics.dtype)
 
-        elif warp_factor > 1.0:
-            # Faster: compress the movement portion and extend the hold time
-            # Calculate how many points to compress the movement into
-            compressed_length = int(movement_length / warp_factor)
-            if compressed_length < 1:
-                compressed_length = 1
+        # Determine warp factors for each dof
+        if individuate_dofs:
+            if not isnumeric:
+                current_warp = np.random.uniform(warp_factor[0], warp_factor[1], size=pos_dim)
+            else:
+                current_warp = np.full(pos_dim, warp_factor)
+        else:
+            if not isnumeric:
+                current_warp = np.array([np.random.uniform(warp_factor[0], warp_factor[1])])
+            else:
+                current_warp = np.array([warp_factor])
 
-            # Interpolate the movement portion to the compressed length
-            movement_data = trial_data[:movement_length, :pos_dim]
-            compressed_indices = np.linspace(0, movement_length - 1, compressed_length)
-
-            # Create the warped trial data (only for positions)
-            warped_trial_data = torch.zeros(
-                (trial_length, pos_dim), dtype=kinematics.dtype
-            )
-
-            # Interpolate each position dimension
-            for i in range(pos_dim):
-                # Compress the movement portion
+        # Interpolate each position dimension
+        for i in range(pos_dim):
+            wf = current_warp[i] if individuate_dofs else current_warp[0]
+            if wf == 1.0:
+                # No warping needed
+                warped_trial_data[:, i] = trial_data[:, i]
+                actual_warp_factors.append(1.0)
+                continue
+            elif wf > 1.0:
+                # Faster: compress the movement portion and extend the hold time
+                compressed_length = int(movement_length / wf)
+                if compressed_length < 1:
+                    compressed_length = 1
+                movement_data = trial_data[:movement_length, i]
+                compressed_indices = np.linspace(0, movement_length - 1, compressed_length)
                 compressed_movement = torch.tensor(
                     np.interp(
                         compressed_indices,
                         np.arange(movement_length),
-                        movement_data[:, i].cpu().numpy(),
+                        movement_data.cpu().numpy(),
                     ),
                     dtype=kinematics.dtype,
                 )
-
-                # Fill in the compressed movement
                 warped_trial_data[:compressed_length, i] = compressed_movement
-
-                # Fill the rest with the hold position plus some noise
                 noise = (
                     torch.randn(
                         trial_length - compressed_length,
@@ -378,43 +387,23 @@ def warp_kinematics_by_trial(
                 )
                 warped_trial_data[compressed_length:, i] = hold_position[i] + noise
                 actual_warp_factors.append(movement_length / compressed_length)
-
-        else:  # warp_factor < 1.0
-            # Slower: stretch the movement portion and reduce the hold time
-            # Calculate how many points to stretch the movement into
-            stretched_length = int(movement_length / warp_factor)
-
-            # Make sure we don't exceed the trial length
-            if stretched_length > trial_length:
-                stretched_length = trial_length
-
-            # Interpolate the movement portion to the stretched length
-            movement_data = trial_data[:movement_length, :pos_dim]
-            stretched_indices = np.linspace(0, movement_length - 1, stretched_length)
-
-            # Create the warped trial data (only for positions)
-            warped_trial_data = torch.zeros(
-                (trial_length, pos_dim), dtype=kinematics.dtype
-            )
-            actual_warp_factors.append(movement_length / stretched_length)
-
-            # Interpolate each position dimension
-            for i in range(pos_dim):
-                # Stretch the movement portion
+            else:  # wf < 1.0
+                # Slower: stretch the movement portion and reduce the hold time
+                stretched_length = int(movement_length / wf)
+                if stretched_length > trial_length:
+                    stretched_length = trial_length
+                movement_data = trial_data[:movement_length, i]
+                stretched_indices = np.linspace(0, movement_length - 1, stretched_length)
                 stretched_movement = torch.tensor(
                     np.interp(
                         stretched_indices,
                         np.arange(movement_length),
-                        movement_data[:, i].cpu().numpy(),
+                        movement_data.cpu().numpy(),
                     ),
                     dtype=kinematics.dtype,
                 )
-
-                # Fill in as much of the stretched movement as fits
                 max_idx = min(stretched_length, trial_length)
                 warped_trial_data[:max_idx, i] = stretched_movement[:max_idx]
-
-                # If there's room left, fill with the hold position
                 if max_idx < trial_length:
                     noise = (
                         torch.randn(
@@ -425,20 +414,17 @@ def warp_kinematics_by_trial(
                         * 0.005
                     )
                     warped_trial_data[max_idx:, i] = hold_position[i] + noise
+                actual_warp_factors.append(movement_length / stretched_length)
 
         # Update the position part of the output tensor with warped trial data
         warped[trial_mask, :pos_dim] = warped_trial_data.to(device=kinematics.device)
 
         # Compute velocities from the warped positions
-        # First point velocity is set to zero
         warped_velocities = torch.zeros((trial_length, pos_dim), dtype=kinematics.dtype)
-
-        # Calculate velocities as position differences
         if trial_length > 1:
             warped_velocities[1:] = warped_trial_data[1:] - warped_trial_data[:-1]
-
-        # Update the velocity part of the output tensor
         warped[trial_mask, pos_dim:] = warped_velocities.to(device=kinematics.device)
+
         """
         loss_index = dilate_loss(warped[trial_mask, 0].unsqueeze(0).unsqueeze(2), kinematics[trial_mask, 0].unsqueeze(0).unsqueeze(2), 1, 0.001, device=kinematics.device)
         loss_mrs = dilate_loss(warped[trial_mask, 1].unsqueeze(0).unsqueeze(2), kinematics[trial_mask, 1].unsqueeze(0).unsqueeze(2), 1, 0.001, device=kinematics.device)
