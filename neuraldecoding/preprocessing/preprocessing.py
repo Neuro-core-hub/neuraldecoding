@@ -46,3 +46,22 @@ class Preprocessing:
                 return step_instance.transform(data, inter_pipeline_data)
         
         raise ValueError(f"Step '{step_name}' not found in preprocessing pipeline")
+    
+class OnlinePreprocessing(Preprocessing):
+    def __init__(self, config):
+        super().__init__(config)
+    
+    def preprocess_pipeline(self, data, logger, publish_func, params = {'is_train': True}):
+        current_data = data
+        inter_pipeline_data = {}
+        inter_pipeline_data.update(params)
+        for step in self.pipeline:
+            step_instance = step['instance']
+            current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data) #TODO, change to the method that transforms online stuff
+            if self.is_debug:
+                logger.info(f"Publishing step {step['name']} and interpipe")
+                publish_func(
+                            f'preprocessing_{step['name']}',
+                            {'step': step['name'], 'data': current_data, 'interpipe': inter_pipeline_data}
+                        )
+        publish_func('preprocessing', {'step': step['name'], 'data': current_data, 'interpipe': inter_pipeline_data})# TODO: ,parents)
