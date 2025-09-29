@@ -33,10 +33,10 @@ Last updated: 11/6/2021
 
 
 import warnings
-from scipy import linalg
 import numpy as np
 
-def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
+def get_factor_analysis_loading(train_data, n_components,max_n_its=100000, ll_diff_thresh=1e-8,
+    min_priv_var=0.01, C_init=None, PSI_init=None, verbose = False, n_restarts=5):
     '''
     Runs multiple Factor Analysis (FA) models and returns loading matrix of 
     model with maximum log likelihood
@@ -63,10 +63,17 @@ def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
 
     models = []
     for i in range(0, n_restarts): 
-        d, c, psi, _, diags = fit_factor_analysis(input_data, 
-                                                  n_latents=n_components,
-                                                  min_priv_var=0.1,
-                                                  ll_diff_thresh=0.00001)
+        np.random.seed(i)
+        d, c, psi, _, diags = fit_factor_analysis(
+            input_data, 
+            n_latents=n_components,
+            max_n_its=max_n_its,
+            ll_diff_thresh=ll_diff_thresh,
+            min_priv_var=min_priv_var,
+            C_init=C_init,
+            PSI_init=PSI_init,
+            verbose=verbose
+        )
 
         models.append((c, psi, d, diags))
 
@@ -80,10 +87,10 @@ def get_factor_analysis_loading(train_data, n_components, n_restarts=5):
     psi = model_max_ll[1]
     d = model_max_ll[2]
 
-    return loading, psi, d
+    return d, loading, psi, None, None
 
 def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
-    min_priv_var=0.01, C_init=None, PSI_init=None):
+    min_priv_var=0.01, C_init=None, PSI_init=None, verbose = False):
     '''
     Fits a factor analysis model: 
     x_t = C * l_t + d + ep_t
@@ -151,8 +158,10 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
 
         # initialize estimates for c and psi 
         if C_init == None or PSI_init == None: 
-            print('Initializing randomly.')
+            if verbose:
+                print('Initializing randomly.')
             # initialize C 
+            
             c_init = np.random.randn(n_obs_vars, n_latents)*10
             # initialize psi 
             psi_init = np.diag(np.nanvar(x, axis=0)) - np.diag(np.diag(np.matmul(c_init, c_init.T)))
@@ -164,8 +173,8 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
 
         diags['cInit'] = c_init 
         diags['psiInit'] = psi_init 
-
-        print('Done with initialization. Fitting with EM.')
+        if verbose:
+            print('Done with initialization. Fitting with EM.')
 
         diags['ll'] = np.full((max_n_its+1,), np.nan)
 
@@ -207,13 +216,14 @@ def fit_factor_analysis(x, n_latents, max_n_its=100000, ll_diff_thresh=1e-8,
             else: 
                 stop_crit = stopfcn(cur_ll, prev_ll, init_ll)
             prev_ll = cur_ll
-
-            print('EM Iteration: %d LL: %f Stop Crit: %f' % (cur_it, cur_ll, stop_crit), end="\r", flush=True)
+            if verbose:
+                print('EM Iteration: %d LL: %f Stop Crit: %f' % (cur_it, cur_ll, stop_crit), end="\r", flush=True)
             
             cur_it += 1
 
         conv = stop_crit <= ll_diff_thresh
-        print('\n')
+        if verbose:
+            print('\n')
         
     return d, c, psi, conv, diags
 
@@ -492,13 +502,23 @@ def find_minimal_disjoint_integer_sets(input_cell):
     bad_rows = np.sum(ind_matrix, axis=1) == 0
     unique_vls[bad_rows] = []
     ind_matrix[bad_rows, :] = np.empty((1, ind_matrix.shape[1]))
- 
+#     unique_rows = np.unique(ind_matrix, axis=0)
+#     # find the index of the unique rows where each row matches
+#     row_map = np.array([np.where((unique_rows == ind_matrix[ii]).all(axis=1))[0][0] \
+#         for ii in range(0, ind_matrix.shape[0])])
+#     n_unique_rows = unique_rows.shape[0]
+# ### uniqure_rows to n_unique_rows code above are altered because
+# ### error occured on   File "/home/chesteklab/Code/Chang/newraldecoding/neuraldecoding/stabilization/latent_space_alignment/factor_analysis.py", line 505, in find_minimal_disjoint_integer_sets
+# ###    'cell_inds': np.where(unique_rows[r])[0]
+# ###                 ~~~~~~~~^^^^^^^^^^^^^^^^
+# ### ValueError: Calling nonzero on 0d arrays is not allowed. Use np.atleast_1d(scalar).nonzero() instead. If the context of this error is of the form `arr[nonzero(cond)]`, just use `arr[cond]`.
+    
     unique_rows = np.unique(ind_matrix)
     # find the index of the unique rows where each row matches
     row_map = np.array([np.unique(np.where(unique_rows == ind_matrix[ii])[0])[0] \
         for ii in range(0, ind_matrix.shape[0]) if ind_matrix[ii,:] in unique_rows])
     n_unique_rows = unique_rows.shape[0]
-
+    
     setstr = []
     for r in range(n_unique_rows-1, -1, -1): 
         setstr.append({'vls': unique_vls[row_map == r],

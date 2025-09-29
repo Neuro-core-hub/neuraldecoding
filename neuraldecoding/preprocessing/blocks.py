@@ -479,6 +479,34 @@ class RoundToIntegerBlock(DataFormattingBlock):
 			data_out[loc] = np.round(data[loc])
 		return data_out, interpipe
 
+class xdsDict2DictBlock(DataFormattingBlock):
+	"""
+	A block for converting an xds data dictionary to usable data dictionary.
+	"""
+	def __init__(self, channel_cutoff = 90, data_keys = ['neural', 'behaviour']):
+		super().__init__()
+		self.channel_cutoff = channel_cutoff # the xds code from limblab have variable (yes you saw it correct) number of channels,
+											 # for the sake of consistency, we will use a fixed cutoff on channels.
+		self.data_keys = data_keys
+
+	def transform(self, data, interpipe):
+		data_out = {}
+		if(interpipe['is_train']):
+			self.neural_key = 'day0_spike'
+			self.behavior_key = 'day0_EMG'
+		else:
+			self.neural_key = 'dayk_spike'
+			self.behavior_key = 'dayk_EMG'
+		# Concatenate all trials in the list to create a single array
+		data_out[self.data_keys[0]] = np.concatenate(data.dataset[self.neural_key], axis=0)
+		data_out[self.data_keys[1]] = np.concatenate(data.dataset[self.behavior_key], axis=0)
+		# Cutoff channels if necessary
+		if data_out[self.data_keys[0]].shape[1] > self.channel_cutoff:
+			data_out[self.data_keys[0]] = data_out[self.data_keys[0]][:, :self.channel_cutoff]
+		if data_out[self.data_keys[1]].shape[1] > self.channel_cutoff:
+			data_out[self.data_keys[1]] = data_out[self.data_keys[1]][:, :self.channel_cutoff]
+		return data_out, interpipe
+
 # Wrappers that Modify Data
 class StabilizationBlock(DataProcessingBlock):
 	"""
@@ -553,7 +581,39 @@ class AddHistoryBlock(DataProcessingBlock):
 			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
+	
+class AddHistoryBlockRR(DataProcessingBlock):
+	"""
+	A block for adding history to the data at specified locations. For Ridge Regression model / linear models
+	It uses `neuraldecoding.utils.add_hist` to add history.
+	Keeps 2d shape
+	"""
+	def __init__(self, location, seq_length = 10):
+		"""
+		Initializes the AddHistoryBlock.
+		Args:
+			location (str or list): The key(s) in the data dictionary where history is added.
+			seq_length (int): The length of the history to be added. Default is 10.
+		"""
+		super().__init__()
+		self.location = location
+		self.seq_length = seq_length
 
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding history to the specified locations of datastream.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with history added at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+		data[self.location[0]], data[self.location[1]] = neuraldecoding.utils.add_hist(data[self.location[0]], data[self.location[1]], self.seq_length)
+		return data, interpipe
+	
 class NormalizationBlock(DataProcessingBlock):
 	def __init__(self, location, method, normalizer_params):
 		super().__init__()
@@ -562,7 +622,7 @@ class NormalizationBlock(DataProcessingBlock):
 		self.normalizer_params = normalizer_params
 	
 	def transform(self, data, interpipe):
-		if interpipe['is_train']:
+		if self.normalizer_params['is_IO']:
 			if self.normalizer_method == 'sklearn':
 				normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])(**self.normalizer_params['params'])
 				data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
@@ -578,12 +638,25 @@ class NormalizationBlock(DataProcessingBlock):
 					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
 				with open(self.normalizer_params['save_path'], 'wb') as f:
 					pickle.dump(normalizer, f)
+			else:
+				if 'save_path' not in self.normalizer_params:
+					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
+				with open(self.normalizer_params['save_path'], 'rb') as f:
+					normalizer = pickle.load(f)
+				for loc in self.location:
+					data[loc] = normalizer.transform(data[loc])
 			return data, interpipe
 		else:
-			with open(self.normalizer_params['save_path'], 'rb') as f:
-				normalizer = pickle.load(f)
-			for loc in self.location:
-				data[loc] = normalizer.transform(data[loc])
+			if self.normalizer_method == 'sklearn':
+				normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])(**self.normalizer_params['params'])
+				data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
+				data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			elif self.normalizer_method == 'sequence_scaler':
+				normalizer = SequenceScaler()
+				data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
+				data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			else:
+				raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
 			return data, interpipe
 
 class EnforceTensorBlock(DataProcessingBlock):

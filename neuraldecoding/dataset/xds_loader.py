@@ -12,7 +12,9 @@ from pynwb.ecephys import (
 from pynwb.base import TimeSeries
 from datetime import datetime
 from dateutil.tz import tzlocal
+from pynwb.base import TimeSeries
 import numpy as np
+from hdmf.backends.hdf5.h5_utils import H5DataIO
 
 import fnmatch, os, sys
 
@@ -124,6 +126,34 @@ def load_xds(dataset_parameters):
     #============================================= Pre-processing ==================================================================#
     day0_spike, dayk_spike = spike_preprocessing(day0_unit_names, dayk_unit_names, day0_spike, dayk_spike) # zero-padding empty channels
 
+    nwb_file = NWBFile(
+        identifier=f"xds_data_{day0_name}-{dayk_name}",
+        session_description=f"xds data: {day0_name}",
+        lab="limblab",
+        session_start_time=datetime.now(tz=tzlocal()),
+    )
+    modules = {}
+    modules['ecephys'] = nwb_file.create_processing_module(name='ecephys', description='Ecephys processed data')
+
+    def create_ts(data, name):
+        data_ts = ElectricalSeries(name=name, data=H5DataIO(data))
+        return data_ts
+    modules['ecephys'].add(create_ts(np.array(day0_spike[0]).T, "day0_spike"))
+    
+    # Write the NWB file to disk and display information about it
+    with NWBHDF5IO('xds_data.nwb', 'w') as io:
+        io.write(nwb_file)
+
+    # Read and display the NWB file contents
+    with NWBHDF5IO('xds_data.nwb', 'r') as io:
+        read_nwb = io.read()
+        print("NWB File Contents:")
+        print(f"Session Description: {read_nwb.session_description}")
+        print(f"Lab: {read_nwb.lab}")
+        print(f"Processing Modules: {list(read_nwb.processing.keys())}")
+        if 'ecephys' in read_nwb.processing:
+            ecephys_module = read_nwb.processing['ecephys']
+            print(f"Ecephys Module Contents: {list(ecephys_module.data_interfaces.keys())}")
     return {
             "day0_spike": day0_spike,
             "dayk_spike": dayk_spike,

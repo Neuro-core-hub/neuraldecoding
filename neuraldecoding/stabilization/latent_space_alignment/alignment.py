@@ -40,7 +40,11 @@ class ProcrustesAlignment(Alignment):
     def __init__(self):
         self.name = "procrustes_alignment"  
         
-    def align(self, lm):              
+    def align(self, lm):     
+        print("Aligning with Procrustes") 
+        print(f"baseline: {self.baseline}")
+        print(np.linalg.norm(self.baseline, ord = "fro"))
+        print(np.linalg.norm(lm - self.baseline, ord = 'fro'))        
         m = self.baseline.T @ lm
         U, _, V = np.linalg.svd(m)
         
@@ -49,7 +53,24 @@ class ProcrustesAlignment(Alignment):
         aligned_lm = lm @ S.T
         
         return aligned_lm
-    
+
+class TestProcrustesAlignment(Alignment):
+    """
+    Use orthogonal procrustes to align day_0 lm to day_k lm
+    """  
+    def __init__(self):
+        self.name = "procrustes_alignment"  
+        
+    def align(self, lm):     
+        m1 = self.baseline
+        m2 = lm
+        S = np.matmul(m1.T, m2)
+        U, _, V = np.linalg.svd(S)
+        V = V.T # due to differences in Matlab and numpy impls 
+        T = np.matmul(U, V.T)
+        aligned_lm = np.matmul(m2, T.T)
+
+        return aligned_lm
     
 class SwitchLM(Alignment):
     """

@@ -3,7 +3,6 @@ import neuraldecoding.stabilization.latent_space_alignment.dim_red
 import neuraldecoding.stabilization.latent_space_alignment.alignment
 from neuraldecoding.stabilization import Stabilization
 import pickle
-
 import time
 
 class LatentSpaceAlignment(Stabilization):
@@ -17,7 +16,7 @@ class LatentSpaceAlignment(Stabilization):
         """        
         self.ndims = cfg.ndims
         self.dim_red_method = getattr(neuraldecoding.stabilization.latent_space_alignment.dim_red, cfg.dim_red_method.type)(**cfg.dim_red_method.params)
-        self.alignment_method = getattr(neuraldecoding.stabilization.latent_space_alignment.alignment, cfg.alignment_method.type)(**cfg.dim_red_method.params)
+        self.alignment_method = getattr(neuraldecoding.stabilization.latent_space_alignment.alignment, cfg.alignment_method.type)(**cfg.alignment_method.params)
         self.fpath = cfg.fpath
 
     def fit(self, data):
@@ -33,16 +32,15 @@ class LatentSpaceAlignment(Stabilization):
             ndims = data.shape[0]
         else:
             ndims = self.ndims
-            
         self.dim_red_method.set_dims(ndims)
         self.alignment_method.set_dims(ndims)
 
         lm, args = self.dim_red_method.calc_lm(data)
+        print(f"aabaseline to be set: {lm}")
         self.alignment_method.set_baseline(lm)
         latent_ds = self.dim_red_method.reduce(data, lm, args)
-
+        print(f"Latent space shape: {latent_ds.shape}")
         return latent_ds
-    
     
     def extract_latent_space(self, data):
         """Extract and align a latent space
@@ -56,9 +54,10 @@ class LatentSpaceAlignment(Stabilization):
         lm, args = self.dim_red_method.calc_lm(data)
         
         aligned_lm = self.alignment_method.get_aligned_lm(lm)
+        print(f"baslm and aligned lm shapes {lm.shape} and {aligned_lm.shape}")
 
         latent_ds = self.dim_red_method.reduce(data, aligned_lm, args)
-        
+
         return latent_ds
     
     def stabilize(self, data):

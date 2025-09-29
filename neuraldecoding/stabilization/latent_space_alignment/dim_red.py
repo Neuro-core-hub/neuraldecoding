@@ -65,6 +65,7 @@ class FactorAnalysis(LoadingMatrixDimRed):
     
 class PCA(LoadingMatrixDimRed):
     def calc_lm(self, ds):
+        print(ds.shape)
         pca = PrincipalComponentAnalyisis(n_components=self.ndims)
         pca.fit(ds)
         lm = pca.components_.T
@@ -72,6 +73,7 @@ class PCA(LoadingMatrixDimRed):
         # warnings.warn("Warning: Debugging outputs, shouldn't occur in use, remove later")
         # cumvar = np.cumsum(pca.explained_variance_ratio_)
         # print(f"Cum Var of PCA: {cumvar}")
+        print(lm.shape)
         return lm, None
     
     def reduce(self, data, lm, args = None):
@@ -138,16 +140,18 @@ class EMFactorAnalysis1(DimRed):
     This is the factor analysis version used by procrustes alignment of factors (Degenhart 2022)
     """
 
-    def __init__(self, n_restarts = 5, max_n_inits = 300, ll_diff_threshold = .01, min_priv_var = .1):
+    def __init__(self, n_restarts = 5, max_n_inits = 300, ll_diff_threshold = .01, min_priv_var = .1, verbose = False):
         self.n_restarts = n_restarts
         self.max_n_inits = max_n_inits
         self.ll_diff_threshold = ll_diff_threshold
         self.min_priv_var = min_priv_var
+        self.verbose = verbose
         
     def calc_lm(self, data):
-        d, base_lm, psi, _, _ = fa_stable.fit_factor_analysis(data, self.ndims, max_n_its = self.max_n_inits, 
-                                        ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var)
-
+        d, base_lm, psi, _, _ = fa_stable.get_factor_analysis_loading(data, self.ndims, max_n_its = self.max_n_inits, 
+                                        ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var, verbose = self.verbose)
+        print(base_lm.shape)
+        print(base_lm)
         return base_lm, (d, psi)
     
     def reduce(self, data, lm, args):

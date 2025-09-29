@@ -58,7 +58,7 @@ class config:
         
         # TODO: figure out what to do with hash if the config is updated, right now hash stays the same as the original one
 
-    def update(self, key_path: str, value: Any, merge) -> None:
+    def update(self, key_path: str, value: Any, merge=False) -> None:
         '''
         Set a value in the configuration using dot notation. Saves update to history
 
