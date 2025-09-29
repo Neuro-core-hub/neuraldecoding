@@ -107,7 +107,7 @@ class TestDataSplitBlock(unittest.TestCase):
         import neuraldecoding.utils
         original_func = getattr(neuraldecoding.utils, 'data_split_trial', None)
         
-        def mock_data_split_trial(neural, finger, trial_idx, split_ratio, seed):
+        def mock_data_split_trial(neural, finger, trial_idx, split_ratio, seed, shuffle):
             split_point = int(len(neural) * split_ratio)
             return ((neural[:split_point], finger[:split_point]), 
                    (neural[split_point:], finger[split_point:]))

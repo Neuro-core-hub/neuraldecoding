@@ -274,9 +274,10 @@ class DataSplitBlock(DataFormattingBlock):
 				- 'behaviour_test': Testing behaviour data
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
+		
 		trial_idxs = interpipe.get(self.interpipe_location[0], None)
 		if trial_idxs is None:
-			print(f"Warning: DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock).")
+			raise ValueError(f"Warning: DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock).")
 
 		split_data = neuraldecoding.utils.data_split_trial(data[self.location[0]], 
 														   data[self.location[1]], 
