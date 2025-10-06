@@ -9,6 +9,7 @@ from pynwb.ecephys import (
     ElectricalSeries,
     EventDetection,
 )
+from pynwb.misc import AnnotationSeries
 from pynwb.base import TimeSeries
 from datetime import datetime
 from dateutil.tz import tzlocal
@@ -81,22 +82,15 @@ def spike_preprocessing(unit_names1, unit_names2, spike1, spike2):
 def load_xds(dataset_parameters):
     # outputs dictionary containing keys:
     #   "day0_spike": list of arrays, each array is a trial. Each array is (number of time bins, number of channels/electrodes)
-    #   "dayk_spike": list of arrays, each array is a trial. Each array is (number of time bins, number of channels/electrodes)
     #   "day0_EMG": list of arrays, each array is a trial. Each array is (number of time bins, number of EMG channels)
-    #   "dayk_EMG": list of arrays, each array is a trial. Each array is (number of time bins, number of EMG channels)
     if not HAS_XDS:
         raise ImportError("xds_python is not installed. Please install it to use this feature. Please install it by downloading content from https://github.com/limblab/xds/tree/master/xds_python into xds_python folder in neuraldecoding/dataset")
-    day0_path = dataset_parameters.day0_path
-    day0_name = dataset_parameters.day0_name
-    dayk_path = dataset_parameters.dayk_path
-    dayk_name = dataset_parameters.dayk_name
+    day0_path = dataset_parameters.fpath
+    day0_name = dataset_parameters.fname
 
     if not os.path.isfile(os.path.join(day0_path, day0_name)):
         raise ValueError(f"xds file not found at {os.path.join(day0_path, day0_name)}")
     day0_data = xds.lab_data(day0_path, day0_name)
-    if not os.path.isfile(os.path.join(dayk_path, dayk_name)):
-        raise ValueError(f"xds file not found at {os.path.join(dayk_path, dayk_name)}")
-    dayk_data = xds.lab_data(dayk_path, dayk_name)
 
     bin_size = dataset_parameters.bin_size
     smooth_size = dataset_parameters.smooth_size
@@ -112,51 +106,139 @@ def load_xds(dataset_parameters):
     day0_EMG = day0_data.get_trials_data_EMG('R', 'start_time', 0.0, 'end_time', 0)
     day0_EMG, day0_EMG_names = emg_preprocessing(day0_EMG, day0_EMG_names) # outlier removal and normalization
 
-    #============================================= Load day-k data ==================================================================#
-    dayk_data.update_bin_data(bin_size)  
-    dayk_data.smooth_binned_spikes(bin_size, 'gaussian', smooth_size)
-    dayk_unit_names = dayk_data.unit_names
-    #-------- Extract smoothed spike counts in trials without temporal alignment --------#
-    dayk_spike = dayk_data.get_trials_data_spike_counts('R', 'start_time', 0.0, 'end_time', 0)
-    dayk_EMG_names = dayk_data.EMG_names
-    #-------- Extract EMG envelops in trials without temporal alignment --------#
-    dayk_EMG = dayk_data.get_trials_data_EMG('R', 'start_time', 0.0, 'end_time', 0)
-    dayk_EMG, dayk_EMG_names = emg_preprocessing(dayk_EMG, dayk_EMG_names)
-
-    #============================================= Pre-processing ==================================================================#
-    day0_spike, dayk_spike = spike_preprocessing(day0_unit_names, dayk_unit_names, day0_spike, dayk_spike) # zero-padding empty channels
-
+    # Create NWB file
     nwb_file = NWBFile(
-        identifier=f"xds_data_{day0_name}-{dayk_name}",
-        session_description=f"xds data: {day0_name}",
+        identifier=f"xds_data_{day0_name}",
+        session_description=f"XDS neural and EMG data from {day0_name}",
         lab="limblab",
         session_start_time=datetime.now(tz=tzlocal()),
     )
-    modules = {}
-    modules['ecephys'] = nwb_file.create_processing_module(name='ecephys', description='Ecephys processed data')
-
-    def create_ts(data, name):
-        data_ts = ElectricalSeries(name=name, data=H5DataIO(data))
-        return data_ts
-    modules['ecephys'].add(create_ts(np.array(day0_spike[0]).T, "day0_spike"))
     
-    # Write the NWB file to disk and display information about it
-    with NWBHDF5IO('xds_data.nwb', 'w') as io:
-        io.write(nwb_file)
+    # Create a device for neural recordings
+    device = Device(name="neural_array", description="array")
+    nwb_file.add_device(device)
+    
+    # Create electrode group
+    electrode_group = ElectrodeGroup(
+        name="electrodes", 
+        description="electrodes",
+        location="brain",
+        device=device
+    )
+    nwb_file.add_electrode_group(electrode_group)
+    
+    # Add electrodes to the electrode table
+    all_unit_names = np.sort(list(set(day0_unit_names)))
+    for i, unit_name in enumerate(all_unit_names):
+        nwb_file.add_electrode(
+            x=0.0, y=0.0, z=0.0,  # placeholder coordinates
+            imp=np.nan,
+            location="motor cortex",
+            filtering="none",
+            group=electrode_group,
+            id=i
+            # Note: unit names will be stored in metadata module instead of electrode labels
+        )
+    
+    # Concatenate all day0 spike trials for NWB storage
+    day0_spike_concat = np.concatenate(day0_spike, axis=0)
+    
+    # Do the same for EMG data
+    day0_EMG_concat = np.concatenate(day0_EMG, axis=0)
+    
+    # Calculate trial start and end times (bin indices) - should be same for both spike and EMG
+    day0_trial_start_times = []
+    day0_trial_end_times = []
+    cumulative_bins = 0
+    
+    print(f"Day0 Trials: {len(day0_spike)} spike trials, {len(day0_EMG)} EMG trials")
+    
+    # Verify that spike and EMG have same number of trials and same lengths
+    if len(day0_spike) != len(day0_EMG):
+        print(f"WARNING: Mismatch in trial count - Spike: {len(day0_spike)}, EMG: {len(day0_EMG)}")
+    
+    for trial_idx in range(len(day0_spike)):
+        spike_length = day0_spike[trial_idx].shape[0]
+        emg_length = day0_EMG[trial_idx].shape[0]
+        
+        if spike_length != emg_length:
+            print(f"WARNING: Trial {trial_idx} length mismatch - Spike: {spike_length}, EMG: {emg_length}")
+        
+        # Use spike trial length as reference (they should be the same)
+        start_bin = cumulative_bins
+        end_bin = cumulative_bins + spike_length - 1  # -1 because end is inclusive
+        
+        day0_trial_start_times.append(start_bin)
+        day0_trial_end_times.append(end_bin)
+        
+        cumulative_bins += spike_length
+        
+    # Create electrical series for spike data
+    electrode_table_region = nwb_file.create_electrode_table_region(
+        region=list(range(len(all_unit_names))),
+        description="electrodes for spike data"
+    )
+    
+    spike_electrical_series = ElectricalSeries(
+        name="spike",
+        data=H5DataIO(day0_spike_concat, compression=True),
+        electrodes=electrode_table_region,
+        starting_time=0.0,
+        rate=1.0/bin_size,  # sampling rate based on bin size
+        description="Binned and smoothed spike counts for day 0"
+    )
+    nwb_file.add_acquisition(spike_electrical_series)
+    
+    # Create time series for EMG data with channel names
+    emg_time_series = TimeSeries(
+        name="emg",
+        data=H5DataIO(day0_EMG_concat, compression=True),
+        unit="normalized",
+        starting_time=0.0,
+        rate=1.0/bin_size,  # sampling rate based on bin size
+        description=f"EMG envelope data for day 0. Channels: {', '.join(day0_EMG_names)}"
+    )
+    nwb_file.add_acquisition(emg_time_series)
+    
+    # Create a processing module for metadata
+    metadata_module = nwb_file.create_processing_module(
+        name='metadata', 
+        description='Custom metadata including unit names and EMG channel names'
+    )
+    
+    # Store unit names as annotation
+    unit_names_annotation = AnnotationSeries(
+        name="unit_names",
+        data=day0_unit_names,
+        timestamps=[0.0] * len(day0_unit_names),  # dummy timestamps
+        description="Neural unit names corresponding to electrode indices"
+    )
+    metadata_module.add(unit_names_annotation)
+    
+    # Store EMG channel names as annotation  
+    emg_names_annotation = AnnotationSeries(
+        name="emg_names",
+        data=day0_EMG_names,
+        timestamps=[0.0] * len(day0_EMG_names),  # dummy timestamps
+        description="EMG channel names corresponding to EMG data columns"
+    )
+    metadata_module.add(emg_names_annotation)
+    
+    # Store trial timing information
+    trial_starts_annotation = AnnotationSeries(
+        name="trial_start_bins",
+        data=day0_trial_start_times,
+        timestamps=[0.0] * len(day0_trial_start_times),
+        description="Start bin indices for each trial in concatenated data"
+    )
+    metadata_module.add(trial_starts_annotation)
 
-    # Read and display the NWB file contents
-    with NWBHDF5IO('xds_data.nwb', 'r') as io:
-        read_nwb = io.read()
-        print("NWB File Contents:")
-        print(f"Session Description: {read_nwb.session_description}")
-        print(f"Lab: {read_nwb.lab}")
-        print(f"Processing Modules: {list(read_nwb.processing.keys())}")
-        if 'ecephys' in read_nwb.processing:
-            ecephys_module = read_nwb.processing['ecephys']
-            print(f"Ecephys Module Contents: {list(ecephys_module.data_interfaces.keys())}")
-    return {
-            "day0_spike": day0_spike,
-            "dayk_spike": dayk_spike,
-            "day0_EMG": day0_EMG,
-            "dayk_EMG": dayk_EMG,
-            }
+    trial_ends_annotation = AnnotationSeries(
+        name="trial_end_bins",
+        data=day0_trial_end_times,
+        timestamps=[0.0] * len(day0_trial_end_times),
+        description="End bin indices for each trial in concatenated data"
+    )
+    metadata_module.add(trial_ends_annotation)
+    
+    return nwb_file

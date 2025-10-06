@@ -507,7 +507,65 @@ class xdsDict2DictBlock(DataFormattingBlock):
 			data_out[self.data_keys[1]] = data_out[self.data_keys[1]][:, :self.channel_cutoff]
 		return data_out, interpipe
 
+class xdsNWB2DictBlock(DataFormattingBlock):
+	"""
+	A block for converting an xds data NWB file to usable data dictionary.
+	"""
+	def __init__(self, data_keys = ['neural', 'behaviour']):
+		super().__init__()
+		self.data_keys = data_keys
+
+	def transform(self, data, interpipe):
+		data_out = {}
+		spike = data.dataset.acquisition['spike'].data[:]
+		emg = data.dataset.acquisition['emg'].data[:]
+		spike_names = data.dataset.processing['metadata']['unit_names'].data[:]
+		emg_names = data.dataset.processing['metadata']['emg_names'].data[:]
+		data_out[self.data_keys[0]] = spike
+		data_out[self.data_keys[1]] = emg
+		interpipe['spike_names'] = spike_names
+		interpipe['emg_names'] = emg_names
+		return data_out, interpipe
+
 # Wrappers that Modify Data
+
+class ZeroPaddingBlock(DataFormattingBlock):
+	"""
+	A block for zero-padding the data at specified locations.
+	"""
+	def __init__(self, ref_names, pad_value = 0, location = 'neural'):
+		"""
+		Initializes the ZeroPaddingBlock.
+		Args:
+			location (str or list): The key(s) in the data dictionary where padding is applied.
+			pad_width (int or tuple): The width of padding to be applied. If an integer is provided, it applies the same padding to both sides. If a tuple is provided, it should be in the form (pad_before, pad_after).
+		"""
+		super().__init__()
+		self.ref_names = ref_names
+		self.pad_value = pad_value
+		self.location = location
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by applying zero-padding to the specified locations of datastream.
+		Args:
+			data (dict): Input data dictionary containing the data to be padded.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with zero-padding applied at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if 'spike_names' not in interpipe:
+			raise ValueError("The 'interpipe' dictionary for ZeroPaddingBlock must contain a 'spike_names' key.")
+		spike_names = interpipe['spike_names']
+		raw_data = data[self.location]
+		padded_data = np.full((raw_data.shape[0], len(self.ref_names)), self.pad_value, dtype=raw_data.dtype)
+		for i, name in enumerate(self.ref_names):
+			if name in spike_names:
+				name_index = spike_names.index(name)
+				padded_data[:, i] = raw_data[:, name_index]
+		data[self.location] = padded_data
+		return data, interpipe
 class StabilizationBlock(DataProcessingBlock):
 	"""
 	A block for stabilizing the latent space of neural data.
