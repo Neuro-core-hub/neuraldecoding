@@ -5,28 +5,30 @@ from typing import Self
 import numpy as np
 import torch
 
+from omegaconf import OmegaConf, DictConfig
 from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA
 from neuraldecoding.model.neural_network_models import LSTM
-
+from neuraldecoding.model.Model import DummyModel
 import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.stabilization.latent_space_alignment import LatentSpaceAlignment
 
 from neuraldecoding.utils.data_tools import prep_data_decoder
 
-model_reg = {
+MODEL_REGISTRY = {
     "KalmanFilter": KalmanFilter,
     "LinearRegression": LinearRegression,
     "RidgeRegression": RidgeRegression,
     "LDA":LDA,
-    "LSTM": LSTM
+    "LSTM": LSTM,
+    "dummy": DummyModel
     }
 
-stabilization_reg = {
+STABILIZATION_REGISTRY = {
     "LatentSpaceAlignment": LatentSpaceAlignment
     }
 
 class Decoder(ABC):
-    def __init__(self, cfg: dict) -> None:
+    def __init__(self, cfg: DictConfig) -> None:
         """
         Decoder Class
 
@@ -34,14 +36,15 @@ class Decoder(ABC):
             cfg: config dictionary
         """
         # Get model stuff
-        if cfg["model"]["type"] in model_reg:
-            self.model = model_reg[cfg["model"]["type"]](cfg["model"]["params"])
+        self.cfg = cfg
+        if self.cfg.model.type in MODEL_REGISTRY:
+            self.model = MODEL_REGISTRY[self.cfg.model.type](self.cfg.model.params)
         else:
-            raise ValueError(f"Model {cfg['model']['type']} is not registered in model_reg.")
-        self.device = cfg["model"]["params"].get("device", "cpu")
+            raise ValueError(f"Model {cfg.model.type} either does not exist or is not registered in the model registry (in Decoder module).")
+        self.device = self.cfg.model.params.get("device", "cpu")
 
         # Get model path
-        self.fpath = cfg["fpath"]
+        self.fpath = self.cfg.model.fpath
 
         # # Get model i/o shape
         # self.input_shape = cfg["model"]["params"]["input_size"]
@@ -52,9 +55,8 @@ class Decoder(ABC):
 
         # Load model from path
         self.load_model()
-        self.cfg = cfg
 
-    def load_model(self, fpath : str = None) -> None:
+    def load_model(self, fpath : str = None, running_online : bool = False) -> None:
         """
         Load decoder's model parameters from a specified location
 
@@ -62,7 +64,7 @@ class Decoder(ABC):
             fpath: Override path to the parameters
         """
         self.fpath = fpath if fpath is not None else self.fpath
-        self.model.load_model(self.fpath)
+        self.model.load_model(fpath=self.fpath, running_online=running_online)
 
     def get_decoder(self) -> Self:
         """
@@ -103,7 +105,7 @@ class Decoder(ABC):
         return np.array(self.output_shape)
     
 class LinearDecoder(Decoder):
-    def __init__(self, cfg: dict) -> None:
+    def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
     def predict(self, neural_data: np.ndarray) -> torch.Tensor:
         """
@@ -120,10 +122,20 @@ class LinearDecoder(Decoder):
         return prediction
     
 class NeuralNetworkDecoder(Decoder):
-    def __init__(self, cfg: dict) -> None:
+    def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
     def predict(self, input):
+        if not isinstance(input, torch.Tensor):
+            input = torch.tensor(input, dtype=torch.float32)
         with torch.no_grad():
             input = input.to(self.device)
             prediction = self.model(input)
         return prediction
+    
+class DummyDecoder(Decoder):
+    def __init__(self, cfg: DictConfig) -> None:
+        super().__init__(cfg)
+
+    def predict(self, neural_data):
+        self.model(neural_data)
+    

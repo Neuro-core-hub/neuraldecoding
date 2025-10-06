@@ -1,0 +1,4 @@
+defaults:
+  - /model: model
+
+fpath: "lstm/lstm_date_{date}_day_{day}.pkl" # directory to saved model

@@ -30,8 +30,11 @@ class SequenceScaler:
     
     def transform(self, X):
         # loop over each timestep and apply the scaler
-        for i in range(X.shape[2]):
-            X[:, :, i] = self.scaler.transform(X[:, :, i])
+        if X.ndim == 3:
+            for i in range(X.shape[2]):
+                X[:, :, i] = self.scaler.transform(X[:, :, i])
+        else:
+            X = self.scaler.transform(X)
         return X
     
     def fit_transform(self, X):

@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pickle
 import torch
@@ -48,7 +49,7 @@ class LDA(LinearModel):
         if data.shape[1] != self.Nfeats:
             raise ValueError(f"Number of features in input data ({data.shape[1]}) does not match the model's trained number of features ({self.Nfeats}).")
         if isinstance(data, np.ndarray):
-            data = torch.from_numpy(data)
+            data = torch.from_numpy(data.copy())
         predictions = self.model.predict(data)
         return torch.tensor(predictions, dtype=torch.float64)
     
@@ -69,20 +70,22 @@ class LDA(LinearModel):
         likelihood = self.model.predict_proba(data)
         return torch.tensor(likelihood, dtype=torch.float64)
 
-    def save_model(self, filepath: str) -> None:
+    def save_model(self, fpath: str) -> None:
         """
         Save the trained LDA model to a file.
         Args:
-            filepath (str): Path to the file where the model will be saved.
+            fpath (str): Path to the file where the model will be saved.
         """
-        with open(filepath, 'wb') as f:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        with open(fpath, 'wb') as f:
             pickle.dump((self.model, self.Nfeats), f)
 
-    def load_model(self, filepath: str) -> None:
+    def load_model(self, fpath: str, running_online: bool) -> None:
         """
         Load a trained LDA model from a file.
         Args:
-            filepath (str): Path to the file from which the model will be loaded.
+            fpath (str): Path to the file from which the model will be loaded.
         """
-        with open(filepath, 'rb') as f:
+        with open(fpath, 'rb') as f:
             self.model, self.Nfeats = pickle.load(f)

@@ -1,0 +1,5 @@
+type: KalmanFilter
+fpath: null
+save: true
+params:
+  zero_position_uncertainty: false

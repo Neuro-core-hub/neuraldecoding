@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 
+
 def int_to_string(in_array):
     """
     Convert an array of integers to a string
@@ -14,9 +15,10 @@ def int_to_string(in_array):
     for number in range(len(in_array)):
         final_string.append(chr(in_array[number]))
 
-    final_string = ''.join(final_string)
+    final_string = "".join(final_string)
 
     return final_string
+
 
 def get_creation_path_time(path):
     """
@@ -32,18 +34,43 @@ def get_creation_path_time(path):
         file_path = os.path.join(path, file)
 
         # choose the standard path based on the OS
-        if sys.platform == "linux" or sys.platform == "linux2" or sys.platform == "win32":
+        if (
+            sys.platform == "linux"
+            or sys.platform == "linux2"
+            or sys.platform == "win32"
+        ):
             curr_time = os.path.getctime(file_path)
         elif sys.platform == "darwin":
             curr_time = os.stat(file_path).st_birthtime
-        
+
         if curr_time < earliest_time:
             earliest_time = curr_time
-    
+
     return earliest_time
+
 
 def is_collection(obj):
     """
     Check if the object is a collection (list, tuple, or numpy array)
     """
     return isinstance(obj, (list, tuple, np.ndarray))
+
+def resolve_path(obj, path):
+    """
+    given a string that resembles a class structure, access the attribute from obj
+    ex: obj has attribute 'processing' that has attribute 'ecephys', path is 'processing.ecephys'
+    this function will return obj.processing.ecephys
+
+    Parameters:
+    obj: the object we would like to access
+    str: the path leading to the part of the object we'd like to access (not including the object itself)
+    """
+    for key in path.split('.'):
+        try:
+            obj = getattr(obj,key)
+        except AttributeError:
+            try:
+                obj = obj[key]
+            except (KeyError, TypeError):
+                raise ValueError(f"Cannot resolve path segment: {key}")
+    return obj

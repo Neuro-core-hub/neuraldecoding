@@ -33,7 +33,6 @@ Last updated: 11/6/2021
 
 
 import warnings
-from scipy import linalg
 import numpy as np
 
 def get_factor_analysis_loading(train_data, n_components,max_n_its=100000, ll_diff_thresh=1e-8,
@@ -503,13 +502,23 @@ def find_minimal_disjoint_integer_sets(input_cell):
     bad_rows = np.sum(ind_matrix, axis=1) == 0
     unique_vls[bad_rows] = []
     ind_matrix[bad_rows, :] = np.empty((1, ind_matrix.shape[1]))
- 
+#     unique_rows = np.unique(ind_matrix, axis=0)
+#     # find the index of the unique rows where each row matches
+#     row_map = np.array([np.where((unique_rows == ind_matrix[ii]).all(axis=1))[0][0] \
+#         for ii in range(0, ind_matrix.shape[0])])
+#     n_unique_rows = unique_rows.shape[0]
+# ### uniqure_rows to n_unique_rows code above are altered because
+# ### error occured on   File "/home/chesteklab/Code/Chang/newraldecoding/neuraldecoding/stabilization/latent_space_alignment/factor_analysis.py", line 505, in find_minimal_disjoint_integer_sets
+# ###    'cell_inds': np.where(unique_rows[r])[0]
+# ###                 ~~~~~~~~^^^^^^^^^^^^^^^^
+# ### ValueError: Calling nonzero on 0d arrays is not allowed. Use np.atleast_1d(scalar).nonzero() instead. If the context of this error is of the form `arr[nonzero(cond)]`, just use `arr[cond]`.
+    
     unique_rows = np.unique(ind_matrix)
     # find the index of the unique rows where each row matches
     row_map = np.array([np.unique(np.where(unique_rows == ind_matrix[ii])[0])[0] \
         for ii in range(0, ind_matrix.shape[0]) if ind_matrix[ii,:] in unique_rows])
     n_unique_rows = unique_rows.shape[0]
-
+    
     setstr = []
     for r in range(n_unique_rows-1, -1, -1): 
         setstr.append({'vls': unique_vls[row_map == r],

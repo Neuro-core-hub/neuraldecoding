@@ -1,0 +1,14 @@
+defaults:
+  - /model@model: model
+
+training:
+  print_results: True
+  print_every: 1
+
+evaluation:
+  metrics: ["correlation"]
+  save_path: "tests/trainer/results/test_trainer_results.csv"
+  params: {}
+
+data:
+  params: {}

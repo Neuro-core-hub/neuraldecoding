@@ -116,38 +116,75 @@ def data_split_direct(data_X, data_Y, ratio):
 
     return split1, split2
 
-def data_split_trial(x, y, trial_idx, split_ratio=0.8, seed = 42):
-    boundaries = np.concatenate([trial_idx, [len(x)]])
-    n_trials = len(trial_idx)
-    if seed<0:
-        n_samples = x.shape[0]
-        n_val = int(n_samples * (1.0-split_ratio))
 
-        # Take the last n_val samples for validation
-        train_neural_split = x[:-n_val]
-        train_kinematics_split = y[:-n_val]
-        val_neural = x[-n_val:]
-        val_kinematics = y[-n_val:]
-        return (train_neural_split, train_kinematics_split), (val_neural, val_kinematics)
+def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False):
+    """
+    Split (x, y) into train/test.
+    - If trial_idx is provided and non-empty, split by whole trials.
+      trial_idx is interpreted as the start index of each trial (sorted or not).
+    - If trial_idx is None or empty, split by samples.
+    - Shuffles only when shuffle=True (seeded).
+    Returns: (x_train, y_train), (x_test, y_test)
+    """
+    n = len(x)
+    if len(y) != n:
+        raise ValueError("x and y must have the same length.")
+
     g = torch.Generator().manual_seed(seed)
-    perm = torch.randperm(n_trials, generator=g)
-    n_test = int(n_trials * (1.-split_ratio))
-    
-    test_trials = perm[:n_test]
-    train_trials = perm[n_test:]
-    
-    train_mask = torch.zeros(len(x), dtype=torch.bool)
-    test_mask = torch.zeros(len(x), dtype=torch.bool)
-    
-    for trial in train_trials:
-        start, end = boundaries[trial], boundaries[trial + 1]
-        train_mask[start:end] = True
-        
-    for trial in test_trials:
-        start, end = boundaries[trial], boundaries[trial + 1]
-        test_mask[start:end] = True
-    
-    return (x[train_mask],y[train_mask]), (x[test_mask],y[test_mask])
+    device = x.device if torch.is_tensor(x) else torch.device('cpu')
+
+    # ----- Trial-aware split -----
+    if trial_idx is not None and len(trial_idx) > 0:
+        # Normalize/validate trial starts
+        if torch.is_tensor(trial_idx):
+            tstarts = trial_idx.flatten().long().cpu()
+        else:
+            tstarts = torch.as_tensor(trial_idx, dtype=torch.long)
+        tstarts = tstarts.clamp(0, max(0, n - 1))
+        tstarts, _ = torch.sort(tstarts)
+
+        # Build boundaries: [t0, t1, ..., tn, N]
+        boundaries = torch.cat([tstarts, torch.tensor([n], dtype=torch.long)])
+
+        n_trials = len(tstarts)
+        n_train_trials = int(n_trials * split_ratio)
+
+        if shuffle:
+            perm = torch.randperm(n_trials, generator=g)
+        else:
+            perm = torch.arange(n_trials)
+
+        train_trials = perm[:n_train_trials]
+        test_trials = perm[n_train_trials:]
+
+        # Boolean masks on the same device as x (if tensor)
+        train_mask = torch.zeros(n, dtype=torch.bool, device=device)
+        test_mask = torch.zeros(n, dtype=torch.bool, device=device)
+
+        for tr in train_trials.tolist():
+            s = int(boundaries[tr].item())
+            e = int(boundaries[tr + 1].item())
+            train_mask[s:e] = True
+
+        for tr in test_trials.tolist():
+            s = int(boundaries[tr].item())
+            e = int(boundaries[tr + 1].item())
+            test_mask[s:e] = True
+
+        return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])
+
+    # ----- Sample-wise split (no trial info) -----
+    n_train = int(n * split_ratio)
+    if shuffle:
+        perm = torch.randperm(n, generator=g).to(device)
+        train_idx = perm[:n_train]
+        test_idx = perm[n_train:]
+    else:
+        train_idx = torch.arange(0, n_train, device=device)
+        test_idx = torch.arange(n_train, n, device=device)
+
+    return (x[train_idx], y[train_idx]), (x[test_idx], y[test_idx])
+
 
 def add_history(neural_data, seq_len):
     """
