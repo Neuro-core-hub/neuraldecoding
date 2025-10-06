@@ -1437,3 +1437,87 @@ class ReFITTransformationBlock(DataProcessingBlock):
 		
 		return transformed_vel
 		
+class TrimAndSmoothBlock(DataProcessingBlock):
+    """
+    A block for trimming neural and kinematic (finger) data around movement onset,
+    determined by deviations from baseline, and then smoothing the neural data.
+    """
+
+    def __init__(self, neural_key="neural_train", finger_key="finger_train",
+                 std_multiplier=2, sigma=2.5, pre_ms=120, post_ms=420, bin_ms=20):
+        """
+        Initializes the TrimBlock.
+
+        Args:
+            neural_key (str): Key in the data dict for neural data.
+            finger_key (str): Key in the data dict for kinematic data.
+            std_multiplier (float): Threshold multiplier for std above baseline.
+            sigma (float): Gaussian smoothing sigma (in samples -> calculated by 50ms/bin_ms, where 50 ms is from Gallego 2020 paper)
+            pre_ms (int): How many ms before movement onset to include.
+            post_ms (int): How many ms after movement onset to include.
+            bin_ms (int): Bin width in ms.
+        """
+        super().__init__()
+        self.neural_key = neural_key
+        self.finger_key = finger_key
+        self.std_multiplier = std_multiplier
+        self.sigma = sigma
+        self.pre_bins = pre_ms // bin_ms
+        self.post_bins = post_ms // bin_ms
+
+    def transform(self, data, interpipe):
+        """
+        Trim trials around movement onset and smooth neural data.
+
+        Args:
+            data (dict): Dictionary with keys [self.neural_key, self.finger_key].
+                         - neural: list/array of shape (n_trials, T, C)
+                         - finger: list/array of shape (n_trials, T)
+            interpipe (dict): Shared pipeline dictionary.
+
+        Returns:
+            data (dict): With trimmed + smoothed neural/finger data.
+            interpipe (dict): Unchanged.
+        """
+        neural_trials = data[self.neural_key]
+        finger_trials = data[self.finger_key]
+
+        trimmed_neural = []
+        trimmed_finger = []
+
+        for trial_idx, (trial_neural, trial_finger) in enumerate(zip(neural_trials, finger_trials)):
+            # baseline = first 10% of trial
+            baseline_period = trial_finger[: int(0.1 * len(trial_finger))]
+            baseline_mean = np.mean(baseline_period)
+            baseline_std = np.std(baseline_period)
+
+            threshold = baseline_mean + self.std_multiplier * baseline_std
+            min_threshold = baseline_mean - self.std_multiplier * baseline_std
+
+            # movement onset idx
+            movement_onset_idx = next(
+                (i for i, val in enumerate(trial_finger)
+                 if (val > threshold) or (val < min_threshold)), 0
+            )
+
+            start = movement_onset_idx - self.pre_bins
+            end = movement_onset_idx + self.post_bins
+
+            if start < 0 or end >= trial_neural.shape[0]:
+                continue  # too short, skip trial
+
+            # trim and smooth
+            neural_trimmed = trial_neural[start:end, :]
+            neural_smoothed = gaussian_filter1d(neural_trimmed, sigma=self.sigma, axis=0)
+
+            finger_trimmed = trial_finger[start:end]
+
+            trimmed_neural.append(neural_smoothed)
+            trimmed_finger.append(finger_trimmed)
+
+
+        # Replace data dict
+        data[self.neural_key] = np.array(trimmed_neural, dtype=object)
+        data[self.finger_key] = np.array(trimmed_finger, dtype=object)
+
+        return data, interpipe
