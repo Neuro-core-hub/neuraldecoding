@@ -19,6 +19,7 @@ import pickle
 from typing import Union, List
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 
 
 class PreprocessingBlock(ABC):
