@@ -159,3 +159,28 @@ class NoAlignment(Alignment):
         return lm
     
     
+class CCA(Alignment):
+    def __init__(self, cfg = None):
+        self.name = 'cca'
+    
+    def set_baseline(self, ds):
+        self.Q0, self.R0 = np.linalg.qr(ds)
+
+    def align(self, ls):
+        assert ls.shape[0] > ls.shape[1], "Data should be in shape [n_timepoints x n_latent_dimensions]"
+
+        Qk, Rk = np.linalg.qr(ls)
+
+        ## TO delete
+        shape = min(Qk.shape[0], self.Q0.shape[0])
+        Q0 = self.Q0[:shape, :]
+        Qk = Qk[:shape, :]
+        ##
+        
+        U, _, Vt = np.linalg.svd(Q0.T @ Qk)
+        Mk = np.linalg.inv(Rk) @ Vt.T
+        M0 = np.linalg.inv(self.R0) @ U
+        # base_ls = self.baseline @ M0
+        aligned_ls = ls @ Mk @ np.linalg.inv(M0)
+        
+        return aligned_ls

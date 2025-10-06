@@ -23,11 +23,11 @@ class Regression(LinearModel):
         predictions = self.model.predict(data)
         return torch.tensor(predictions, dtype=torch.float64)
 
-    def save_model(self, fpath, running_online=False) -> None:
+    def save_model(self, fpath: str) -> None:
         with open(fpath, 'wb') as f:
             pickle.dump(self.model, f)
     
-    def load_model(self, fpath, running_online=False) -> None:
+    def load_model(self, fpath: str, running_online: bool) -> None:
         with open(fpath, 'rb') as f:
             self.model = pickle.load(f)
 
