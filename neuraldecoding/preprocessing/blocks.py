@@ -1380,14 +1380,3 @@ class ReFITTransformationBlock(DataProcessingBlock):
 				transformed_vel[t, :] = vel_magnitude * target_direction
 		
 		return transformed_vel
-	
-class AddBlock(DataProcessingBlock):
-	"""
-	A simple block for debugging that adds a given constant value to the input data.
-	"""
-	def __init__(self, value):
-		super().__init__()
-		self.value = value
-
-	def transform(self, data, interpipe):
-		return data + self.value, interpipe
