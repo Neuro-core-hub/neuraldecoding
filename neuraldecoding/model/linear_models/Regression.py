@@ -27,8 +27,8 @@ class Regression(LinearModel):
         with open(filepath, 'wb') as f:
             pickle.dump(self.model, f)
     
-    def load_model(self, filepath: str) -> None:
-        with open(filepath, 'rb') as f:
+    def load_model(self, fpath: str, running_online: bool = False) -> None:
+        with open(fpath, 'rb') as f:
             self.model = pickle.load(f)
 
 class LinearRegression(Regression):
