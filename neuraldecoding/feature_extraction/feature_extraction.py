@@ -24,7 +24,6 @@ class FeatureExtractor:
                 {
                     "bin_size_ms": 50,
                     "feature_type": "mav" or ["mav", "power"] or [["mean", "var"], ["mav"]],  # string, list, or list of lists
-                    "channels": 96,  # number of channels/features
                     "feature_params": [{"hist": 2}, {}] or None,  # parameters for each feature type
                 }
         """
@@ -651,8 +650,7 @@ class FeatureExtractor:
             # Assume base features are computed with simple feature types that produce 1 feature per channel
             return base_features.shape[0]
         
-        # Fallback - try to get from config if available
-        return getattr(self, 'channels', 1)
+        raise ValueError("Could not get dimensions for array index")
     
     def _compute_features(self, data: np.ndarray, feature_types: List[str], feature_params: Optional[Dict] = None) -> np.ndarray:
         """
@@ -731,7 +729,6 @@ if __name__ == "__main__":
     config = {
         'bin_size_ms': 100,
         'feature_type': 'mav',
-        'channels': 3,
     }
     
     extractor = FeatureExtractor(config)
@@ -752,7 +749,6 @@ if __name__ == "__main__":
         'bin_size_ms': 50,
         'feature_type': [['mean', 'var'], ['mav']],  # Two feature groups
         'feature_params': [{}, {}],  # Parameters for each group
-        'channels': 3,
     }
     
     extractor_nested = FeatureExtractor(config_nested)
@@ -779,7 +775,6 @@ if __name__ == "__main__":
         'bin_size_ms': 50,
         'feature_type': ['mean', 'history'],  # Mean feature + history of previous means
         'feature_params': [{'hist': 2}],  # Single parameter dict for the feature group
-        'channels': 4,
     }
     
     extractor_history = FeatureExtractor(config_history)
@@ -815,7 +810,6 @@ if __name__ == "__main__":
         'bin_size_ms': 50,
         'feature_type': [['mean', 'vel'], ['mav', 'history']],  # Second stream: mav + its history
         'feature_params': [{}, {'hist': 2}],  # No params for mean+vel, 2 bin history for second
-        'channels': 3,
     }
     
     extractor_combined = FeatureExtractor(config_combined)
@@ -852,7 +846,6 @@ if __name__ == "__main__":
         invalid_config = {
             'bin_size_ms': 50,
             'feature_type': 'history',  # This should fail
-            'channels': 4,
         }
         FeatureExtractor(invalid_config)
         print("❌ Validation failed - should not allow history alone")
@@ -873,7 +866,6 @@ if __name__ == "__main__":
         config_test = {
             'bin_size_ms': 100,
             'feature_type': ft,
-            'channels': 4,
         }
         extractor_test = FeatureExtractor(config_test)
         
