@@ -12,7 +12,7 @@ import sklearn.preprocessing
 import torch
 
 from abc import ABC, abstractmethod
-
+import os
 import warnings
 import time
 import pickle
@@ -374,10 +374,56 @@ class Dataset2DictBlock(DataFormattingBlock):
 		if self.apply_trial_filtering:
 			UserWarning("Trial Filtering coming soon to a dataset near you")
 
-		data_out = {'neural': neural, 'neural_ts': neural_ts, 'behavior': behavior, 'behavior_ts': behavior_ts}
-		interpipe['trial_start_times'] = trial_start_times
-		interpipe['trial_end_times'] = trial_end_times
-		interpipe['targets'] = targets[:]
+		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
+		interpipe[self.interpipe_keys['trial_start_times']] = trial_start_times
+		interpipe[self.interpipe_keys['trial_end_times']] = trial_end_times
+		interpipe[self.interpipe_keys['targets']] = targets[:]
+		interpipe[f'{self.data_keys[0]}_ts'] = neural_ts
+		interpipe[f'{self.data_keys[1]}_ts'] = behaviour_ts
+		return data_out, interpipe
+
+class IndexSelectorBlock(DataFormattingBlock):
+	"""
+	A block for selecting data from a dictionary based on indices.
+	"""
+	def __init__(self, location: List[str], indices: Union[int, list]):
+		super().__init__()
+		self.location = location
+		self.indices = indices
+
+	def transform(self, data, interpipe):
+		data_out = data.copy()
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			# Convert data to numpy array if not already
+			if not isinstance(data[loc], np.ndarray):
+				data[loc] = np.array(data[loc])
+			if data[loc].ndim == 1:
+				# For 1D data, select indices directly
+				data_out[loc] = data[loc][self.indices]
+			elif data[loc].ndim == 2:
+				# For 2D data, select indices from the second dimension
+				data_out[loc] = data[loc][:, self.indices]
+			else:
+				raise ValueError(f"Data at location '{loc}' must be 1D or 2D, got {data[loc].ndim}D")
+		return data_out, interpipe
+	def transform_online(self, data, interpipe):
+		return self.transform(data, interpipe)
+
+class OneHotToClassNumberBlock(DataFormattingBlock):
+	"""
+	A block for converting one-hot encoded data to class numbers.
+	"""
+	def __init__(self, location):
+		super().__init__()
+		self.location = location
+	def transform(self, data, interpipe):
+		data_out = data.copy()
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			data_out[loc] = np.argmax(data[loc], axis=1)
 		return data_out, interpipe
 
 class RoundToIntegerBlock(DataFormattingBlock):
@@ -518,49 +564,32 @@ class NormalizationBlock(DataProcessingBlock):
 		self.save_denorm_data = save_denorm_data
 		self.save_normalizer = save_normalizer
 	def transform(self, data, interpipe):
-		if self.normalizer_method == 'sklearn':
-			normalizer = getattr(sklearn.preprocessing, self.sklearn_type)(**self.normalizer_params)
-			if self.save_denorm_data:
-				denorm_key = 'denorm_' + self.fit_location
-				interpipe[denorm_key] = data[self.fit_location]
-				interpipe['save_keys'].append(denorm_key)
-			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location])
-			for loc in self.apply_location:
-				if self.save_denorm_data:
-					denorm_key = 'denorm_' + loc
-					interpipe[denorm_key] = data[loc]
-					interpipe['save_keys'].append(denorm_key)
-				data[loc] = normalizer.transform(data[loc])
-		elif self.normalizer_method == 'sequence_scaler':	
-			normalizer = SequenceScaler()
-			data[self.fit_location] = normalizer.fit_transform(data[self.fit_location], **self.normalizer_params)
-			if self.save_denorm_data:
-				denorm_key = 'denorm_' + self.fit_location
-				interpipe[denorm_key] = data[self.fit_location].copy()
-				interpipe['save_keys'].append(denorm_key)
-			for loc in self.apply_location:
-				if self.save_denorm_data:
-					denorm_key = 'denorm_' + loc
-					interpipe[denorm_key] = data[loc]
-				data[loc] = normalizer.transform(data[loc])
+		if interpipe['is_train']:
+			if self.normalizer_method == 'sklearn':
+				normalizer = getattr(sklearn.preprocessing, self.normalizer_params['type'])(**self.normalizer_params['params'])
+				data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
+				data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			elif self.normalizer_method == 'sequence_scaler':
+				normalizer = SequenceScaler()
+				data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
+				data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			else:
+				raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
+			if self.normalizer_params['is_save']:
+				if 'save_path' not in self.normalizer_params:
+					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
+				os.makedirs(os.path.dirname(self.normalizer_params['save_path']), exist_ok=True)
+				with open(self.normalizer_params['save_path'], 'wb') as f:
+					pickle.dump(normalizer, f)
+			return data, interpipe
 		else:
-			raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
-		if self.save_path is not None:
-			with open(self.save_path, 'wb') as f:
-				pickle.dump(normalizer, f)
-		if self.save_normalizer:
-			normalizer_key = 'normalizer_' + self.fit_location
-			interpipe[normalizer_key] = normalizer
-			interpipe['save_keys'].append(normalizer_key)
-		return data, interpipe
+			with open(self.normalizer_params['save_path'], 'rb') as f:
+				normalizer = pickle.load(f)
+			for loc in self.location:
+				data[loc] = normalizer.transform(data[loc])
+			return data, interpipe
 
-class LoadNormalizationBlock(DataProcessingBlock):
-	def __init__(self, location, method, normalizer_params):
-		super().__init__()
-		self.location = location
-		self.normalizer_method = method
-		self.normalizer_params = normalizer_params
-	def transform(self, data, interpipe):
+	def transform_online(self, data, interpipe):
 		with open(self.normalizer_params['save_path'], 'rb') as f:
 			normalizer = pickle.load(f)
 		for loc in self.location:
@@ -657,7 +686,14 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			interpipe['targets_filt'][start:end] = interpipe['targets'][i][self.target_filter]
 
 		return data, interpipe
-	
+
+	def transform_online(self, data, interpipe):
+		neural_data_bin = data[self.location_data[0]]
+		features = self.feature_extractor.compute_bin_features(
+			data=neural_data_bin,
+		)["features"]
+		data[self.location_data[0]] = features
+		return data, interpipe
 
 class RawToXPC(DataProcessingBlock):
 	"""
@@ -1430,4 +1466,3 @@ class ReFITTransformationBlock(DataProcessingBlock):
 				transformed_vel[t, :] = vel_magnitude * target_direction
 		
 		return transformed_vel
-		

@@ -1,3 +1,3 @@
-from neuraldecoding.preprocessing import *
-from neuraldecoding.preprocessing.preprocessing import Preprocessing
-from neuraldecoding.preprocessing.blocks import *
+from .preprocessing import *
+from .preprocessing import Preprocessing
+from .blocks import *

@@ -32,17 +32,12 @@ class Preprocessing:
     
     def preprocess_pipeline(self, data, params = {'is_train': True}):
         current_data = data
-        inter_pipeline_data = {'save_keys': []}
+        inter_pipeline_data = {}
         inter_pipeline_data.update(params)
         for step in self.pipeline:
             step_instance = step['instance']
             current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data)
-
-        final_save_data = {}
-        for key in inter_pipeline_data['save_keys']:
-            final_save_data[key] = inter_pipeline_data[key]
-
-        return current_data, final_save_data
+        return current_data
 
     def preprocess_step(self, data, step_name, inter_pipeline_data = {'is_train': True}):
         for step in self.pipeline:
@@ -51,3 +46,23 @@ class Preprocessing:
                 return step_instance.transform(data, inter_pipeline_data)
         
         raise ValueError(f"Step '{step_name}' not found in preprocessing pipeline")
+    
+class OnlinePreprocessing(Preprocessing):
+    def __init__(self, config):
+        super().__init__(config)
+    
+    def preprocess_pipeline(self, data, params = {'is_online': True}, publish_intermediate_steps = False, publish_func = None):
+        current_data = data
+        inter_pipeline_data = {}
+        inter_pipeline_data.update(params)
+        for step in self.pipeline:
+            step_instance = step['instance']
+            current_data, inter_pipeline_data = step_instance.transform_online(current_data, inter_pipeline_data)
+            if publish_intermediate_steps:
+                if publish_func is None:
+                    raise ValueError("publish_func is required when publish_intermediate_steps is True")
+                publish_func({'step': step['name'], 'data': current_data, 'interpipe': inter_pipeline_data}, is_intermediate_step = True, step_name=step["name"])
+        if publish_func is None:
+            raise ValueError("publish_func is required when publish_intermediate_steps is True")
+        publish_func(current_data, is_intermediate_step=False)
+        return current_data

@@ -1,5 +1,5 @@
 from typing import Any
-from neuraldecoding.model.Model import Model
+from neuraldecoding.model import Model
 
 class LinearModel(Model):
 

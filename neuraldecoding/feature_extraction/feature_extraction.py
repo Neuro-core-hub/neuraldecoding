@@ -24,7 +24,6 @@ class FeatureExtractor:
                 {
                     "bin_size_ms": 50,
                     "feature_type": "mav" or ["mav", "power"] or [["mean", "var"], ["mav"]],  # string, list, or list of lists
-                    "channels": 96,  # number of channels/features
                     "feature_params": [{"hist": 2}, {}] or None,  # parameters for each feature type
                 }
         """
@@ -166,7 +165,7 @@ class FeatureExtractor:
     def extract_binned_features(self,
                                data: Union[np.ndarray, List[np.ndarray]],
                                timestamps_ms: Union[np.ndarray, List[np.ndarray]],
-                               return_array: bool = False) -> Union[Tuple[List[Dict], np.ndarray], Tuple[np.ndarray, np.ndarray], Tuple[List[np.ndarray], np.ndarray]]:
+                               return_array: bool = False):
         """
         Extract features from timestamped data by dividing it into time bins.
         
@@ -178,8 +177,6 @@ class FeatureExtractor:
         Returns:
             List of feature dictionaries (default), single array [n_bins, n_features] (single input),
             or list of arrays [n_bins, n_features] (multiple inputs) when return_array=True
-            List of feature dictionaries (default), single array [n_bins, n_features] (single input),
-            or list of arrays [n_bins, n_features] (multiple inputs) when return_array=True
         """
         # Normalize inputs to lists
         if isinstance(data, np.ndarray):
@@ -189,7 +186,6 @@ class FeatureExtractor:
             data_list = data
             timestamps_list = timestamps_ms
 
-        
         # --- Start of new validation section ---
         is_multistream_config = isinstance(self.feature_type, list) and \
                                 len(self.feature_type) > 0 and \
@@ -222,7 +218,7 @@ class FeatureExtractor:
                 raise ValueError(f"Data and timestamps must have same number of samples for array {i}")
         
         if len(data_list) == 0 or any(len(t) == 0 for t in timestamps_list):
-            return np.array([]), np.array([]) if return_array else [], np.array([])
+            return np.array([]) if return_array else []
         
         # Determine global time range across all arrays
         min_time = min(t.min() for t in timestamps_list)
@@ -242,7 +238,6 @@ class FeatureExtractor:
             should_skip = False
             for chans, d, t in zip(channels_per_array, data_list, timestamps_list):
                 bin_mask = (t >= bin_start) & (t < bin_end)
-
                 if np.any(bin_mask):
                     bin_data_list.append(d[bin_mask].reshape(-1, chans))
                 else:
@@ -322,7 +317,7 @@ class FeatureExtractor:
         # Return array of features if requested
         if return_array:
             if not bin_features:
-                return np.array([]), np.array([])
+                return np.array([])
             
             # Handle both single arrays and lists of arrays
             first_features = bin_features[0]['features']
@@ -340,7 +335,7 @@ class FeatureExtractor:
                 return np.array(feature_arrays)
         
         return bin_features
-            
+
     def compute_bin_features(self, 
                             data: np.ndarray,
                             bin_end_timestamp_ms: Optional[float] = None,
@@ -655,8 +650,7 @@ class FeatureExtractor:
             # Assume base features are computed with simple feature types that produce 1 feature per channel
             return base_features.shape[0]
         
-        # Fallback - try to get from config if available
-        return getattr(self, 'channels', 1)
+        raise ValueError("Could not get dimensions for array index")
     
     def _compute_features(self, data: np.ndarray, feature_types: List[str], feature_params: Optional[Dict] = None) -> np.ndarray:
         """
@@ -735,7 +729,6 @@ if __name__ == "__main__":
     config = {
         'bin_size_ms': 100,
         'feature_type': 'mav',
-        'channels': 3,
     }
     
     extractor = FeatureExtractor(config)
@@ -756,7 +749,6 @@ if __name__ == "__main__":
         'bin_size_ms': 50,
         'feature_type': [['mean', 'var'], ['mav']],  # Two feature groups
         'feature_params': [{}, {}],  # Parameters for each group
-        'channels': 3,
     }
     
     extractor_nested = FeatureExtractor(config_nested)
@@ -783,7 +775,6 @@ if __name__ == "__main__":
         'bin_size_ms': 50,
         'feature_type': ['mean', 'history'],  # Mean feature + history of previous means
         'feature_params': [{'hist': 2}],  # Single parameter dict for the feature group
-        'channels': 4,
     }
     
     extractor_history = FeatureExtractor(config_history)
@@ -819,7 +810,6 @@ if __name__ == "__main__":
         'bin_size_ms': 50,
         'feature_type': [['mean', 'vel'], ['mav', 'history']],  # Second stream: mav + its history
         'feature_params': [{}, {'hist': 2}],  # No params for mean+vel, 2 bin history for second
-        'channels': 3,
     }
     
     extractor_combined = FeatureExtractor(config_combined)
@@ -856,7 +846,6 @@ if __name__ == "__main__":
         invalid_config = {
             'bin_size_ms': 50,
             'feature_type': 'history',  # This should fail
-            'channels': 4,
         }
         FeatureExtractor(invalid_config)
         print("❌ Validation failed - should not allow history alone")
@@ -877,7 +866,6 @@ if __name__ == "__main__":
         config_test = {
             'bin_size_ms': 100,
             'feature_type': ft,
-            'channels': 4,
         }
         extractor_test = FeatureExtractor(config_test)
         

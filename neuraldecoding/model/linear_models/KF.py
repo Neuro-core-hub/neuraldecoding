@@ -13,6 +13,7 @@ class KalmanFilter(LinearModel):
             "num_outputs" (int) which specifies the number of outputs, "start_y" (list) which specifies the initial yhat, and "zero_position_uncertainty" 
             (bool) which specifies whether to zero position uncertainty for online predictions
         """
+
         self.A, self.C, self.W, self.Q = None, None, None, None
         self.Pt = None
         self.append_ones_y = model_params.get("append_ones_y", True)

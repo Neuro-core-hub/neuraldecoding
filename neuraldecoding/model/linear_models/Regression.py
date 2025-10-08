@@ -2,7 +2,7 @@ import numpy as np
 import pickle
 import torch
 from typing import Any
-from neuraldecoding.model.linear_models.LinearModel import LinearModel
+from .LinearModel import LinearModel
 from sklearn.linear_model import LinearRegression as SklearnLinearRegression
 from sklearn.linear_model import Ridge
 

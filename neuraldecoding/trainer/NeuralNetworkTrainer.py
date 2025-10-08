@@ -1,4 +1,6 @@
+import hydra
 from omegaconf import DictConfig
+import numpy as np
 import torch
 import json
 import collections
@@ -10,7 +12,6 @@ from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.utils import eval_metrics
 from omegaconf import open_dict
 from neuraldecoding.model import neural_network_models
-import numpy as np
 import neuraldecoding
 import warnings
 import copy
