@@ -2,3 +2,4 @@ from .latent_space_alignment import *
 from .alignment import *
 from .dim_red import *
 from .factor_analysis import *
+from .cycleGAN import *

@@ -1,5 +1,6 @@
 import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
+from neuraldecoding.stabilization.latent_space_alignment import cycleGAN
 import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
 from neuraldecoding.feature_extraction import FeatureExtractor
@@ -20,6 +21,7 @@ from typing import Union, List
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
+from omegaconf import OmegaConf
 
 
 class PreprocessingBlock(ABC):
@@ -1580,3 +1582,111 @@ class TrimAndSmoothBlock(DataProcessingBlock):
         data[self.finger_key] = np.array(trimmed_finger, dtype=object)
 
         return data, interpipe
+	
+class SmoothBlock(DataProcessingBlock):
+    """
+    Smooth using Gaussian1d
+    """
+
+    def __init__(self, neural_key="neural", finger_key="finger", kernel_size=40, sample_size=20):
+        """
+        Initializes the SmoothBlock.
+
+        Args:
+            neural_key (str): Key in the data dict for neural data.
+            finger_key (str): Key in the data dict for kinematic data.
+            kernel_size (int): Size of the Gaussian kernel for smoothing.
+            sample_size (int): Size of the samples to process.
+        """
+        super().__init__()
+        self.neural_key = neural_key
+        self.finger_key = finger_key
+        self.kernel_size = kernel_size
+        self.sample_size = sample_size
+
+    def transform(self, data, interpipe):
+        """
+        Trim trials around movement onset and smooth neural data.
+
+        Args:
+            data (dict): Dictionary with keys 
+            interpipe (dict): Shared pipeline dictionary.
+
+        Returns:
+            data (dict): With trimmed + smoothed neural/finger data.
+            interpipe (dict): Unchanged.
+        """
+        sigma = self.kernel_size / self.sample_size
+        # print(data[self.neural_key].shape)
+        # print(f"Data type: {data[self.neural_key].dtype}")
+        # print(data[self.neural_key][:100])
+        
+        data[self.neural_key] = gaussian_filter1d(data[self.neural_key].astype(np.float32), sigma=sigma, axis=0)
+        # print(data[self.neural_key].shape)
+        # print(f"Data type: {data[self.neural_key].dtype}")
+        # print(data[self.neural_key][:100])
+        return data, interpipe#
+
+class CycleGanBlock(DataProcessingBlock):
+	"""
+	A block for quick testing cycle gan. it does all the shit like loading data and do smoothing
+	TODO: terrible for a block design but useful for current timeframe to implement cycleGAN
+	"""
+
+	def __init__(self, 
+				fpath,
+				cycleGAN_params,
+				train_test_split = 0.8,
+				neural_type = 'tcfr',
+				verbose = False,
+				normalizer_path = None,
+				nested_pipeline_config = None
+				):
+		"""
+		Initializes the CycleGanBlock.
+
+		Args:
+
+		"""
+		super().__init__()
+		from neuraldecoding.preprocessing import Preprocessing
+		self.fpath = fpath
+		self.cycleGAN_params = cycleGAN_params
+		self.verbose = verbose
+		self.neural_type = neural_type
+		self.train_test_split = train_test_split
+		if normalizer_path is not None:
+			self.normalizer_path = normalizer_path
+		else:
+			self.normalizer_path = None
+
+		if nested_pipeline_config is not None:
+			self.preprocessor = Preprocessing(nested_pipeline_config) # its 21:00 and i am writing some real cursed shit
+		else:
+			self.preprocessor = None
+
+		
+
+	def transform(self, data, interpipe):
+		if 'is_train' not in interpipe:
+			raise ValueError("CycleGANBlock requires 'is_train' in interpipe.")
+
+		if interpipe['is_train']:
+			# load data
+			day0_data_dir = data['data_path']
+			cGAN = cycleGAN(day0_data_dir, self.verbose)
+			cGAN.save_cycleGAN(self.fpath)
+			return data, interpipe
+		else:
+			with open(self.fpath, 'rb') as fp:
+				cGAN = pickle.load(fp)
+
+			cGAN.load_process_data(data['data_path'], interpipe['decoder'], self.neural_type, self.preprocessor, self.normalizer_path, train_test_split=self.train_test_split)
+			cGAN.train_cycle_gan_aligner((OmegaConf.to_container(self.cycleGAN_params)))
+			cGAN.test_cycle_gan_aligner()
+			data_out = {}
+			data_out['neural_train'] = cGAN.dayk_X_train
+			data_out['neural_test'] = cGAN.dayk_X_test_aligned
+			data_out['behaviour_train'] = cGAN.dayk_Y_train
+			data_out['behaviour_test'] = cGAN.dayk_Y_test
+			return data_out, interpipe
