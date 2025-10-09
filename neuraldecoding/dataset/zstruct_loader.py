@@ -671,7 +671,7 @@ def add_run_data(
                     cross_trial_spike_times.append(trial_spike_times)
 
             # pdb.set_trace()
-            spike_times = np.concat(cross_trial_spike_times)
+            spike_times = np.concat(cross_trial_spike_times) / 1000 # convert to seconds
             nwb_file.add_unit(spike_times=spike_times, channel=ch_idx)
 
     # looping through the trials for adding the trials and all the other non-timeseries data to the NWB file
