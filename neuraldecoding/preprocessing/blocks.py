@@ -12,7 +12,7 @@ import sklearn.preprocessing
 import torch
 
 from abc import ABC, abstractmethod
-
+import os
 import warnings
 import time
 import pickle
@@ -449,6 +449,8 @@ class IndexSelectorBlock(DataFormattingBlock):
 			else:
 				raise ValueError(f"Data at location '{loc}' must be 1D or 2D, got {data[loc].ndim}D")
 		return data_out, interpipe
+	def transform_online(self, data, interpipe):
+		return self.transform(data, interpipe)
 
 class OneHotToClassNumberBlock(DataFormattingBlock):
 	"""
@@ -577,6 +579,7 @@ class NormalizationBlock(DataProcessingBlock):
 			if self.normalizer_params['is_save']:
 				if 'save_path' not in self.normalizer_params:
 					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
+				os.makedirs(os.path.dirname(self.normalizer_params['save_path']), exist_ok=True)
 				with open(self.normalizer_params['save_path'], 'wb') as f:
 					pickle.dump(normalizer, f)
 			return data, interpipe
@@ -586,6 +589,13 @@ class NormalizationBlock(DataProcessingBlock):
 			for loc in self.location:
 				data[loc] = normalizer.transform(data[loc])
 			return data, interpipe
+
+	def transform_online(self, data, interpipe):
+		with open(self.normalizer_params['save_path'], 'rb') as f:
+			normalizer = pickle.load(f)
+		for loc in self.location:
+			data[loc] = normalizer.transform(data[loc])
+		return data, interpipe
 
 class EnforceTensorBlock(DataProcessingBlock):
 	"""
@@ -665,7 +675,14 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			interpipe[ts_loc] = bin_timestamps
 		
 		return data, interpipe
-	
+
+	def transform_online(self, data, interpipe):
+		neural_data_bin = data[self.location_data[0]]
+		features = self.feature_extractor.compute_bin_features(
+			data=neural_data_bin,
+		)["features"]
+		data[self.location_data[0]] = features
+		return data, interpipe
 
 class RawToXPC(DataProcessingBlock):
 	"""
@@ -1364,4 +1381,3 @@ class ReFITTransformationBlock(DataProcessingBlock):
 				transformed_vel[t, :] = vel_magnitude * target_direction
 		
 		return transformed_vel
-		
