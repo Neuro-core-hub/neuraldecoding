@@ -54,6 +54,7 @@ class FactorAnalysis(LoadingMatrixDimRed):
 
         # proportion_variance = total_variance_captured / total_original_variance
         # print(f"Total variance captured: {proportion_variance}")
+        self.save_dict = {'lm_partial': lm_partial, 'psi': psi, 'W': W, 'loading_matrix': loading_matrix, 'FA': fa}
         return loading_matrix, None
     
     def reduce(self, data, lm, args = None):
@@ -152,11 +153,16 @@ class EMFactorAnalysis1(DimRed):
                                         ll_diff_thresh=self.ll_diff_threshold, min_priv_var=self.min_priv_var, verbose = self.verbose)
         print(base_lm.shape)
         print(base_lm)
+        self.save_dict = {'d': d, 'lm': base_lm, 'psi': psi}
         return base_lm, (d, psi)
     
     def reduce(self, data, lm, args):
         d, psi = args
         regularized_lm, O = fa_stable.get_stabilization_matrices(lm, psi, d)
         reduced_data = data @ regularized_lm.T + np.expand_dims(O, axis = -1).T
+        if hasattr(self, 'save_dict'):
+            self.save_dict.update({'regularized_lm': regularized_lm, 'O': O})
+        else:
+            self.save_dict = {'d': d, 'psi': psi, 'regularized_lm': regularized_lm, 'O': O}
         return reduced_data
     

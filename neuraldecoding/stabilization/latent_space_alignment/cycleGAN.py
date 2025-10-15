@@ -3,13 +3,42 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from neuraldecoding.utils.data_tools import load_one_nwb, neural_finger_from_dict
-from neuraldecoding.utils import data_split_trial
+from neuraldecoding.utils import data_split_trial#
+from neuraldecoding.dataset import Dataset
 from scipy.ndimage import gaussian_filter1d
 import numpy as np
 from sklearn.metrics import r2_score
 from datetime import datetime
 import pickle
 import os
+import sklearn.preprocessing
+from scipy.stats import entropy
+import neuraldecoding.preprocessing
+
+def kl_divergence_per_channel_rob(signal1, signal2, bins=50):
+    n_channels = signal1.shape[1]
+    kl_divs = np.zeros(n_channels)
+    
+    for ch in range(n_channels):
+        # CRITICAL: Use combined min/max from BOTH signals
+        combined_min = min(signal1[:, ch].min(), signal2[:, ch].min())
+        combined_max = max(signal1[:, ch].max(), signal2[:, ch].max())
+        
+        # Create common bin edges
+        bin_edges = np.linspace(combined_min, combined_max, bins + 1)
+        
+        # Now both histograms use the same bins
+        hist1, _ = np.histogram(signal1[:, ch], bins=bin_edges, density=False)
+        hist2, _ = np.histogram(signal2[:, ch], bins=bin_edges, density=False)
+        
+        # Normalize to probabilities
+        epsilon = 1e-10
+        hist1 = (hist1 + epsilon) / (hist1.sum() + bins * epsilon)
+        hist2 = (hist2 + epsilon) / (hist2.sum() + bins * epsilon)
+        
+        kl_divs[ch] = entropy(hist1, hist2)
+    
+    return kl_divs
 
 class Generator(nn.Module):
     def __init__(self, input_dim, hidden_dim, drop_out):
@@ -79,18 +108,44 @@ class cycleGAN():
         self.sample_size = 20
         self.verbose = verbose
     
-    def load_process_data(self, dayk_data_dir, decoder, neural_type, preprocessor, normalizer_path, train_test_split = 0.8):
+    def load_process_data(self, dayk_data_dir, decoder, neural_type, preprocessor, normalizer_path, is_xds = False, day0_xds_data = None, day_pair = None, train_test_split = 0.8):
         # preprocessor is the preprocessor for validation data split after first split to mimic the preproc after split
         self.preprocessor = preprocessor
-        if self.verbose:
-            print("Loading and processing data...")
-        day0_data = load_one_nwb(self.day0_data_dir)
-        (day0_neural, day0_behaviour), trial_idx_day0 = neural_finger_from_dict(day0_data, neural_type)
-        dayk_data = load_one_nwb(dayk_data_dir)
-        (dayk_neural, dayk_behaviour), trial_idx_dayk = neural_finger_from_dict(dayk_data, neural_type)
-        if self.verbose:
-            print("Data loaded, Smoothing data...")
+        self.dayk_data_dir = dayk_data_dir
+        self.is_xds = is_xds
+        self.day_pair = day_pair
+        if is_xds:
+            ref_names = ['elec93', 'elec92', 'elec94', 'elec95', 'elec75', 'elec96', 'elec85', 'elec97', 'elec86', 'elec98', 'elec87', 'elec88', 'elec77', 'elec99', 'elec66', 'elec89', 'elec76', 'elec90', 'elec67', 'elec79', 'elec58', 'elec80', 'elec78', 'elec70', 'elec68', 'elec60', 'elec69', 'elec50', 'elec59', 'elec40', 'elec49', 'elec100', 'elec83', 'elec84', 'elec73', 'elec74', 'elec63', 'elec64', 'elec53', 'elec54', 'elec43', 'elec55', 'elec44', 'elec45', 'elec33', 'elec46', 'elec34', 'elec65', 'elec24', 'elec56', 'elec35', 'elec47', 'elec25', 'elec57', 'elec26', 'elec36', 'elec27', 'elec37', 'elec28', 'elec38', 'elec29', 'elec48', 'elec19', 'elec39', 'elec81', 'elec82', 'elec71', 'elec72', 'elec61', 'elec62', 'elec51', 'elec52', 'elec41', 'elec42', 'elec31', 'elec32', 'elec21', 'elec22', 'elec11', 'elec12', 'elec2', 'elec23', 'elec3', 'elec13', 'elec4', 'elec14', 'elec15', 'elec5', 'elec16', 'elec6', 'elec17', 'elec7', 'elec8', 'elec18', 'elec20', 'elec9']
+            day0_data = day0_xds_data
+            xds_day0 = neuraldecoding.preprocessing.blocks.xdsNWB2DictBlock()
+            zeropad1 = neuraldecoding.preprocessing.blocks.ZeroPaddingBlock(ref_names)
 
+            interpipe_day0 = {}
+            xds_day0_out, interpipe_day0 = xds_day0.transform(day0_data, interpipe_day0)
+            zeropad_day0_out, interpipe_day0 = zeropad1.transform(xds_day0_out, interpipe_day0)
+            day0_neural = zeropad_day0_out['neural']
+            day0_behaviour = zeropad_day0_out['behaviour']
+
+            dayk_data = dayk_data_dir
+            xds_dayk = neuraldecoding.preprocessing.blocks.xdsNWB2DictBlock()
+            zeropad2 = neuraldecoding.preprocessing.blocks.ZeroPaddingBlock(ref_names)
+
+            interpipe_dayk = {}
+            xds_dayk_out, interpipe_dayk = xds_dayk.transform(dayk_data, interpipe_dayk)
+            zeropad_dayk_out, interpipe_dayk = zeropad2.transform(xds_dayk_out, interpipe_dayk)
+            dayk_neural = zeropad_dayk_out['neural']
+            dayk_behaviour = zeropad_dayk_out['behaviour']
+        else:
+            if self.verbose:
+                print("Loading and processing data...")
+            day0_data = load_one_nwb(self.day0_data_dir)
+            (day0_neural, day0_behaviour), trial_idx_day0 = neural_finger_from_dict(day0_data, neural_type)
+            dayk_data = load_one_nwb(dayk_data_dir)
+            (dayk_neural, dayk_behaviour), trial_idx_dayk = neural_finger_from_dict(dayk_data, neural_type)
+            if self.verbose:
+                print("Data loaded, Smoothing data...")
+
+        
         sigma = self.kernel_size / self.sample_size
 
         day0_X = gaussian_filter1d(day0_neural.astype(np.float32), sigma=sigma, axis=0)
@@ -206,6 +261,7 @@ class cycleGAN():
         #=============================== Split x2 into the actual training set and the validation set ==============================
         # TODO
         x2_train = x2[:int((x2.shape[0])*0.75), :] # training set
+        y2_train = y2[:int((y2.shape[0])*0.75), :] # training set
         x2_valid = x2[int((x2.shape[0])*0.75):, :] # validation set
         y2_valid = y2[int((y2.shape[0])*0.75):, :] # validation set
         #================================================  Define data Loaders ======================================================
@@ -230,7 +286,7 @@ class cycleGAN():
         discriminator2.train()
         aligner_list = []
         mr2_all_list = []
-
+        kl_list = []
         #================================================== The training loop ====================================================
         for epoch in range(epochs):
             for batch_idx, (data1_, data2_) in enumerate(zip(loader1, loader2)):
@@ -337,10 +393,14 @@ class cycleGAN():
                 
                 # x2_valid_aligned_, y2_valid_ = format_data_from_trials(x2_valid_aligned, y2_valid, n_lags)
                 x2_valid_align = generator2(torch.from_numpy(x2_valid).type('torch.FloatTensor')).detach().numpy()
-                x2_valid_, y2_valid_ = self.preprocess_val_data({'neural': x2_valid_align, 'behaviour': y2_valid})
+                x2_valid_, y2_valid_ = self.preprocess_val_data({'neural': x2_valid_align, 'behaviour': y2_valid, 'neural_train': x2_train, 'behaviour_train': y2_train})
+                kl_origin = kl_divergence_per_channel_rob(x1, x2_valid)
+                kl_align = kl_divergence_per_channel_rob(x1, x2_valid_align)
+                kl = {'origin': kl_origin, 'align': kl_align}
                 # print(f"Shapes of x2_valid_aligned_ and y2_valid_: {x2_valid_.shape}, {y2_valid_.shape}")
                 # print(x2_valid_)
                 pred_y2_valid_ = self.decoder.predict(x2_valid_)
+                
                 if self.normalizer_path is not None:
                     with open(self.normalizer_path, 'rb') as f:
                         normalizer = pickle.load(f)
@@ -352,6 +412,7 @@ class cycleGAN():
                 
                 #------- Save the half-trained aligners and the corresponding performance on the validation set ---------
                 aligner_list.append(generator2)
+                kl_list.append(kl)
                 mr2_all_list.append(mr2)
                 
                 #---------- Put generator2 back into training mode after finishing the evaluation -----------
@@ -366,7 +427,17 @@ class cycleGAN():
             dt_string = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
             with open(log_save_path + 'cycleGAN_train_log_' + dt_string + '.pkl', 'wb') as fp:
                 pickle.dump(train_log, fp)        
+
         self.trained_aligner = aligner_list[IDX]
+        if self.is_xds:
+            day0day = self.day_pair[0]
+            daykday = self.day_pair[1]
+        else:
+            day0day = os.path.basename(self.day0_data_dir).split('_')[1].split('-')[1]
+            daykday = os.path.basename(self.dayk_data_dir).split('_')[1].split('-')[1]
+        with open(f"{log_save_path}/kl/kl_{day0day}_{daykday}.pkl", 'wb') as f:
+            pickle.dump(kl_list[IDX], f)
+            
         return 
 
     def test_cycle_gan_aligner(self):

@@ -333,6 +333,23 @@ class Dict2TupleBlock(DataFormattingBlock):
 			raise ValueError(f"Data Dict Contain Unexpected # of Keys. Expected 2 or 4 keys, got {len(data)}")
 		return data_out, interpipe
 
+class CycleGANOutputBlock(DataFormattingBlock):
+	"""
+	"""
+	def __init__(self, location = None):
+		super().__init__()
+		self.location = location
+
+	def transform(self, data, interpipe):
+		"""
+		"""
+		if self.location is None:
+			self.location = ['neural', 'behaviour']
+			
+		data_out = (data[self.location[0]], data[self.location[1]])
+		
+		return data_out, interpipe
+
 class Dict2TrainerBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary to a trainer dictionary format.
@@ -569,6 +586,7 @@ class ZeroPaddingBlock(DataFormattingBlock):
 				padded_data[:, i] = raw_data[:, name_index]
 		data[self.location] = padded_data
 		return data, interpipe
+
 class StabilizationBlock(DataProcessingBlock):
 	"""
 	A block for stabilizing the latent space of neural data.
@@ -607,6 +625,7 @@ class StabilizationBlock(DataProcessingBlock):
 		else:
 			self.stabilization.load_alignment()
 			data[self.location] = self.stabilization.extract_latent_space(data[self.location])
+			self.stabilization.save_alignment() #todo remove after nicholas debug on principle angle
 		return data, interpipe
 
 class AddHistoryBlock(DataProcessingBlock):
@@ -1640,7 +1659,8 @@ class CycleGanBlock(DataProcessingBlock):
 				neural_type = 'tcfr',
 				verbose = False,
 				normalizer_path = None,
-				nested_pipeline_config = None
+				nested_pipeline_config = None,
+				is_xds = False
 				):
 		"""
 		Initializes the CycleGanBlock.
@@ -1664,7 +1684,7 @@ class CycleGanBlock(DataProcessingBlock):
 			self.preprocessor = Preprocessing(nested_pipeline_config) # its 21:00 and i am writing some real cursed shit
 		else:
 			self.preprocessor = None
-
+		self.is_xds = is_xds
 		
 
 	def transform(self, data, interpipe):
@@ -1673,15 +1693,22 @@ class CycleGanBlock(DataProcessingBlock):
 
 		if interpipe['is_train']:
 			# load data
-			day0_data_dir = data['data_path']
-			cGAN = cycleGAN(day0_data_dir, self.verbose)
-			cGAN.save_cycleGAN(self.fpath)
+			if not self.is_xds:
+				day0_data_dir = data['data_path']
+				cGAN = cycleGAN(day0_data_dir, self.verbose)
+				cGAN.save_cycleGAN(self.fpath)
+			else:
+				day0_data_dir = 'placeholder'
+				cGAN = cycleGAN(day0_data_dir, self.verbose)
+				cGAN.save_cycleGAN(self.fpath)
 			return data, interpipe
 		else:
 			with open(self.fpath, 'rb') as fp:
 				cGAN = pickle.load(fp)
-
-			cGAN.load_process_data(data['data_path'], interpipe['decoder'], self.neural_type, self.preprocessor, self.normalizer_path, train_test_split=self.train_test_split)
+			if self.is_xds:
+				cGAN.load_process_data(data, interpipe['decoder'], self.neural_type, self.preprocessor, self.normalizer_path, is_xds = self.is_xds, day0_xds_data = interpipe['day0_xds_data'], day_pair = interpipe['day_pair'], train_test_split=self.train_test_split)
+			else:
+				cGAN.load_process_data(data['data_path'], interpipe['decoder'], self.neural_type, self.preprocessor, self.normalizer_path, train_test_split=self.train_test_split)
 			cGAN.train_cycle_gan_aligner((OmegaConf.to_container(self.cycleGAN_params)))
 			cGAN.test_cycle_gan_aligner()
 			data_out = {}

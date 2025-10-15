@@ -51,7 +51,7 @@ class ProcrustesAlignment(Alignment):
         S =  U @ V
         
         aligned_lm = lm @ S.T
-        
+        self.save_dict = {'U': U, 'V': V, 'S': S, 'aligned_lm': aligned_lm, 'lm': lm, 'baseline': self.baseline}
         return aligned_lm
 
 class TestProcrustesAlignment(Alignment):

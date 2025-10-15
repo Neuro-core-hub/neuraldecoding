@@ -133,45 +133,45 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
     g = torch.Generator().manual_seed(seed)
     device = x.device if torch.is_tensor(x) else torch.device('cpu')
 
-    # ----- Trial-aware split -----
-    if trial_idx is not None and len(trial_idx) > 0:
-        # Normalize/validate trial starts
-        if torch.is_tensor(trial_idx):
-            tstarts = trial_idx.flatten().long().cpu()
-        else:
-            tstarts = torch.as_tensor(trial_idx, dtype=torch.long)
-        tstarts = tstarts.clamp(0, max(0, n - 1))
-        tstarts, _ = torch.sort(tstarts)
+    # # ----- Trial-aware split -----
+    # if trial_idx is not None and len(trial_idx) > 0:
+    #     # Normalize/validate trial starts
+    #     if torch.is_tensor(trial_idx):
+    #         tstarts = trial_idx.flatten().long().cpu()
+    #     else:
+    #         tstarts = torch.as_tensor(trial_idx, dtype=torch.long)
+    #     tstarts = tstarts.clamp(0, max(0, n - 1))
+    #     tstarts, _ = torch.sort(tstarts)
 
-        # Build boundaries: [t0, t1, ..., tn, N]
-        boundaries = torch.cat([tstarts, torch.tensor([n], dtype=torch.long)])
+    #     # Build boundaries: [t0, t1, ..., tn, N]
+    #     boundaries = torch.cat([tstarts, torch.tensor([n], dtype=torch.long)])
 
-        n_trials = len(tstarts)
-        n_train_trials = int(n_trials * split_ratio)
+    #     n_trials = len(tstarts)
+    #     n_train_trials = int(n_trials * split_ratio)
 
-        if shuffle:
-            perm = torch.randperm(n_trials, generator=g)
-        else:
-            perm = torch.arange(n_trials)
+    #     if shuffle:
+    #         perm = torch.randperm(n_trials, generator=g)
+    #     else:
+    #         perm = torch.arange(n_trials)
 
-        train_trials = perm[:n_train_trials]
-        test_trials = perm[n_train_trials:]
+    #     train_trials = perm[:n_train_trials]
+    #     test_trials = perm[n_train_trials:]
 
-        # Boolean masks on the same device as x (if tensor)
-        train_mask = torch.zeros(n, dtype=torch.bool, device=device)
-        test_mask = torch.zeros(n, dtype=torch.bool, device=device)
+    #     # Boolean masks on the same device as x (if tensor)
+    #     train_mask = torch.zeros(n, dtype=torch.bool, device=device)
+    #     test_mask = torch.zeros(n, dtype=torch.bool, device=device)
 
-        for tr in train_trials.tolist():
-            s = int(boundaries[tr].item())
-            e = int(boundaries[tr + 1].item())
-            train_mask[s:e] = True
+    #     for tr in train_trials.tolist():
+    #         s = int(boundaries[tr].item())
+    #         e = int(boundaries[tr + 1].item())
+    #         train_mask[s:e] = True
 
-        for tr in test_trials.tolist():
-            s = int(boundaries[tr].item())
-            e = int(boundaries[tr + 1].item())
-            test_mask[s:e] = True
+    #     for tr in test_trials.tolist():
+    #         s = int(boundaries[tr].item())
+    #         e = int(boundaries[tr + 1].item())
+    #         test_mask[s:e] = True
 
-        return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])
+    #     return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])
 
     # ----- Sample-wise split (no trial info) -----
     n_train = int(n * split_ratio)
