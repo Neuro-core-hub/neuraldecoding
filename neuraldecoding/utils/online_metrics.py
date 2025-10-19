@@ -1,9 +1,8 @@
 import numpy as np
 from pynwb import NWBFile
-from neuraldecoding.utils.utils_general import resolve_path
-from typing import Union, Optional
+from .utils_general import resolve_path
 
-def success_rate(nwb_file: NWBFile, success_field: str = 'success', exclude_trials: Optional[Union[list, np.ndarray]] = None) -> float:
+def success_rate(nwb_file: NWBFile, success_field: str = 'success', exclude_trials: list|np.ndarray|None = None) -> float:
     """
     Calculate the success rate of the task.
     

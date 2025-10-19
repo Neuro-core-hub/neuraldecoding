@@ -18,7 +18,7 @@ class NeuralNetworkModel(Model):
         loss.backward()
         optimizer.step()
         if(clear_cache):
-            del x
+            del x, y
 
         if return_y:
             return loss, yhat, y
