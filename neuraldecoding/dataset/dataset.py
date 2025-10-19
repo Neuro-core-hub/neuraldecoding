@@ -64,6 +64,7 @@ class Dataset:
         Load data from NWB file
 
         """
+        print(f"Loading NWB file {self.cfg.dataset_parameters.nwb_file}...")
         self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_file, mode="r")
         self.dataset = self.io.read()
 
@@ -101,12 +102,12 @@ class Dataset:
                 print("NWB file exists but overwriting")
                 self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
             else:
-                print("NWB file already exists, loading")
+                print(f"NWB file already exists, loading {zstruct_loader.get_save_path(self.dataset_parameters)}")
                 self.io = NWBHDF5IO(zstruct_loader.get_save_path(self.dataset_parameters), mode="r")
                 self.dataset = self.io.read()
                 
         else:
-            print("No existing NWB file, creating...")
+            print(f"No existing NWB file, creating {zstruct_loader.get_save_path(self.dataset_parameters)}...")
             self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
 
     def save_data(self):

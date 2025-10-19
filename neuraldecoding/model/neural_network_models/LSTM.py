@@ -54,20 +54,6 @@ class LSTM(nn.Module, NeuralNetworkModel):
         # Dropout layer for input (if enabled)
         self.input_dropout = nn.Dropout(self.drop_prob) if self.dropout_input else nn.Identity()
 
-    def __call__(self, data):
-        """
-        Makes the instance callable and returns the result of forward pass.
-
-        Parameters:
-            data (ndarray): Observation data for prediction, expected size [n, m]
-
-        Returns:
-            ndarray: Prediction results, size [n, k]
-        """
-        return self.forward(data)
-    
-
-
     def forward(self, x, h=None, return_all_tsteps=False, return_h = False):
         """
         Runs forward pass of LSTM Model
@@ -205,74 +191,47 @@ class LSTMTrialInput(LSTM):
         # search through the preprocessing params to find the leadup
         self.leadup = model_params.get("leadup", 0)
 
-    def forward(self, x, h=None, trial_length=None, return_h=False):
-        """
-        Runs forward pass of LSTM Model with trial input support
-
-        Args:
-            x:                  Neural data tensor of shape (batch_size, num_inputs, sequence_length)
-            h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
-            return_all_steps:   If true, returns predictions from all timesteps in the sequence. If false, only returns the
-                                last step in the sequence.
-        Returns:
-            out:                output/prediction from forward pass of shape (batch_size, seq_len^, num_outs)  ^if return_all_steps is true
-            h:                  Hidden state tensor of shape (n_layers, batch_size, hidden_size) [for LSTM, its a tuple of two of these, one for hidden state, one for cell state]
-        """
-        if x.dim() != 3:
-            raise ValueError(f"Input tensor must be 3D (batch_size, num_inputs, sequence_length), got shape {x.shape}")
-        if x.shape[1] != self.input_size:
-            raise ValueError(f"Input feature dimension mismatch: expected {self.input_size}, got {x.shape[1]}")
-
-        x = x.permute(0, 2, 1)  # put in format (batches, sequence length (history), features)
-
-        if self.dropout_input and self.training:
-            x = self.input_dropout(x)
-
-        if h is None:
-            h = self.init_hidden(x.shape[0]) # x.shape[0] is batch size
-
-        out, h = self.rnn(x, h) # out shape:    (batch_size, seq_len, hidden_size) like (64, 20, 350)
-                                # h shape:      (n_layers, batch_size, hidden_size) like (2, 64, 350)
-
-        if trial_length is None:
-            out = self.fc(out[:, -1])  # out now has shape (batch_size, num_outs) like (64, 2)# out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
-        else:
-            out = self.fc(out[:,self.leadup:self.leadup + trial_length]).permute(0, 2, 1)  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
-
+    def forward(self, x, h=None, return_all_tsteps=True, return_h = False, remove_leadup=False):
         if return_h:
-            return out, h
+            out, h = super().forward(x, h, return_h=True, return_all_tsteps=True)
+            # Remove leadup should only be used for training, and thus a batched input
+            if remove_leadup:
+                assert x.dim() == 3, "Remove leadup should only be used for batched input"
+                return out[:, self.leadup:, :], h
+            else:
+                return out, h
         else:
-            return out
+            out = super().forward(x, h, return_all_tsteps=True)
+            if remove_leadup:
+                assert x.dim() == 3, "Remove leadup should only be used for batched input"
+                return out[:, self.leadup:, :]
+            else:
+                return out
         
-    def train_step(self, batch, model, optimizer, loss_func, clear_cache = False): 
+    def train_step(self, x, y, optimizer, loss_func, clear_cache = False, return_y = False): 
         """
         Trains LSTM Model
         """
-        x = batch['neu'].to(self.device)
-        y = batch['kin'].to(self.device)
-        trial_length = batch.get('trial_lengths_train', None)
-        if trial_length is not None:
-            trial_length = int(trial_length.item())
-        yhat = model(x, trial_length=trial_length)
+        trial_length = (~torch.isnan(y[0, 0, :])).sum().max().item()
+        # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
+        if torch.isnan(x[0, 0, 0]):
+            x = x[:, :, self.leadup:]
+            yhat = self.forward(x[:, :, :trial_length], remove_leadup=False)
+        else:
+            yhat = self.forward(x[:, :, :self.leadup + trial_length], remove_leadup=True)
+        yhat = yhat.permute(0, 2, 1)
         y = y[:, :, :trial_length]
-
+        
+        # TODO: make loss function ignore nans to enable batch processing
         loss = loss_func(yhat, y)
+        # print(loss)
 
         loss.backward()
         optimizer.step()
         if(clear_cache):
-            del x, y
+            del x
 
-        return loss, yhat
-    
-    def __call__(self, data, trial_length=None):
-        """
-        Makes the instance callable and returns the result of forward pass.
-
-        Parameters:
-            data (ndarray): Observation data for prediction, expected size [n, m]
-
-        Returns:
-            ndarray: Prediction results, size [n, k]
-        """
-        return self.forward(data, trial_length=trial_length)
+        if return_y:
+            return loss, yhat, y
+        else:
+            return loss, yhat

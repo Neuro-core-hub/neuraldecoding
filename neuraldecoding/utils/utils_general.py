@@ -1,7 +1,6 @@
 import os
 import sys
 import numpy as np
-from omegaconf import open_dict
 
 
 def int_to_string(in_array):
