@@ -165,7 +165,7 @@ class FeatureExtractor:
     def extract_binned_features(self,
                                data: Union[np.ndarray, List[np.ndarray]],
                                timestamps_ms: Union[np.ndarray, List[np.ndarray]],
-                               return_array: bool = False):
+                               return_array: bool = False) -> Union[List[Dict], np.ndarray, List[np.ndarray]]:
         """
         Extract features from timestamped data by dividing it into time bins.
         
@@ -185,7 +185,6 @@ class FeatureExtractor:
         else:
             data_list = data
             timestamps_list = timestamps_ms
-
         # --- Start of new validation section ---
         is_multistream_config = isinstance(self.feature_type, list) and \
                                 len(self.feature_type) > 0 and \
