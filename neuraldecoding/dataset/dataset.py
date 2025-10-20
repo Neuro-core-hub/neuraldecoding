@@ -106,7 +106,7 @@ class Dataset:
                 self.dataset = self.io.read()
                 
         else:
-            print("No existing NWB file, creating")
+            print("No existing NWB file, creating...")
             self.dataset = zstruct_loader.load_xpc_run(self.dataset_parameters)
 
     def save_data(self):

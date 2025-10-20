@@ -185,6 +185,7 @@ class FeatureExtractor:
         else:
             data_list = data
             timestamps_list = timestamps_ms
+        
         # --- Start of new validation section ---
         is_multistream_config = isinstance(self.feature_type, list) and \
                                 len(self.feature_type) > 0 and \

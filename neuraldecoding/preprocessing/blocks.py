@@ -87,6 +87,7 @@ class DataProcessingBlock(PreprocessingBlock):
 		"""
 		pass
 
+
 # Wrappers that Modifies Data Format
 class Dict2DataDictBlock(DataFormattingBlock):
 	"""
@@ -139,7 +140,7 @@ class LoadNWBBlock(DataFormattingBlock):
 		'''
 		data = load_one_nwb(data['data_path'])
 		return data, interpipe
-
+	
 class ClassificationDict2TupleBlock(DataFormattingBlock):
 	"""
 	Converts a dictionary to a tuple format for classification tasks.

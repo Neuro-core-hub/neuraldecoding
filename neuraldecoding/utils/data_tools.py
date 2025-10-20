@@ -101,13 +101,7 @@ def neural_finger_from_dict(dict, neural_type):
     neural = dict[neural_type]
     finger = dict['finger_kinematics']
     trial_idx = dict['trial_index']
-
-    trial_ts = np.zeros(len(neural), dtype=np.int32)
-    boundaries = np.concatenate([trial_idx, [len(neural)]])
-    for i in range(len(trial_idx)):
-        trial_ts[boundaries[i]:boundaries[i+1]] = i
-
-    return (neural, finger), trial_idx, trial_ts
+    return (neural, finger), trial_idx
 
 def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False, return_masks=False):
     """
