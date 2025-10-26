@@ -21,6 +21,7 @@ class KalmanFilter(LinearModel):
         self.last_yhat = None
         self.zero_position_uncertainty = model_params.get("zero_position_uncertainty", True)
         self.is_refit = model_params.get("is_refit", False)
+        self.refit_interpolate_factor = model_params.get("refit_interpolate_factor", 1)
         self.running_online = False
 
     def __call__(self, data):
@@ -59,11 +60,18 @@ class KalmanFilter(LinearModel):
         
         # Compute the neural observation matrix C via least squares:
         # C = (x.T @ y) @ inv(y.T @ y)
-        self.C = (x.T @ y) @ np.linalg.inv(y.T @ y)
-
+        C = (x.T @ y) @ np.linalg.inv(y.T @ y)
+        if self.is_refit:
+            self.C = C * self.refit_interpolate_factor + self.C * (1 - self.refit_interpolate_factor)
+        else:
+            self.C = C
         # Compute observation noise covariance Q.
-        Q_resid = x - y @ self.C.T
-        self.Q = (Q_resid.T @ Q_resid) / num_samples
+        Q_resid = x - y @ C.T
+        Q = (Q_resid.T @ Q_resid) / num_samples
+        if self.is_refit:
+            self.Q = Q * self.refit_interpolate_factor + self.Q * (1 - self.refit_interpolate_factor)
+        else:
+            self.Q = Q
         
         # If doing refit, skip all the other steps
         if self.is_refit:

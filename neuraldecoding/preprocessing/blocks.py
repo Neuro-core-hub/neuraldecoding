@@ -1290,7 +1290,7 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 
 class ReFITTransformationBlock(DataProcessingBlock):
 
-	def __init__(self, location_data: str,location_data_ts:str, location_targets: str, location_out: str, location_trial_start_times: str, location_trial_end_times: str, target_radius: float = 0.075):
+	def __init__(self, location_data: str,location_data_ts:str, location_targets: str, location_out: str, location_trial_start_times: str, location_trial_end_times: str, index_pos: list, index_vel: list, target_radius: float = 0.075):
 		self.location_data = location_data
 		self.location_data_ts = location_data_ts
 		self.location_targets = location_targets
@@ -1298,6 +1298,8 @@ class ReFITTransformationBlock(DataProcessingBlock):
 		self.location_trial_start_times = location_trial_start_times
 		self.location_trial_end_times = location_trial_end_times
 		self.target_radius = target_radius
+		self.index_pos = index_pos
+		self.index_vel = index_vel
 
 	def transform(self, data, interpipe):
 		targets = interpipe[self.location_targets]
@@ -1307,9 +1309,8 @@ class ReFITTransformationBlock(DataProcessingBlock):
 		kinematics = data[self.location_data]
 		kinematics_ts = interpipe[self.location_data_ts]
 		# Assume kinematics has 2*n columns, first n are position, last n are velocity
-		Ndofs = kinematics.shape[1] // 2
-		pos = kinematics[:, :Ndofs]
-		vel = kinematics[:, Ndofs:]
+		pos = kinematics[:, self.index_pos]
+		vel = kinematics[:, self.index_vel]
 		# Apply ReFIT transformation
 		transformed_vel = self._apply_refit_transformation(vel, pos, targets, kinematics_ts, trial_start_times, trial_end_times)
 		# Combine transformed pos and vel
@@ -1339,7 +1340,7 @@ class ReFITTransformationBlock(DataProcessingBlock):
 		n_trials = len(targets)
 		
 		# Create time-aligned target vector
-		target_vector = np.zeros((n_timepoints, n_dofs))
+		target_vector = np.full((n_timepoints, n_dofs), np.nan)
 		
 		# For each trial, find the time indices that belong to it and assign the target
 		for trial_idx in range(n_trials):
@@ -1356,6 +1357,9 @@ class ReFITTransformationBlock(DataProcessingBlock):
 			current_vel = vel[t, :]
 			current_pos = pos[t, :]
 			current_target = target_vector[t, :]
+			if current_target is None or np.any(np.isnan(current_target)):
+				# No valid target for this timepoint, skip transformation
+				continue
 			
 			# Check if position is within target radius
 			distance_to_target = np.linalg.norm(current_pos - current_target)
@@ -1381,3 +1385,26 @@ class ReFITTransformationBlock(DataProcessingBlock):
 				transformed_vel[t, :] = vel_magnitude * target_direction
 		
 		return transformed_vel
+	
+
+class ExcludeNonTrialDataBlock(DataProcessingBlock):
+	def __init__(self, location_data: str, location_ts: str, location_trial_start_times: str, location_trial_end_times: str):
+		super().__init__()
+		self.location_data = location_data
+		self.location_ts = location_ts
+		self.location_trial_start_times = location_trial_start_times
+		self.location_trial_end_times = location_trial_end_times
+	def transform(self, data, interpipe):
+		# Discard kinematics before first trial start and after last trial end
+		trial_start_times = interpipe[self.location_trial_start_times]
+		trial_end_times = interpipe[self.location_trial_end_times]
+		for location, location_ts in zip(self.location_data, self.location_ts):
+			timeseries = data[location]
+			timeseries_ts = interpipe[location_ts]
+			if location not in data:
+				raise ValueError(f"Location '{location}' not found in data dictionary.")
+			valid_mask = (timeseries_ts >= trial_start_times[0]) & (timeseries_ts <= trial_end_times[-1])
+			data[location] = timeseries[valid_mask, :]
+			interpipe[location_ts] = timeseries_ts[valid_mask]
+		return data, interpipe
+
