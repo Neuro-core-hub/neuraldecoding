@@ -644,6 +644,8 @@ class NormalizationBlock(DataProcessingBlock):
 		with open(self.normalizer_params['save_path'], 'rb') as f:
 			normalizer = pickle.load(f)
 		for loc in self.location:
+			if data[loc].ndim == 1:
+				data[loc] = data[loc].reshape(1, -1)
 			data[loc] = normalizer.transform(data[loc])
 		return data, interpipe
 
