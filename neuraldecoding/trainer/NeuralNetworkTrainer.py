@@ -2,36 +2,32 @@ import hydra
 from omegaconf import DictConfig
 import numpy as np
 import torch
-import json
 import collections
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
-from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import DataLoader, TensorDataset
-from neuraldecoding.utils import prep_data_and_split, load_one_nwb
-import neuraldecoding.model.neural_network_models
+from neuraldecoding.utils import loss_functions
 from neuraldecoding.trainer.Trainer import Trainer
-import neuraldecoding.stabilization.latent_space_alignment
-from neuraldecoding.model.neural_network_models.NeuralNetworkModel import NeuralNetworkModel
-from neuraldecoding.model.neural_network_models.LSTM import LSTM
-import neuraldecoding.utils.eval_metrics
-from neuraldecoding.utils.training_utils import generate_output_scaler, OutputScaler
-from neuraldecoding.utils.eval_metrics import *
-import os
-import collections
+from neuraldecoding.model import neural_network_models
+import neuraldecoding
+import warnings
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
         super().__init__(config)
-        # General training params 
+        # General training params
         self.device = torch.device(config.training.device)
         self.model = self.create_model(config.model).to(self.device)
         self.optimizer = self.create_optimizer(config.optimizer, self.model.parameters())
         self.scheduler = self.create_scheduler(config.scheduler, self.optimizer)
         self.loss_func = self.create_loss_function(config.loss_func)
-        self.num_epochs = config.training.num_epochs
-        self.batch_size = config.training.batch_size
+        self.num_epochs = config.training.get('num_epochs', None)
+        self.batch_size = config.training.get('batch_size', 64)
         self.full_batch_valid = config.training.get('full_batch_valid', False)
+        if config.model.type == 'LSTMTrialInput':
+            if self.batch_size != 1:
+                warnings.warn("LSTMTrialInput does not support batch_size in model config. Setting batch_size to 1.")
+                self.batch_size = 1  # Override batch size to 1 for trial input support
         if isinstance(self.batch_size, collections.abc.Iterable):
             self.train_batch_size = self.batch_size[0]
             self.valid_batch_size = self.batch_size[1]
@@ -39,12 +35,11 @@ class NNTrainer(Trainer):
             self.train_batch_size = self.batch_size
             self.valid_batch_size = self.batch_size
         self.clear_cache = config.training.clear_cache
-        # Data specific params, TODO: change when dataset is finalized
         self.preprocessor = preprocessor
         if dataset is not None:
             self.data_dict = self.load_data(dataset)
             self.train_loader, self.valid_loader = self.create_dataloaders()
-
+                
     def load_data(self, data): # TODO, finalize this when dataset is merged to main
         data_dict = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
         # you should have Dict2TrainerBlock in your pipeline
@@ -53,7 +48,7 @@ class NNTrainer(Trainer):
 		#                               - 'X_train', 'X_val', 'Y_train', 'Y_val' if 4 keys are present
         # Typically it is 4 keys for NN trainer, so it will be 'X_train', 'X_val', 'Y_train', 'Y_val'.
         return data_dict
-
+    
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
         train_dataset = TensorDataset(self.data_dict["X_train"].detach().clone().to(torch.float32), 
@@ -71,7 +66,7 @@ class NNTrainer(Trainer):
         """Creates and returns an optimizer based on the configuration."""
         optimizer_class = getattr(torch.optim, optimizer_config.type)
         return optimizer_class(model_params, **optimizer_config.params)
-
+    
     def create_scheduler(self, scheduler_config: DictConfig, optimizer: Optimizer) -> _LRScheduler:
         """Creates and returns a learning rate scheduler based on the configuration."""
         if scheduler_config is None or not scheduler_config or len(scheduler_config) == 0:
@@ -79,14 +74,23 @@ class NNTrainer(Trainer):
         scheduler_class = getattr(torch.optim.lr_scheduler, scheduler_config.type)
         return scheduler_class(optimizer, **scheduler_config.params)
 
-    def create_loss_function(self, loss_config: DictConfig) -> torch.nn.Module:
+    def create_loss_function(self, loss_config: DictConfig):
         """Creates and returns a loss function based on the configuration."""
-        loss_class = getattr(torch.nn, loss_config.type)
-        return loss_class(**loss_config.params)
+        # Try to get from torch.nn first (for built-in losses)
+        loss_class = getattr(torch.nn, loss_config.type, None)
+        if loss_class is not None:
+            return loss_class(**loss_config.params)
 
+        # Then try to get from custom loss functions
+        loss_class = getattr(loss_functions, loss_config.type, None)
+        if loss_class is not None:
+            return loss_class(**loss_config.params)
+
+        raise ValueError(f"Loss function '{loss_config.type}' not found in torch.nn or neuraldecoding.utils.loss_functions.")
+        
     def create_model(self, model_config: DictConfig) -> torch.nn.Module:
-        """Creates and returns a loss function based on the configuration."""
-        model_class = getattr(neuraldecoding.model.neural_network_models, model_config.type)
+        """Creates and returns a model based on the configuration."""
+        model_class = getattr(neural_network_models, model_config.type)
         model = model_class(model_config.params)
         return model
 
@@ -96,7 +100,7 @@ class NNTrainer(Trainer):
             self.train_loader = train_loader
         if(valid_loader is not None):
             self.valid_loader = valid_loader
-
+            
         for epoch in range(self.num_epochs):
             # Train
             self.model.train()
@@ -107,7 +111,7 @@ class NNTrainer(Trainer):
             for x,y in self.train_loader:
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache)
+                loss, yhat, y = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache, return_y=True)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -115,8 +119,6 @@ class NNTrainer(Trainer):
                 if(self.clear_cache):
                     del y, yhat
 
-            train_all_predictions = np.concatenate(train_all_predictions, axis=0)
-            train_all_targets = np.concatenate(train_all_targets, axis=0)
             train_loss = running_loss / len(self.train_loader)
 
             # Validate
@@ -137,14 +139,17 @@ class NNTrainer(Trainer):
                 else:
                     metric_param = self.metric_params.get(metric, None)
                     metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
-                    self.logger[metric]['train'].append(metric_class(train_all_predictions, train_all_targets, metric_param))
                     self.logger[metric]['valid'].append(metric_class(val_all_predictions, val_all_targets, metric_param))
+                    train_metrics = []
+                    for train_prediction, train_target in zip(train_all_predictions, train_all_targets):
+                        train_metrics.append(metric_class(train_prediction, train_target, metric_param))
+                    self.logger[metric]['train'].append(train_metrics)
 
             # Logging
             self.save_print_log(epoch, train_loss, val_loss)
 
         return self.model, self.logger
-    
+
     def clear_gpu_cache(self):
         self.model.cpu()
         del self.model

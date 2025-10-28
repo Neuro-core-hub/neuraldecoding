@@ -8,6 +8,7 @@ import glob
 import os
 import re
 from pynwb import NWBFile, TimeSeries, NWBHDF5IO
+from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import pickle
 
@@ -102,29 +103,15 @@ def neural_finger_from_dict(dict, neural_type):
     trial_idx = dict['trial_index']
     return (neural, finger), trial_idx
 
-def data_split_direct(data_X, data_Y, ratio):
-    total_len = len(data_X)
-    len1 = int(total_len * ratio)
-
-    split1_X = data_X[:len1, :]
-    split1_Y = data_Y[:len1, :]
-    split2_X = data_X[len1:, :]
-    split2_Y = data_Y[len1:, :]
-
-    split1 = (split1_X, split1_Y)
-    split2 = (split2_X, split2_Y)
-
-    return split1, split2
-
-
-def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False):
+def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False, return_masks=False):
     """
-    Split (x, y) into train/test.
+    Split (x, y) into train/(val)/test.
     - If trial_idx is provided and non-empty, split by whole trials.
       trial_idx is interpreted as the start index of each trial (sorted or not).
     - If trial_idx is None or empty, split by samples.
     - Shuffles only when shuffle=True (seeded).
-    Returns: (x_train, y_train), (x_test, y_test)
+    - If split_ratio is a tuple, split into train/val/test.
+    Returns: [(x_train, y_train), (x_test, y_test)] or [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
     """
     n = len(x)
     if len(y) != n:
@@ -147,7 +134,12 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
         boundaries = torch.cat([tstarts, torch.tensor([n], dtype=torch.long)])
 
         n_trials = len(tstarts)
-        n_train_trials = int(n_trials * split_ratio)
+        n_val_trials = 0
+        if isinstance(split_ratio, float):
+            n_train_trials = int(n_trials * split_ratio)
+        else:
+            n_train_trials = int(n_trials * split_ratio[0])
+            n_val_trials = int(n_trials * split_ratio[1])
 
         if shuffle:
             perm = torch.randperm(n_trials, generator=g)
@@ -155,36 +147,74 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
             perm = torch.arange(n_trials)
 
         train_trials = perm[:n_train_trials]
-        test_trials = perm[n_train_trials:]
+        val_trials = perm[n_train_trials:n_train_trials+n_val_trials]
+        test_trials = perm[n_train_trials+n_val_trials:]
 
         # Boolean masks on the same device as x (if tensor)
         train_mask = torch.zeros(n, dtype=torch.bool, device=device)
+        val_mask = torch.zeros(n, dtype=torch.bool, device=device)
         test_mask = torch.zeros(n, dtype=torch.bool, device=device)
 
         for tr in train_trials.tolist():
             s = int(boundaries[tr].item())
             e = int(boundaries[tr + 1].item())
             train_mask[s:e] = True
+    
+        for tr in val_trials.tolist():
+            s = int(boundaries[tr].item())
+            e = int(boundaries[tr + 1].item())
+            val_mask[s:e] = True
 
         for tr in test_trials.tolist():
             s = int(boundaries[tr].item())
             e = int(boundaries[tr + 1].item())
             test_mask[s:e] = True
-
-        return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])
+        
+        if isinstance(split_ratio, float):
+            if return_masks:
+                return ((x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])), (train_mask, test_mask)
+            else:
+                return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])
+        else:
+            if return_masks:
+                return ((x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])), (train_mask, val_mask, test_mask)
+            else:
+                return (x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])
 
     # ----- Sample-wise split (no trial info) -----
-    n_train = int(n * split_ratio)
+    if isinstance(split_ratio, float):
+        n_train = int(n * split_ratio)
+        n_val = 0
+    else:
+        n_train = int(n * split_ratio[0])
+        n_val = int(n * split_ratio[1])
+
     if shuffle:
         perm = torch.randperm(n, generator=g).to(device)
         train_idx = perm[:n_train]
-        test_idx = perm[n_train:]
+        val_idx = perm[n_train:n_train+n_val]
+        if isinstance(split_ratio, float):
+            test_idx = perm[n_train:]
+        else:
+            test_idx = perm[n_train + n_val:]
     else:
         train_idx = torch.arange(0, n_train, device=device)
-        test_idx = torch.arange(n_train, n, device=device)
+        val_idx = torch.arange(n_train, n_train+n_val, device=device)
+        if isinstance(split_ratio, float):
+            test_idx = torch.arange(n_train, n, device=device)
+        else:
+            test_idx = torch.arange(n_train + n_val, n, device=device)
 
-    return (x[train_idx], y[train_idx]), (x[test_idx], y[test_idx])
-
+    if isinstance(split_ratio, float):
+        if return_masks:
+            return ((x[train_idx], y[train_idx]), (x[test_idx], y[test_idx])), (train_idx, test_idx)
+        else:
+            return (x[train_idx], y[train_idx]), (x[test_idx], y[test_idx])
+    else:
+        if return_masks:
+            return ((x[train_idx], y[train_idx]), (x[val_idx], y[val_idx]), (x[test_idx], y[test_idx])), (train_idx, val_idx, test_idx)
+        else:
+            return (x[train_idx], y[train_idx]), (x[val_idx], y[val_idx]), (x[test_idx], y[test_idx])
 
 def add_history(neural_data, seq_len):
     """
@@ -204,6 +234,34 @@ def add_history(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
 
+def add_trial_history(x, y, trial_ts, leadup):
+    # TODO: add device
+    X_temp = torch.tensor(x)
+    Y_temp = torch.tensor(y)
+
+    # find max trial length
+    unique_trials, trial_lengths = np.unique(trial_ts, return_counts=True)
+    max_length = np.max(trial_lengths)
+    num_trials = unique_trials.shape[0]
+
+    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
+    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
+
+    for idx, trial in enumerate(unique_trials):
+        mask = trial == trial_ts
+        Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
+        first_nonzero_idx = mask.nonzero()[0][0]
+        if first_nonzero_idx < leadup:
+            mask[:first_nonzero_idx] = 1
+            start = leadup - first_nonzero_idx
+            X[idx,:,start:start + np.count_nonzero(mask)] = X_temp[mask,:].T
+        else:
+            mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
+            X[idx,:,:np.count_nonzero(mask)] = X_temp[mask,:].T
+
+    return X, Y, trial_lengths
+
+
 def add_history_numpy(neural_data, seq_len):
     """
     Add history to the neural data.
@@ -211,6 +269,8 @@ def add_history_numpy(neural_data, seq_len):
     the output is of shape (n_samples, seq_len, n_channels)
     """
     Xtrain1 = torch.zeros((int(neural_data.shape[0]), int(neural_data.shape[1]), seq_len))
+    if not isinstance(neural_data, np.ndarray):
+        neural_data = neural_data.numpy()
     Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
     for k1 in range(seq_len - 1):
         k = k1 + 1
@@ -287,3 +347,10 @@ def add_hist(X, Y, hist=10):
 
     adjX = adjX.reshape(adjX.shape[0],-1)
     return adjX, adjY
+
+def obtain_trial_idx(bin_start_timestamp_ms: List[float], trial_starts: List[float]) -> np.ndarray:
+    """Obtain trial indices for each bin based on provided trial start/end times."""
+    trial_starts = np.array(trial_starts)
+    bin_start_timestamp_ms = np.array(bin_start_timestamp_ms)
+    trial_idx = np.searchsorted(trial_starts, bin_start_timestamp_ms)
+    return trial_idx

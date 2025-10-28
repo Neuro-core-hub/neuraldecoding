@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from omegaconf import DictConfig
+
 import os
 class Trainer(ABC):
     def __init__(self, cfg: DictConfig):

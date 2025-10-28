@@ -157,15 +157,15 @@ class LSTM(nn.Module, NeuralNetworkModel):
         torch.save(checkpoint_dict, filepath)
 
 
-    def load_model(self, filepath):
+    def load_model(self, fpath : str = None, running_online : bool = False) -> None:
         """
         Load model parameters from a specified location
 
         Parameters:
-            filepath (path-like object) indicates the file path to load the model from
+            fpath (path-like object) indicates the file path to load the model from
         """
         
-        checkpoint = torch.load(filepath)
+        checkpoint = torch.load(fpath)
 
         if checkpoint["model_type"] != "LSTM":
             raise Exception("Tried to load model that isn't a LSTM Instance")
@@ -178,3 +178,60 @@ class LSTM(nn.Module, NeuralNetworkModel):
         self.hidden_size = model_params["hidden_size"]
         self.num_layers = model_params["num_layers"]
 
+class LSTMTrialInput(LSTM):
+    def __init__(self, model_params):
+        """
+        Initializes a LSTM with trial input support
+
+        Args:
+            model_params:                dict containing the same parameters as LSTM
+        """
+        super(LSTMTrialInput, self).__init__(model_params)
+
+        # search through the preprocessing params to find the leadup
+        self.leadup = model_params.get("leadup", 0)
+
+    def forward(self, x, h=None, return_all_tsteps=True, return_h = False, remove_leadup=False):
+        if return_h:
+            out, h = super().forward(x, h, return_h=True, return_all_tsteps=True)
+            # Remove leadup should only be used for training, and thus a batched input
+            if remove_leadup:
+                assert x.dim() == 3, "Remove leadup should only be used for batched input"
+                return out[:, self.leadup:, :], h
+            else:
+                return out, h
+        else:
+            out = super().forward(x, h, return_all_tsteps=True)
+            if remove_leadup:
+                assert x.dim() == 3, "Remove leadup should only be used for batched input"
+                return out[:, self.leadup:, :]
+            else:
+                return out
+        
+    def train_step(self, x, y, optimizer, loss_func, clear_cache = False, return_y = False): 
+        """
+        Trains LSTM Model
+        """
+        trial_length = (~torch.isnan(y[0, 0, :])).sum().max().item()
+        # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
+        if torch.isnan(x[0, 0, 0]):
+            x = x[:, :, self.leadup:]
+            yhat = self.forward(x[:, :, :trial_length], remove_leadup=False)
+        else:
+            yhat = self.forward(x[:, :, :self.leadup + trial_length], remove_leadup=True)
+        yhat = yhat.permute(0, 2, 1)
+        y = y[:, :, :trial_length]
+        
+        # TODO: make loss function ignore nans to enable batch processing
+        loss = loss_func(yhat, y)
+        # print(loss)
+
+        loss.backward()
+        optimizer.step()
+        if(clear_cache):
+            del x
+
+        if return_y:
+            return loss, yhat, y
+        else:
+            return loss, yhat

@@ -104,39 +104,18 @@ class TestDataSplitBlock(unittest.TestCase):
         data = {'neural': neural_data, 'behaviour': finger_data}
         interpipe = {'trial_idx': trial_idx}
         
-        import neuraldecoding.utils
-        original_func = getattr(neuraldecoding.utils, 'data_split_trial', None)
+        result_data, result_interpipe = self.block.transform(data, interpipe)
         
-        def mock_data_split_trial(neural, finger, trial_idx, split_ratio, seed, shuffle):
-            split_point = int(len(neural) * split_ratio)
-            return ((neural[:split_point], finger[:split_point]), 
-                   (neural[split_point:], finger[split_point:]))
+        self.assertIn('neural_train', result_data)
+        self.assertIn('neural_test', result_data)
+        self.assertIn('behaviour_train', result_data)
+        self.assertIn('behaviour_test', result_data)
         
-        neuraldecoding.utils.data_split_trial = mock_data_split_trial
-        
-        try:
-            result_data, result_interpipe = self.block.transform(data, interpipe)
-            
-            self.assertIn('neural_train', result_data)
-            self.assertIn('neural_test', result_data)
-            self.assertIn('behaviour_train', result_data)
-            self.assertIn('behaviour_test', result_data)
-            
-            self.assertEqual(len(result_data['neural_train']), 80)
-            self.assertEqual(len(result_data['neural_test']), 20)
-            self.assertEqual(len(result_data['behaviour_train']), 80)
-            self.assertEqual(len(result_data['behaviour_test']), 20)
-        finally:
-            if original_func:
-                neuraldecoding.utils.data_split_trial = original_func
+        self.assertEqual(len(result_data['neural_train']), 80)
+        self.assertEqual(len(result_data['neural_test']), 20)
+        self.assertEqual(len(result_data['behaviour_train']), 80)
+        self.assertEqual(len(result_data['behaviour_test']), 20)
                 
-    def test_missing_trial_idx(self):
-        data = {'neural': np.random.randn(100, 10), 'behaviour': np.random.randn(100, 3)}
-        interpipe = {}
-        
-        with self.assertRaises(ValueError):
-            self.block.transform(data, interpipe)
-
 class TestDict2TupleBlock(unittest.TestCase):
     def setUp(self):
         self.block = Dict2TupleBlock()
