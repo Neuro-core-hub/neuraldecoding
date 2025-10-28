@@ -193,11 +193,17 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
         perm = torch.randperm(n, generator=g).to(device)
         train_idx = perm[:n_train]
         val_idx = perm[n_train:n_train+n_val]
-        test_idx = perm[n_train:]
+        if isinstance(split_ratio, float):
+            test_idx = perm[n_train:]
+        else:
+            test_idx = perm[n_train + n_val:]
     else:
         train_idx = torch.arange(0, n_train, device=device)
         val_idx = torch.arange(n_train, n_train+n_val, device=device)
-        test_idx = torch.arange(n_train, n, device=device)
+        if isinstance(split_ratio, float):
+            test_idx = torch.arange(n_train, n, device=device)
+        else:
+            test_idx = torch.arange(n_train + n_val, n, device=device)
 
     if isinstance(split_ratio, float):
         if return_masks:
