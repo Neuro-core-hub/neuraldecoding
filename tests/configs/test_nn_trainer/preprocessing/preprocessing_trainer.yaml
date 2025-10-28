@@ -25,4 +25,5 @@ preprocessing_trainer:
         dtype: float32
     trainer_out:
       type: Dict2TrainerBlock
-      params: {}
+      params:
+        location: ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test']

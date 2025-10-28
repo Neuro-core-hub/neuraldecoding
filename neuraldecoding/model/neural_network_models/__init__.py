@@ -1,4 +1,4 @@
-from .LSTM import LSTM
+from .LSTM import LSTM, LSTMTrialInput
 from .RNN import RecurrentModel
 from .tcFNN import TCN
 import warnings

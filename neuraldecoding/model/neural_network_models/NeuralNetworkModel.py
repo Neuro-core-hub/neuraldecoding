@@ -10,7 +10,7 @@ class NeuralNetworkModel(Model):
     def forward(self, input: Any) -> Any:
         pass
 
-    def train_step(self, x, y, optimizer, loss_func, clear_cache = False):
+    def train_step(self, x, y, optimizer, loss_func, clear_cache = False, return_y = False):
         yhat = self.forward(x)
 
         loss = loss_func(yhat, y)
@@ -20,7 +20,10 @@ class NeuralNetworkModel(Model):
         if(clear_cache):
             del x, y
 
-        return loss, yhat
+        if return_y:
+            return loss, yhat, y
+        else:
+            return loss, yhat
 
     def save_model(self, filepath: str) -> None:
         pass

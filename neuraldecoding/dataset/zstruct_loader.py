@@ -48,7 +48,7 @@ def get_server_notes_details(data_path):
     """
     experiment_regex = "(?i)Experiment(er)?(s)?(:)?( )*"
     personnel_regex = "(?i)Personnel(:)?( )*"
-    notes_regex = "(?i)Notes.*\.txt$"
+    notes_regex = r"(?i)Notes.*\.txt$"
 
     run_path_contents = os.listdir(data_path)
 
@@ -457,22 +457,17 @@ def initialize_nwb_columns(nwb_file, data_dict, exp_cfg):
     # Dynamically create trial column and create the time_series dictionary
     time_series_dict = dict()
 
-    num_trials = len(data_dict)
     num_times = len(
-        data_dict[-1][exp_cfg.reference_time]
+        data_dict[0][exp_cfg.reference_time]
     )  # num of times for last trial - used to understand if a variable is a time-series
-    num_total_times = sum(
-        len(data_dict[trl_idx][exp_cfg.reference_time])
-        for trl_idx in range(num_trials)
-    )
 
     for key in data_dict[0].keys():
         if exp_cfg.units.has_spikes and key == exp_cfg.units.field:
             continue  # Spikes handled specially
-        elif (not is_collection(data_dict[0][key]) or len(data_dict[-1][key]) != num_times):
+        elif (not is_collection(data_dict[0][key]) or len(data_dict[0][key]) != num_times):
             nwb_file.add_trial_column(name=key, description=key)
         else:
-            time_series_dict[key] = np.concatenate([data_dict[i][key] for i in np.arange(len(data_dict))], axis=0, dtype=data_dict[0][key].dtype)
+            time_series_dict[key] = np.concatenate([data_dict[i][key] for i in np.arange(len(data_dict)) if data_dict[i][key] is not None], axis=0, dtype=data_dict[0][key].dtype)
     
     return time_series_dict
 
@@ -656,7 +651,6 @@ def add_run_data(
             # undefined acquisition throw warning
             
     # Add spike series
-    # pdb.set_trace()
     if exp_cfg.units.has_spikes:
         nwb_file.add_unit_column(name="channel", description="channel_id")
         all_events = []
@@ -670,9 +664,11 @@ def add_run_data(
                     trial_spike_times = trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]
                     cross_trial_spike_times.append(trial_spike_times)
 
-            # pdb.set_trace()
-            spike_times = np.concat(cross_trial_spike_times)
-            nwb_file.add_unit(spike_times=spike_times, channel=ch_idx)
+            if len(cross_trial_spike_times) > 0:
+                spike_times = np.concat(cross_trial_spike_times) / 1000 # convert to seconds
+                nwb_file.add_unit(spike_times=spike_times, channel=ch_idx)
+            else:
+                nwb_file.add_unit(spike_times=np.array([]), channel=ch_idx)
 
     # looping through the trials for adding the trials and all the other non-timeseries data to the NWB file
     # base structure of each trial
@@ -680,6 +676,8 @@ def add_run_data(
 
     # add the trials to the NWB file
     for trl_idx in range(num_trials):
+        if data_dict[trl_idx][exp_cfg.reference_time] is None:
+            continue
         # trial times
         nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0] / 1000 # convert to seconds
         nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0] / 1000 # convert to seconds
@@ -769,10 +767,16 @@ def get_save_path(cfg):
     # # Create a string representation of the runs
     # runs_str = "_".join([f"Run-{run:03d}" for run in sorted(cfg.run)])\
     runs_str = f"Run-{cfg.run:03d}"
+    if "/" in cfg.subject:
+        subject_folder = cfg.subject
+        subject = cfg.subject.split("/")[-1]
+    else:
+        subject_folder = cfg.subject
+        subject = cfg.subject
     return os.path.join(
         cfg.server_dir,
-        cfg.subject,
+        subject_folder,
         cfg.date,
         runs_str,
-        f"{cfg.subject}_{cfg.date}_{runs_str}.nwb",
+        f"{subject}_{cfg.date}_{runs_str}.nwb",
     )
