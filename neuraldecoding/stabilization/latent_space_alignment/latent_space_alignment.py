@@ -36,10 +36,10 @@ class LatentSpaceAlignment(Stabilization):
         self.alignment_method.set_dims(ndims)
 
         lm, args = self.dim_red_method.calc_lm(data)
-        print(f"aabaseline to be set: {lm}")
+        #print(f"aabaseline to be set: {lm}")
         self.alignment_method.set_baseline(lm)
         latent_ds = self.dim_red_method.reduce(data, lm, args)
-        print(f"Latent space shape: {latent_ds.shape}")
+        #print(f"Latent space shape: {latent_ds.shape}")
         return latent_ds
     
     def extract_latent_space(self, data):
@@ -54,7 +54,7 @@ class LatentSpaceAlignment(Stabilization):
         lm, args = self.dim_red_method.calc_lm(data)
         
         aligned_lm = self.alignment_method.get_aligned_lm(lm)
-        print(f"baslm and aligned lm shapes {lm.shape} and {aligned_lm.shape}")
+        #print(f"baslm and aligned lm shapes {lm.shape} and {aligned_lm.shape}")
 
         latent_ds = self.dim_red_method.reduce(data, aligned_lm, args)
 

@@ -18,7 +18,7 @@ import pickle
 import matplotlib.pyplot as plt
 
 class LinearTrainer(Trainer):
-    def __init__(self, preprocessor: Preprocessing, config: DictConfig, dataset = None):
+    def __init__(self, preprocessor: Preprocessing, config: DictConfig, dataset = None, no_train=False):
         super().__init__(config)
         self.model = self.create_model(self.cfg.model)
         self.preprocessor = preprocessor
@@ -26,6 +26,7 @@ class LinearTrainer(Trainer):
             self.data_dict = self.load_data(dataset)
         #setting dummy num epochs to print stuff
         self.num_epochs = 1
+        self.no_train = no_train
 
     def load_data(self, dataset):
         result = self.preprocessor.preprocess_pipeline(dataset, params={'is_train': True})
@@ -47,7 +48,12 @@ class LinearTrainer(Trainer):
             else:
                 # Load the model first
                 self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
-        self.model.train_step((self.train_X, self.train_Y))
+        if self.no_train:
+            fake_train_X = np.random.randn(*self.train_X.shape)
+            fake_train_Y = np.random.randn(*self.train_Y.shape)
+            self.model.train_step((fake_train_X, fake_train_Y))
+        else:
+            self.model.train_step((self.train_X, self.train_Y))
         # Validate model
         self.validate_model(plot_results)
         print("Model trained, metrics:")
