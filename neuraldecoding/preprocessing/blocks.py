@@ -1534,7 +1534,7 @@ class NoiseAdditionBlock(DataProcessingBlock):
 	def transform(self, data, interpipe):
 		all_data = [data[self.location_neural]]
 		for _ in range(self.iterations):
-			noisy_data = add_noise(data[self.location_neural].clone(), self.method, self.std, self.type)
+			noisy_data = add_noise(data[self.location_neural].clone(), self.method, self.std, self.type, device=data[self.location_neural].device)
 			all_data.append(noisy_data)
 		data[self.location_neural] = torch.cat(all_data, dim=0)
 		# Repeat behavior data for each noisy neural data
