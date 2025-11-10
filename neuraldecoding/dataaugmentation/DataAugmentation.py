@@ -190,7 +190,7 @@ def add_noise_constant_tensor(X,
         biases = torch.normal(mean=0.0, std=std, size=(X.shape[0], X.shape[1]), device=device)
         biases = biases.unsqueeze(2).repeat(1, 1, X.shape[2])
     else:
-        Warning("Not a valid type, defaulting to same")
+        warnings.warn("Not a valid type, defaulting to same")
         biases = torch.full(X.shape, torch.normal(0.0, std, (1,)).item()).to(device)
 
     bias_X = X + biases
