@@ -1,7 +1,7 @@
 import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
 import neuraldecoding.dataaugmentation.DataAugmentation
-from neuraldecoding.dataaugmentation import SequenceScaler
+from neuraldecoding.dataaugmentation import SequenceScaler, add_noise
 from neuraldecoding.feature_extraction import FeatureExtractor
 from neuraldecoding.utils.utils_general import resolve_path
 from neuraldecoding.utils.data_tools import load_one_nwb
@@ -1521,3 +1521,16 @@ class ReFITTransformationBlock(DataProcessingBlock):
 				transformed_vel[t, :] = vel_magnitude * target_direction
 		
 		return transformed_vel
+
+class NoiseAdditionBlock(DataProcessingBlock):
+	def __init__(self, location: str, method: str = 'white', std: float = 0.01, type: str = 'same'):
+		super().__init__()
+		self.location = location
+		self.method = method
+		self.std = std
+		self.type = type
+	def transform(self, data, interpipe):
+		timeseries = data[self.location]
+		noisy_data = add_noise(timeseries, self.method, self.std, self.type)
+		data[self.location] = noisy_data
+		return data, interpipe
