@@ -159,7 +159,7 @@ def add_noise_white_tensor(X,
         Returns:
             noise_X (tensor): tensor of size [N, numfeats] with noise added
     """
-    noise = torch.normal(torch.zeros_like(X), std, device=device)
+    noise = torch.normal(torch.zeros_like(X), std).to(device)
     noise_X = X + noise
     return noise_X
 
@@ -180,13 +180,18 @@ def add_noise_constant_tensor(X,
             bias_X (tensor): tensor of size [N, numfeats] with constant noise added
     """
     if(type == 'same'):
-        biases = torch.full(X.shape, torch.normal(mean=0.0, std=std), device=device)
+        biases = torch.full(X.shape, torch.normal(0.0, std, (1,)).item()).to(device)
     elif(type == 'different'):
         biases = torch.normal(mean=0.0, std=std, size=(1, X.shape[1]), device=device)
         biases = biases.repeat(X.shape[0], 1)
+    elif(type == 'different_per_batch'):
+        # X is of shape [batch_size, numfeats, seq_len]
+        # Same bias for full sequence, but different for each batch and channel
+        biases = torch.normal(mean=0.0, std=std, size=(X.shape[0], X.shape[1]), device=device)
+        biases = biases.unsqueeze(2).repeat(1, 1, X.shape[2])
     else:
-        Warning("Not a valid type, defaulting to same")
-        biases = torch.full(X.shape, torch.normal(mean=0.0, std=std), device=device)
+        warnings.warn("Not a valid type, defaulting to same")
+        biases = torch.full(X.shape, torch.normal(0.0, std, (1,)).item()).to(device)
 
     bias_X = X + biases
         
