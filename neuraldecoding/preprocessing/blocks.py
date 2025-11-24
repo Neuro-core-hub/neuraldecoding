@@ -1523,14 +1523,20 @@ class ReFITTransformationBlock(DataProcessingBlock):
 		return transformed_vel
 
 class NoiseAdditionBlock(DataProcessingBlock):
-	def __init__(self, location: str, method: str = 'white', std: float = 0.01, type: str = 'same'):
+	def __init__(self, location_neural: str, location_behavior: str, method: str = 'white', std: float = 0.01, type: str = 'same', iterations: int = 1):
 		super().__init__()
-		self.location = location
+		self.location_neural = location_neural
+		self.location_behavior = location_behavior
 		self.method = method
 		self.std = std
 		self.type = type
+		self.iterations = iterations
 	def transform(self, data, interpipe):
-		timeseries = data[self.location]
-		noisy_data = add_noise(timeseries, self.method, self.std, self.type)
-		data[self.location] = noisy_data
+		all_data = [data[self.location_neural]]
+		for _ in range(self.iterations):
+			noisy_data = add_noise(data[self.location_neural].clone(), self.method, self.std, self.type, device=data[self.location_neural].device)
+			all_data.append(noisy_data)
+		data[self.location_neural] = torch.cat(all_data, dim=0)
+		# Repeat behavior data for each noisy neural data
+		data[self.location_behavior] = data[self.location_behavior].repeat(self.iterations + 1, 1, 1)
 		return data, interpipe
