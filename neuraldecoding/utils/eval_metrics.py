@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-from sklearn.metrics import r2_score
+import matplotlib.pyplot as plt
+from sklearn.metrics import r2_score, confusion_matrix as sklearn_confusion_matrix
 from neuraldecoding.utils.loss_functions import soft_dtw, path_soft_dtw, dilate_loss
 
 def mse(pred, target, params=None):
@@ -159,3 +160,142 @@ def r2(pred, target, params=None):
         raise ValueError("Arrays cannot be empty")
 
     return r2_score(target, pred, **params) if params else r2_score(target, pred)
+
+def confusion_matrix(pred, target, params=None):
+    """
+    Compute and plot confusion matrix from predictions and targets.
+    
+    Parameters
+    ----------
+    pred : array-like or torch.Tensor
+        Predicted labels
+    target : array-like or torch.Tensor
+        True labels
+    params : dict, optional
+        Dictionary containing plotting parameters:
+        - 'class_names': list of str, class names for labels
+        - 'normalize': bool, whether to normalize the matrix
+        - 'title': str, plot title
+        - 'cmap': str, colormap name
+        - 'figsize': tuple, figure size
+        - 'save_path': str, path to save figure
+        
+    Returns
+    -------
+    None
+    """
+    if isinstance(pred, torch.Tensor):
+        pred = pred.cpu().numpy()
+    if isinstance(target, torch.Tensor):
+        target = target.cpu().numpy()
+    
+    pred = pred.squeeze()
+    target = target.squeeze()
+    
+    # Compute confusion matrix
+    cm = sklearn_confusion_matrix(target, pred)
+    
+    # Extract plotting parameters if provided
+    if params is None:
+        params = {}
+    
+    class_names = params.get('class_names', None)
+    normalize = params.get('normalize', False)
+    title = params.get('title', 'Confusion Matrix')
+    cmap = params.get('cmap', 'Blues')
+    figsize = params.get('figsize', (8, 6))
+    save_path = params.get('save_path', None)
+    
+    # Plot the confusion matrix
+    plot_confusion_matrix(cm, class_names=class_names, normalize=normalize, 
+                         title=title, cmap=cmap, figsize=figsize, 
+                         save_path=save_path)
+    plt.show()
+    return None
+
+def plot_confusion_matrix(cm, class_names=None, normalize=False, title='Confusion Matrix',
+                         cmap='Blues', figsize=(8, 6), save_path=None):
+    """
+    Plot confusion matrix using pure matplotlib (no seaborn).
+    
+    Parameters
+    ----------
+    cm : ndarray of shape (n_classes, n_classes)
+        Confusion matrix as returned by sklearn.metrics.confusion_matrix or confusion_matrix function
+    class_names : list of str, optional
+        Names of classes for tick labels. If None, uses indices.
+    normalize : bool, default=False
+        If True, normalize the confusion matrix by row (true labels)
+    title : str, default='Confusion Matrix'
+        Title for the plot
+    cmap : str or Colormap, default='Blues'
+        Colormap to use for the matrix
+    figsize : tuple, default=(8, 6)
+        Figure size (width, height) in inches
+    save_path : str, optional
+        If provided, saves the figure to this path
+        
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+        The matplotlib figure object
+    ax : matplotlib.axes.Axes
+        The matplotlib axes object
+    """
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1, keepdims=True)
+        fmt = '.2f'
+    else:
+        fmt = 'd'
+    
+    n_classes = cm.shape[0]
+    
+    if class_names is None:
+        class_names = [str(i) for i in range(n_classes)]
+    
+    fig, ax = plt.subplots(figsize=figsize)
+    
+    # Create the heatmap
+    im = ax.imshow(cm, interpolation='nearest', cmap=cmap, aspect='auto')
+    
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax)
+    if normalize:
+        cbar.set_label('Proportion', rotation=270, labelpad=20)
+    else:
+        cbar.set_label('Count', rotation=270, labelpad=20)
+    
+    # Set ticks and labels
+    tick_marks = np.arange(n_classes)
+    ax.set_xticks(tick_marks)
+    ax.set_yticks(tick_marks)
+    ax.set_xticklabels(class_names, rotation=45, ha='right')
+    ax.set_yticklabels(class_names)
+    
+    # Add text annotations
+    thresh = cm.max() / 2.
+    for i in range(n_classes):
+        for j in range(n_classes):
+            if normalize:
+                text = ax.text(j, i, f'{cm[i, j]:.2f}',
+                             ha="center", va="center",
+                             color="white" if cm[i, j] > thresh else "black",
+                             fontsize=10)
+            else:
+                text = ax.text(j, i, f'{cm[i, j]:{fmt}}',
+                             ha="center", va="center",
+                             color="white" if cm[i, j] > thresh else "black",
+                             fontsize=10)
+    
+    # Labels and title
+    ax.set_ylabel('True Label', fontsize=12)
+    ax.set_xlabel('Predicted Label', fontsize=12)
+    ax.set_title(title, fontsize=14, pad=20)
+    
+    # Adjust layout to prevent label cutoff
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    
+    return fig, ax

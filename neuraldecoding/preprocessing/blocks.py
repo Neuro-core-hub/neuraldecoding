@@ -239,7 +239,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behaviour'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test']):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behavior'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test']):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -382,7 +382,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behaviour'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.target'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -413,6 +413,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		#TODO: Implement trial filtering (have an apply trial filters feature)
 		neural, behaviour = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
 		neural_ts, behaviour_ts = neural.timestamps[:] * 1000, behaviour.timestamps[:] * 1000
+		neural_units, behaviour_units = neural.unit, behaviour.unit
 		neural, behaviour = neural.data[:], behaviour.data[:]
 		trial_start_times = resolve_path(data.dataset, self.nwb_trial_start_times_loc)
 		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
@@ -431,6 +432,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 		interpipe[self.interpipe_keys['targets']] = targets[:]
 		interpipe[f'{self.data_keys[0]}_ts'] = neural_ts
 		interpipe[f'{self.data_keys[1]}_ts'] = behaviour_ts
+		interpipe[f"{self.data_keys[0]}_units"] = neural_units
+		interpipe[f"{self.data_keys[1]}_units"] = behaviour_units
 		return data_out, interpipe
 
 class IndexSelectorBlock(DataFormattingBlock):
@@ -476,15 +479,29 @@ class OneHotToClassNumberBlock(DataFormattingBlock):
 	"""
 	A block for converting one-hot encoded data to class numbers.
 	"""
-	def __init__(self, location):
+	def __init__(self, location, location_ts):
 		super().__init__()
 		self.location = location
+		self.location_ts = location_ts
 	def transform(self, data, interpipe):
 		data_out = data.copy()
-		for loc in self.location:
+		behavior_units = eval(interpipe["behavior_units"])
+		print("--------------------------------")
+		print("Class numbers:")
+		for i in range(len(behavior_units)):
+			print(f"Class {i}: {behavior_units[i]}")
+		print("--------------------------------")
+
+		for loc, loc_ts in zip(self.location, self.location_ts):
 			if loc not in data:
 				raise ValueError(f"Location '{loc}' not found in data dictionary.")
-			data_out[loc] = np.argmax(data[loc], axis=1)
+			result = np.argmax(data[loc], axis=1).astype(float)
+			# Remove when no class is active
+			mask = np.max(data[loc], axis=1) == 0
+			result = result[~mask]
+			# Remove corresponding timestamps
+			interpipe[loc_ts] = interpipe[loc_ts][~mask]
+			data_out[loc] = result
 		return data_out, interpipe
 
 class RoundToIntegerBlock(DataFormattingBlock):

@@ -1,5 +1,7 @@
 import os
-from pynwb import NWBHDF5IO, NWBFile
+import numpy as np
+from pynwb import NWBHDF5IO, NWBFile, TimeSeries
+from pynwb.ecephys import ElectricalSeries
 from datetime import datetime
 from dateutil.tz import tzlocal
 from . import zstruct_loader
@@ -56,9 +58,56 @@ class Dataset:
             self._load_data_zstruct()
         elif self.cfg.dataset_type == "nwb":
             self._load_data_nwb()
+        elif self.cfg.dataset_type == "multi-nwb":
+            self._load_data_multi_nwb()
         else:
             raise NotImplementedError(f"Unimplemented dataset type: {self.cfg.dataset_type}")
     
+    def _load_data_multi_nwb(self):
+        """
+        Load data from multiple NWB files
+        Combines them into a new NWB file using the first file as the template and adding on top
+        """
+        self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_files[0], mode="r")
+        self.dataset = self.io.read()
+        for nwb_file in self.cfg.dataset_parameters.nwb_files[1:]:
+            # Read the NWB file
+            with NWBHDF5IO(nwb_file, mode="r") as io:
+                nwbdata = io.read()
+                if self.cfg.dataset_parameters.patterns_add_mode == "new_patterns":
+                    # Pop original timeseries
+                    # Add new patterns
+                    old_patterns = self.dataset.acquisition.pop("patterns")
+                    new_patterns = old_patterns.data[:]
+                    
+                    if new_patterns.ndim == 1:
+                        new_patterns = new_patterns.reshape(-1, 1)
+                    # Get patterns from current nwb file
+                    additional_patterns = nwbdata.acquisition["patterns"].data[:]
+                    if additional_patterns.ndim == 1:
+                        additional_patterns = additional_patterns.reshape(-1, 1)
+                    additional_patterns = np.hstack([np.zeros((additional_patterns.shape[0], new_patterns.shape[1])), additional_patterns])
+                    new_patterns = np.hstack([new_patterns, np.zeros((new_patterns.shape[0], nwbdata.acquisition["patterns"].data.shape[1]))])
+                    # Vstack new and additional patterns
+                    new_patterns = np.vstack([new_patterns, additional_patterns])
+                    # Modify the units
+                    new_patterns_unit = eval(old_patterns.unit) + eval(nwbdata.acquisition["patterns"].unit)
+                    new_patterns_unit = str(new_patterns_unit)
+                    new_patterns_timestamps = np.concatenate([old_patterns.timestamps[:], nwbdata.acquisition["patterns"].timestamps[:]])
+                    self.dataset.add_acquisition(TimeSeries(name="patterns", data=new_patterns, timestamps=new_patterns_timestamps, unit=new_patterns_unit, description=old_patterns.description))
+                if self.cfg.dataset_parameters.neural_add_mode == "simple":
+                    # Pop original timeseries
+                    # Add new neural
+                    old_neural = self.dataset.acquisition.pop("neural")
+                    new_neural = old_neural.data[:]
+                    
+                    # Get neural from current nwb file
+                    additional_neural = nwbdata.acquisition["neural"].data[:]
+                    new_neural = np.vstack([new_neural, additional_neural])
+                    # Modify timestamps
+                    new_neural_timestamps = np.concatenate([old_neural.timestamps[:], nwbdata.acquisition["neural"].timestamps[:]])
+                    self.dataset.add_acquisition(ElectricalSeries(name="neural", data=new_neural, electrodes=old_neural.electrodes, conversion=old_neural.conversion, timestamps=new_neural_timestamps))
+
     def _load_data_nwb(self):
         """
         Load data from NWB file

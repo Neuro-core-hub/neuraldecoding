@@ -244,7 +244,7 @@ class FeatureExtractor:
                     # Discard data from both data streams
                     should_skip = True
             if should_skip:
-                print(f"Warning: No data found for at least one data stream for bin {bin_start:.2f} to {bin_end:.2f} ms. Skipping bin.")
+                # print(f"Warning: No data found for at least one data stream for bin {bin_start:.2f} to {bin_end:.2f} ms. Skipping bin.")
                 current_time += self.bin_size_ms
                 continue
             else:
