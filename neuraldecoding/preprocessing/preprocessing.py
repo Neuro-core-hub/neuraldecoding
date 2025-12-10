@@ -9,6 +9,7 @@ class Preprocessing:
     def __init__(self, config):
         self.config = config
         self.pipeline = []
+        self.saved_data = {}
 
         order = self.config.get('order', [])
         content = self.config.get('content', {})
@@ -32,11 +33,13 @@ class Preprocessing:
     
     def preprocess_pipeline(self, data, params = {'is_train': True}):
         current_data = data
-        inter_pipeline_data = {}
+        inter_pipeline_data = {'save_keys_ram': []}
         inter_pipeline_data.update(params)
         for step in self.pipeline:
             step_instance = step['instance']
             current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data)
+        for key in inter_pipeline_data.get('save_keys_ram', []):
+            self.saved_data[key] = inter_pipeline_data[key]
         return current_data
 
     def preprocess_step(self, data, step_name, inter_pipeline_data = {'is_train': True}):

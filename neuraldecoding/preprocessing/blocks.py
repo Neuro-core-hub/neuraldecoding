@@ -382,7 +382,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', is_human = True):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -398,6 +398,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
 		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
 		self.nwb_targets_loc = nwb_targets_loc
+		self.is_human = is_human
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -419,8 +420,9 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
-		trial_start_times = trial_start_times[:] * 1000
-		trial_end_times = trial_end_times[:] * 1000
+		if self.is_human:
+			trial_start_times = trial_start_times[:] * 1000
+			trial_end_times = trial_end_times[:] * 1000
 		# Skip trials as needed
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
@@ -435,7 +437,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		interpipe[f"{self.data_keys[0]}_units"] = neural_units
 		interpipe[f"{self.data_keys[1]}_units"] = behaviour_units
 		return data_out, interpipe
-
+	
 class IndexSelectorBlock(DataFormattingBlock):
 	"""
 	A block for selecting data from a dictionary based on indices.
@@ -641,14 +643,22 @@ class NormalizationBlock(DataProcessingBlock):
 				normalizer = SequenceScaler()
 			else:
 				raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
+			if self.normalizer_params.get('save_denorm_data_ram', False):
+				for loc in self.location:
+					interpipe[f'{loc}_denorm_data'] = data[loc].copy()
+					interpipe['save_keys_ram'].append(f'{loc}_denorm_data')
 			data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
-			data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			for loc in self.location[1:]:
+				data[loc] = normalizer.transform(data[loc])
 			if self.normalizer_params['is_save']:
 				if 'save_path' not in self.normalizer_params:
 					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
 				os.makedirs(os.path.dirname(self.normalizer_params['save_path']), exist_ok=True)
 				with open(self.normalizer_params['save_path'], 'wb') as f:
 					pickle.dump(normalizer, f)
+			if self.normalizer_params.get('save_normalizer_ram', False):
+				interpipe[f'{self.location[0]}_normalizer'] = normalizer
+				interpipe['save_keys_ram'].append(f'{self.location[0]}_normalizer')
 			return data, interpipe
 		else:
 			with open(self.normalizer_params['save_path'], 'rb') as f:
@@ -747,6 +757,7 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		interpipe['bin_trial_idx'] = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_start_ms'] for bin_feat in bin_features], interpipe['trial_start_times'])
 		# Indices for the start of each trial in terms of bins
 		interpipe['bin_trial_start_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_start_times'])
+		interpipe['save_keys_ram'].append('bin_trial_start_idx')
 		return data, interpipe
 
 	def transform_online(self, data, interpipe):
