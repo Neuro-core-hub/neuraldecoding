@@ -24,8 +24,6 @@ class NNTrainer(Trainer):
         self.num_epochs = config.training.get('num_epochs', None)
         self.max_iters = config.training.get('max_iters', None)
         self.print_on = config.training.get('print_on', 'epoch')
-        self.update_scheduler_on = config.training.get('update_scheduler_on', 'epoch')
-        self.update_scheduler_every = config.training.get('update_scheduler_every', 1)
         self.min_lr_plateau = config.training.get('min_lr_plateau', 0)
         self.take_best = config.training.get('take_best', False)
         self.batch_size = config.training.get('batch_size', 64)
@@ -112,10 +110,10 @@ class NNTrainer(Trainer):
         best_model_state = None
         best_epoch = 0
         best_iteration = 0
+        running_loss = 0.0
             
         for epoch in range(self.num_epochs):
             # Train
-            running_loss = 0.0
             train_all_predictions = []
             train_all_targets = []
 
@@ -134,7 +132,44 @@ class NNTrainer(Trainer):
                 iteration += 1
                 
                 if self.print_on == 'iters':
-                    train_loss = running_loss / (iteration)
+                    
+                    if iteration % self.print_every == 0:
+                        train_loss = running_loss / self.print_every
+                        running_loss = 0.0
+                        
+                        val_loss, val_all_predictions, val_all_targets = self.validate_model()
+
+                        # Save best model
+                        if self.take_best and val_loss < best_val_loss:
+                            best_val_loss = val_loss
+                            best_model_state = self.model.state_dict().copy()
+                            best_epoch = epoch
+                            best_iteration = iteration
+                        self.update_scheduler(val_loss)
+                        if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                            if self.optimizer.param_groups[0]['lr'] <= self.min_lr_plateau:
+                                print(f"Learning rate has reached minimum threshold ({self.min_lr_plateau}). Ending training.")
+                                if self.take_best and best_model_state is not None:
+                                    self.model.load_state_dict(best_model_state)
+                                    print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                                return self.model, self.logger
+                    
+                        self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
+
+                if self.max_iters is not None and iteration >= self.max_iters:
+                    print(f"Reached maximum iterations ({self.max_iters}). Ending training.")
+                    if self.take_best and best_model_state is not None:
+                        self.model.load_state_dict(best_model_state)
+                        print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                    return self.model, self.logger
+
+            # Update logger
+            if self.print_on == 'epoch':
+                train_loss = running_loss / len(self.train_loader)
+                running_loss = 0.0
+                
+                if epoch % self.print_every == 0:
+                    # Validate
                     val_loss, val_all_predictions, val_all_targets = self.validate_model()
                     
                     # Save best model
@@ -143,18 +178,9 @@ class NNTrainer(Trainer):
                         best_model_state = self.model.state_dict().copy()
                         best_epoch = epoch
                         best_iteration = iteration
-                    
-                    self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
 
-                if self.max_iters is not None and iteration >= self.max_iters:
-                    print(f"Reached maximum iterations ({self.max_iters}). Ending training.")
-                    if self.take_best and best_model_state is not None:
-                        self.model.load_state_dict(best_model_state)
-                        print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
-                    return self.model, self.logger
-                
-                if self.update_scheduler_on == 'iters' and (iteration % self.update_scheduler_every == 0):
                     self.update_scheduler(val_loss)
+
                     if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                         if self.optimizer.param_groups[0]['lr'] <= self.min_lr_plateau:
                             print(f"Learning rate has reached minimum threshold ({self.min_lr_plateau}). Ending training.")
@@ -162,33 +188,7 @@ class NNTrainer(Trainer):
                                 self.model.load_state_dict(best_model_state)
                                 print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
                             return self.model, self.logger
-
-            train_loss = running_loss / len(self.train_loader)
-
-            # Validate
-            val_loss, val_all_predictions, val_all_targets = self.validate_model()
-            
-            # Save best model
-            if self.take_best and val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_model_state = self.model.state_dict().copy()
-                best_epoch = epoch
-                best_iteration = iteration
-
-            # Scheduler step
-            if self.update_scheduler_on == 'epoch' and (iteration % self.update_scheduler_every == 0):
-                self.update_scheduler(val_loss)
-                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    if self.optimizer.param_groups[0]['lr'] <= self.min_lr_plateau:
-                        print(f"Learning rate has reached minimum threshold ({self.min_lr_plateau}). Ending training.")
-                        if self.take_best and best_model_state is not None:
-                            self.model.load_state_dict(best_model_state)
-                            print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
-                        return self.model, self.logger
-
-            # Update logger
-            if self.print_on == 'epoch':
-                self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
+                    self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
         
         print("Reached maximum number of epochs. Ending training.")
         if self.take_best and best_model_state is not None:

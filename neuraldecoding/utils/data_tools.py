@@ -244,10 +244,16 @@ def add_trial_history(x, y, trial_ts, leadup):
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
 
+    if np.isnan(unique_trials).any():
+        num_trials -= 1
+
     X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
     Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
 
     for idx, trial in enumerate(unique_trials):
+        if np.isnan(trial):
+            continue
+
         mask = trial == trial_ts
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]

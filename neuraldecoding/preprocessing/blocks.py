@@ -416,8 +416,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 		neural_ts, behaviour_ts = neural.timestamps[:] * 1000, behaviour.timestamps[:] * 1000
 		neural_units, behaviour_units = neural.unit, behaviour.unit
 		neural, behaviour = neural.data[:], behaviour.data[:]
-		trial_start_times = resolve_path(data.dataset, self.nwb_trial_start_times_loc)
-		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
+		trial_start_times = np.array(resolve_path(data.dataset, self.nwb_trial_start_times_loc))
+		trial_end_times = np.array(resolve_path(data.dataset, self.nwb_trial_end_times_loc))
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
 		if self.is_human:
@@ -754,10 +754,17 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			interpipe[ts_loc] = bin_timestamps
 
 		# Extract trial indices for each bin
-		interpipe['bin_trial_idx'] = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_start_ms'] for bin_feat in bin_features], interpipe['trial_start_times'])
+		trial_start_idx = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_start_ms'] for bin_feat in bin_features], interpipe['trial_start_times'])
+		trial_end_idx = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_end_ms'] for bin_feat in bin_features], interpipe['trial_end_times'])
+		trial_points = trial_start_idx - 1 == trial_end_idx
+		bin_trial_idx = np.nan * np.ones_like(trial_points)
+		bin_trial_idx[trial_points] = trial_start_idx[trial_points] - 1  # Zero-based indexing
+		interpipe['bin_trial_idx'] = bin_trial_idx
 		# Indices for the start of each trial in terms of bins
 		interpipe['bin_trial_start_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_start_times'])
+		interpipe['bin_trial_end_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_end_times'])
 		interpipe['save_keys_ram'].append('bin_trial_start_idx')
+		interpipe['save_keys_ram'].append('bin_trial_end_idx')
 		return data, interpipe
 
 	def transform_online(self, data, interpipe):
