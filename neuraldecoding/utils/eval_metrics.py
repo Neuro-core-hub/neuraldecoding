@@ -137,6 +137,9 @@ def correlation(pred,target,params=None):
         pred = pred.cpu().numpy()
     if isinstance(target, torch.Tensor):
         target = target.cpu().numpy()
+    if pred.ndim == 1:
+        pred = pred.reshape(-1, 1)
+        target = target.reshape(-1, 1)
     for i in range(pred.shape[1]):
         corr.append(np.corrcoef(pred[:, i], target[:, i])[1, 0])
     return corr
