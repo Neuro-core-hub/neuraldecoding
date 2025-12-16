@@ -26,6 +26,7 @@ class Dataset:
         self.cfg: DictConfig = cfg
         self.dataset_parameters: DictConfig = self.cfg.dataset_parameters
         self.verbose: bool = verbose
+        self.dataset_ratio = 1.0 # will be inferred from neural data
         # Initialize empty NWB file
         self.dataset: NWBFile = NWBFile(
             session_description="",
@@ -70,6 +71,7 @@ class Dataset:
         """
         self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_files[0], mode="r")
         self.dataset = self.copy_nwb_contents(self.io.read())
+        dataset_sizes = [len(self.dataset.acquisition["neural"].timestamps[:])]
         for idx, nwb_file in enumerate(self.cfg.dataset_parameters.nwb_files[1:]):
             idx = idx + 1  # since we skipped the first file
             if self.cfg.dataset_parameters.continuous_add_mode == "same_dofs":
@@ -129,6 +131,8 @@ class Dataset:
                     # Add new neural
                     old_neural = self.dataset.acquisition.pop("neural")
                     new_neural = old_neural.data[:]
+
+                    dataset_sizes.append(len(nwbdata.acquisition["neural"].timestamps[:]))
                     
                     # Get neural from current nwb file
                     additional_neural = nwbdata.acquisition["neural"].data[:]
@@ -152,6 +156,10 @@ class Dataset:
                     new_continuous_timestamps = np.concatenate([old_continuous.timestamps[:], nwbdata.acquisition["continuous"].timestamps[:] - timestamp_offset])
                     self.dataset.add_acquisition(TimeSeries(name="continuous", data=new_continuous, timestamps=new_continuous_timestamps, description=old_continuous.description, unit=old_continuous.unit))
 
+        dataset_sizes = np.array(dataset_sizes)
+        self.dataset_ratio = dataset_sizes / np.sum(dataset_sizes)
+        print(f"Dataset ratio overridden: {self.dataset_ratio}")
+        
     def _load_data_nwb(self):
         """
         Load data from NWB file

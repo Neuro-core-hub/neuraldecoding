@@ -239,7 +239,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behavior'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test']):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behavior'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -251,6 +251,9 @@ class DataSplitBlock(DataFormattingBlock):
 			data_keys (list): List of 4 keys names to store the split data in the output dictionary. Default is ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test'].
 			shuffle (bool): Whether to shuffle the data. Default is False.
 			masks_suffix (list): List of suffixes to add to the interpipe dictionary keys for the masks. Default is ['_train', '_val', '_test'].
+			dataset_ratio (int): Ratio of dataset sizes in composite dataset. Should only be used if using multiple datasets so data is balanced. Currently only configured for direct split.
+			val_run (int): Use an entire run for validation. Should only be used if using multiple datasets. Indexed at 1.
+			
 		"""
 		super().__init__()
 		self.location = location
@@ -261,6 +264,7 @@ class DataSplitBlock(DataFormattingBlock):
 		self.data_keys = data_keys
 		self.shuffle = shuffle
 		self.masks_suffix = masks_suffix
+		self.val_run = val_run
 	def transform(self, data, interpipe):
 		"""
 		Transform the data by splitting it into training and testing sets based on trial indices.
@@ -292,7 +296,9 @@ class DataSplitBlock(DataFormattingBlock):
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed,
 														   shuffle=self.shuffle,
-														   return_masks=True)
+														   return_masks=True,
+														   dataset_ratio=interpipe['dataset_ratio'] if 'dataset_ratio' in interpipe else 1,
+														   val_run=self.val_run)
 		assert len(split_data) == len(self.data_keys) // 2, "DataSplitBlock: split_data length mismatch. Did you include keys for validation set?"
 		for i, (x, y) in enumerate(split_data):
 			data[self.data_keys[i]] = x
@@ -412,6 +418,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
 		#TODO: Implement trial filtering (have an apply trial filters feature)
+		interpipe['dataset_ratio'] = data.dataset_ratio
 		neural, behaviour = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
 		neural_ts, behaviour_ts = neural.timestamps[:] * 1000, behaviour.timestamps[:] * 1000
 		neural_units, behaviour_units = neural.unit, behaviour.unit
