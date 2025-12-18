@@ -910,11 +910,11 @@ class LabelModificationBlock(DataProcessingBlock):
 				curmod_num = 0
 				while True:
 					curmod_name = f"unmodified_{curmod_num}"
-					if curmod_name not in interpipe['save_keys']:
+					if curmod_name not in interpipe['save_keys_ram']:
 						break
 					curmod_num += 1
 				self.save_name = curmod_name
-			interpipe['save_keys'].append(self.save_name)
+			interpipe['save_keys_ram'].append(self.save_name)
 			interpipe[self.save_name] = data['behavior_train']
 
 		data['behavior_train'] = neuraldecoding.utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)

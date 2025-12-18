@@ -200,8 +200,6 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
     return2 = True
 
     if val_run is not None:
-        swap_flag = True
-
         assert val_run < len(dataset_ratio) + 1 and val_run >= 1, "val_run is not valid given number of datasets loaded"
 
         if isinstance(split_ratio, tuple) and split_ratio[1] != 0:
