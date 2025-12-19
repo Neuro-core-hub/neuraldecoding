@@ -239,7 +239,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behavior'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test']):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behavior'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -251,6 +251,9 @@ class DataSplitBlock(DataFormattingBlock):
 			data_keys (list): List of 4 keys names to store the split data in the output dictionary. Default is ['neural_train', 'neural_test', 'behaviour_train', 'behaviour_test'].
 			shuffle (bool): Whether to shuffle the data. Default is False.
 			masks_suffix (list): List of suffixes to add to the interpipe dictionary keys for the masks. Default is ['_train', '_val', '_test'].
+			dataset_ratio (int): Ratio of dataset sizes in composite dataset. Should only be used if using multiple datasets so data is balanced. Currently only configured for direct split.
+			val_run (int): Use an entire run for validation. Should only be used if using multiple datasets. Indexed at 1.
+			
 		"""
 		super().__init__()
 		self.location = location
@@ -261,6 +264,7 @@ class DataSplitBlock(DataFormattingBlock):
 		self.data_keys = data_keys
 		self.shuffle = shuffle
 		self.masks_suffix = masks_suffix
+		self.val_run = val_run
 	def transform(self, data, interpipe):
 		"""
 		Transform the data by splitting it into training and testing sets based on trial indices.
@@ -292,7 +296,9 @@ class DataSplitBlock(DataFormattingBlock):
 														   split_ratio=self.split_ratio, 
 														   seed=self.split_seed,
 														   shuffle=self.shuffle,
-														   return_masks=True)
+														   return_masks=True,
+														   dataset_ratio=interpipe['dataset_ratio'] if 'dataset_ratio' in interpipe else 1,
+														   val_run=self.val_run)
 		assert len(split_data) == len(self.data_keys) // 2, "DataSplitBlock: split_data length mismatch. Did you include keys for validation set?"
 		for i, (x, y) in enumerate(split_data):
 			data[self.data_keys[i]] = x
@@ -382,7 +388,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', is_human = True):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -398,6 +404,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
 		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
 		self.nwb_targets_loc = nwb_targets_loc
+		self.is_human = is_human
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -411,16 +418,18 @@ class Dataset2DictBlock(DataFormattingBlock):
 			interpipe (dict): Updated interpipe dictionary with entry of 'trial_idx' containing the trial indices.
 		"""
 		#TODO: Implement trial filtering (have an apply trial filters feature)
+		interpipe['dataset_ratio'] = data.dataset_ratio
 		neural, behaviour = resolve_path(data.dataset, self.neural_nwb_loc), resolve_path(data.dataset, self.behavior_nwb_loc)
 		neural_ts, behaviour_ts = neural.timestamps[:] * 1000, behaviour.timestamps[:] * 1000
 		neural_units, behaviour_units = neural.unit, behaviour.unit
 		neural, behaviour = neural.data[:], behaviour.data[:]
-		trial_start_times = resolve_path(data.dataset, self.nwb_trial_start_times_loc)
-		trial_end_times = resolve_path(data.dataset, self.nwb_trial_end_times_loc)
+		trial_start_times = np.array(resolve_path(data.dataset, self.nwb_trial_start_times_loc))
+		trial_end_times = np.array(resolve_path(data.dataset, self.nwb_trial_end_times_loc))
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
-		trial_start_times = trial_start_times[:] * 1000
-		trial_end_times = trial_end_times[:] * 1000
+		if self.is_human:
+			trial_start_times = trial_start_times[:] * 1000
+			trial_end_times = trial_end_times[:] * 1000
 		# Skip trials as needed
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
@@ -435,7 +444,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		interpipe[f"{self.data_keys[0]}_units"] = neural_units
 		interpipe[f"{self.data_keys[1]}_units"] = behaviour_units
 		return data_out, interpipe
-
+	
 class IndexSelectorBlock(DataFormattingBlock):
 	"""
 	A block for selecting data from a dictionary based on indices.
@@ -641,14 +650,22 @@ class NormalizationBlock(DataProcessingBlock):
 				normalizer = SequenceScaler()
 			else:
 				raise ValueError(f"Unsupported normalization method: {self.normalizer_method}")
+			if self.normalizer_params.get('save_denorm_data_ram', False):
+				for loc in self.location:
+					interpipe[f'{loc}_denorm_data'] = data[loc].copy()
+					interpipe['save_keys_ram'].append(f'{loc}_denorm_data')
 			data[self.location[0]] = normalizer.fit_transform(data[self.location[0]])
-			data[self.location[1]] = normalizer.transform(data[self.location[1]])
+			for loc in self.location[1:]:
+				data[loc] = normalizer.transform(data[loc])
 			if self.normalizer_params['is_save']:
 				if 'save_path' not in self.normalizer_params:
 					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
 				os.makedirs(os.path.dirname(self.normalizer_params['save_path']), exist_ok=True)
 				with open(self.normalizer_params['save_path'], 'wb') as f:
 					pickle.dump(normalizer, f)
+			if self.normalizer_params.get('save_normalizer_ram', False):
+				interpipe[f'{self.location[0]}_normalizer'] = normalizer
+				interpipe['save_keys_ram'].append(f'{self.location[0]}_normalizer')
 			return data, interpipe
 		else:
 			with open(self.normalizer_params['save_path'], 'rb') as f:
@@ -744,9 +761,17 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			interpipe[ts_loc] = bin_timestamps
 
 		# Extract trial indices for each bin
-		interpipe['bin_trial_idx'] = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_start_ms'] for bin_feat in bin_features], interpipe['trial_start_times'])
+		trial_start_idx = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_start_ms'] for bin_feat in bin_features], interpipe['trial_start_times'])
+		trial_end_idx = neuraldecoding.utils.obtain_trial_idx([bin_feat['bin_end_ms'] for bin_feat in bin_features], interpipe['trial_end_times'])
+		trial_points = trial_start_idx - 1 == trial_end_idx
+		bin_trial_idx = np.nan * np.ones_like(trial_points)
+		bin_trial_idx[trial_points] = trial_start_idx[trial_points] - 1  # Zero-based indexing
+		interpipe['bin_trial_idx'] = bin_trial_idx
 		# Indices for the start of each trial in terms of bins
 		interpipe['bin_trial_start_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_start_times'])
+		interpipe['bin_trial_end_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_end_times'])
+		interpipe['save_keys_ram'].append('bin_trial_start_idx')
+		interpipe['save_keys_ram'].append('bin_trial_end_idx')
 		return data, interpipe
 
 	def transform_online(self, data, interpipe):
@@ -885,11 +910,11 @@ class LabelModificationBlock(DataProcessingBlock):
 				curmod_num = 0
 				while True:
 					curmod_name = f"unmodified_{curmod_num}"
-					if curmod_name not in interpipe['save_keys']:
+					if curmod_name not in interpipe['save_keys_ram']:
 						break
 					curmod_num += 1
 				self.save_name = curmod_name
-			interpipe['save_keys'].append(self.save_name)
+			interpipe['save_keys_ram'].append(self.save_name)
 			interpipe[self.save_name] = data['behavior_train']
 
 		data['behavior_train'] = neuraldecoding.utils.label_mods.apply_modifications(self.nicknames, data['behavior_train'], interpipe, self.param_dict)

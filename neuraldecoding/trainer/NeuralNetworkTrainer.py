@@ -22,6 +22,10 @@ class NNTrainer(Trainer):
         self.scheduler = self.create_scheduler(config.scheduler, self.optimizer)
         self.loss_func = self.create_loss_function(config.loss_func)
         self.num_epochs = config.training.get('num_epochs', None)
+        self.max_iters = config.training.get('max_iters', None)
+        self.print_on = config.training.get('print_on', 'epoch')
+        self.min_lr_plateau = config.training.get('min_lr_plateau', 0)
+        self.take_best = config.training.get('take_best', False)
         self.batch_size = config.training.get('batch_size', 64)
         self.full_batch_valid = config.training.get('full_batch_valid', False)
         if config.model.type == 'LSTMTrialInput':
@@ -100,15 +104,21 @@ class NNTrainer(Trainer):
             self.train_loader = train_loader
         if(valid_loader is not None):
             self.valid_loader = valid_loader
+
+        iteration = 0
+        best_val_loss = float('inf')
+        best_model_state = None
+        best_epoch = 0
+        best_iteration = 0
+        running_loss = 0.0
             
         for epoch in range(self.num_epochs):
             # Train
-            self.model.train()
-            running_loss = 0.0
             train_all_predictions = []
             train_all_targets = []
 
             for x,y in self.train_loader:
+                self.model.train()
                 self.optimizer.zero_grad()
 
                 loss, yhat, y = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache, return_y=True)
@@ -118,25 +128,89 @@ class NNTrainer(Trainer):
                 train_all_targets.append(y.detach().cpu().numpy())
                 if(self.clear_cache):
                     del y, yhat
+                
+                iteration += 1
+                
+                if self.print_on == 'iters':
+                    
+                    if iteration % self.print_every == 0:
+                        train_loss = running_loss / self.print_every
+                        running_loss = 0.0
+                        
+                        val_loss, val_all_predictions, val_all_targets = self.validate_model()
 
-            train_loss = running_loss / len(self.train_loader)
+                        # Save best model
+                        if self.take_best and val_loss < best_val_loss:
+                            best_val_loss = val_loss
+                            best_model_state = self.model.state_dict().copy()
+                            best_epoch = epoch
+                            best_iteration = iteration
+                        self.update_scheduler(val_loss)
+                        if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                            if self.optimizer.param_groups[0]['lr'] <= self.min_lr_plateau:
+                                print(f"Learning rate has reached minimum threshold ({self.min_lr_plateau}). Ending training.")
+                                if self.take_best and best_model_state is not None:
+                                    self.model.load_state_dict(best_model_state)
+                                    print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                                return self.model, self.logger
+                    
+                        self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
 
-            # Validate
-            val_loss, val_all_predictions, val_all_targets = self.validate_model()
+                if self.max_iters is not None and iteration >= self.max_iters:
+                    print(f"Reached maximum iterations ({self.max_iters}). Ending training.")
+                    if self.take_best and best_model_state is not None:
+                        self.model.load_state_dict(best_model_state)
+                        print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                    return self.model, self.logger
 
-            # Scheduler step
-            if self.scheduler:
-                if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                    self.scheduler.step(val_loss)
-                else:
-                    self.scheduler.step()
+            # Update logger
+            if self.print_on == 'epoch':
+                train_loss = running_loss / len(self.train_loader)
+                running_loss = 0.0
+                
+                if epoch % self.print_every == 0:
+                    # Validate
+                    val_loss, val_all_predictions, val_all_targets = self.validate_model()
+                    
+                    # Save best model
+                    if self.take_best and val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        best_model_state = self.model.state_dict().copy()
+                        best_epoch = epoch
+                        best_iteration = iteration
 
+                    self.update_scheduler(val_loss)
+
+                    if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                        if self.optimizer.param_groups[0]['lr'] <= self.min_lr_plateau:
+                            print(f"Learning rate has reached minimum threshold ({self.min_lr_plateau}). Ending training.")
+                            if self.take_best and best_model_state is not None:
+                                self.model.load_state_dict(best_model_state)
+                                print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                            return self.model, self.logger
+                    self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
+        
+        print("Reached maximum number of epochs. Ending training.")
+        if self.take_best and best_model_state is not None:
+            self.model.load_state_dict(best_model_state)
+            print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+        return self.model, self.logger
+    
+    def update_scheduler(self, val_loss):
+        if self.scheduler:
+            if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.scheduler.step(val_loss)
+            else:
+                self.scheduler.step()
+    
+    def update_logger(self, train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration):
+        for metric, compute_train in zip(self.metrics, self.compute_train):
             # Calculate and populate metrics
-            for metric in self.metrics:
-                if metric == "loss":
-                    self.logger[metric]['train'].append(train_loss)
-                    self.logger[metric]['valid'].append(val_loss)
-                else:
+            if metric == "loss":
+                self.logger[metric]['train'].append(train_loss)
+                self.logger[metric]['valid'].append(val_loss)
+            else:
+                if compute_train:
                     metric_param = self.metric_params.get(metric, None)
                     metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
                     self.logger[metric]['valid'].append(metric_class(val_all_predictions, val_all_targets, metric_param))
@@ -144,11 +218,14 @@ class NNTrainer(Trainer):
                     for train_prediction, train_target in zip(train_all_predictions, train_all_targets):
                         train_metrics.append(metric_class(train_prediction, train_target, metric_param))
                     self.logger[metric]['train'].append(train_metrics)
+                else:
+                    metric_param = self.metric_params.get(metric, None)
+                    metric_class = getattr(neuraldecoding.utils.eval_metrics, metric)
+                    self.logger[metric]['valid'].append(metric_class(val_all_predictions, val_all_targets, metric_param))
+                    self.logger[metric]['train'].append(None)
 
-            # Logging
-            self.save_print_log(epoch, train_loss, val_loss)
-
-        return self.model, self.logger
+        # logging
+        self.save_print_log_v2(epoch, iteration, train_loss, val_loss)
 
     def clear_gpu_cache(self):
         self.model.cpu()

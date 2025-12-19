@@ -11,6 +11,7 @@ from pynwb import NWBFile, TimeSeries, NWBHDF5IO
 from typing import Dict, List, Optional, Tuple, Union
 from datetime import datetime
 import pickle
+import warnings
 
 def extract_dates_from_filenames(data_path):
     # Find all matching .pkl files
@@ -103,7 +104,7 @@ def neural_finger_from_dict(dict, neural_type):
     trial_idx = dict['trial_index']
     return (neural, finger), trial_idx
 
-def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False, return_masks=False):
+def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False, return_masks=False, dataset_ratio=1.0, val_run=None):
     """
     Split (x, y) into train/(val)/test.
     - If trial_idx is provided and non-empty, split by whole trials.
@@ -111,11 +112,19 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
     - If trial_idx is None or empty, split by samples.
     - Shuffles only when shuffle=True (seeded).
     - If split_ratio is a tuple, split into train/val/test.
+    - Split by dataset for balance (e.g. 1/3 for train, 1/3 for val, 1/3 for test).
+    - If val_run is provided, take that run as validation, instead of using ratios. Only configured for direct split.
+      If split_ratio is a tuple, the first value is used for train, the third for test.
     Returns: [(x_train, y_train), (x_test, y_test)] or [(x_train, y_train), (x_val, y_val), (x_test, y_test)]
     """
     n = len(x)
     if len(y) != n:
         raise ValueError("x and y must have the same length.")
+    
+    if isinstance(dataset_ratio, float):
+        dataset_ratio = [dataset_ratio]
+    
+    assert sum(dataset_ratio) == 1, "dataset_ratio must sum to 1"
 
     g = torch.Generator().manual_seed(seed)
     device = x.device if torch.is_tensor(x) else torch.device('cpu')
@@ -182,30 +191,95 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
                 return (x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])
 
     # ----- Sample-wise split (no trial info) -----
-    if isinstance(split_ratio, float):
-        n_train = int(n * split_ratio)
-        n_val = 0
-    else:
-        n_train = int(n * split_ratio[0])
-        n_val = int(n * split_ratio[1])
+    current_start_idx = 0
+    # Initialize index tensors/lists to accumulate indices across dataset_ratio splits
+    train_idx = torch.tensor([], dtype=torch.long, device=device)
+    val_idx = torch.tensor([], dtype=torch.long, device=device)
+    test_idx = torch.tensor([], dtype=torch.long, device=device)
 
-    if shuffle:
-        perm = torch.randperm(n, generator=g).to(device)
-        train_idx = perm[:n_train]
-        val_idx = perm[n_train:n_train+n_val]
-        if isinstance(split_ratio, float):
-            test_idx = perm[n_train:]
-        else:
-            test_idx = perm[n_train + n_val:]
-    else:
-        train_idx = torch.arange(0, n_train, device=device)
-        val_idx = torch.arange(n_train, n_train+n_val, device=device)
-        if isinstance(split_ratio, float):
-            test_idx = torch.arange(n_train, n, device=device)
-        else:
-            test_idx = torch.arange(n_train + n_val, n, device=device)
+    return2 = True
 
-    if isinstance(split_ratio, float):
+    if val_run is not None:
+        assert val_run < len(dataset_ratio) + 1 and val_run >= 1, "val_run is not valid given number of datasets loaded"
+
+        if isinstance(split_ratio, tuple) and split_ratio[1] != 0:
+            warnings.warn("Nonzero validation ratio was provided when a validation run was specified. Recalculating split_ratio.")
+            split_ratio = split_ratio[0]/(split_ratio[0] + split_ratio[2])
+
+        if split_ratio != 1:
+            assert split_ratio <= 1, "Split ratio exceeds 100% of the dataset"
+            warnings.warn("Validation run was specified, but split_ratio is not 1. You are dropping training data if this decoder is for online use.")
+            return2 = False
+
+        for ratio_i, ratio in enumerate(dataset_ratio):
+            if ratio_i == len(dataset_ratio) - 1:
+                n_cur = n - current_start_idx
+            else:
+                n_cur = int(n * ratio)
+
+            if ratio_i == val_run - 1:
+                if shuffle:
+                    perm = torch.randperm(n_cur, generator=g).to(device) + current_start_idx
+                    val_idx = perm
+                else:
+                    val_idx = torch.arange(current_start_idx, current_start_idx + n_cur, device=device)
+            else:
+                n_train = int(n_cur * split_ratio)
+
+                if shuffle:
+                    perm = torch.randperm(n_cur, generator=g).to(device) + current_start_idx
+                    train_idx = torch.cat([train_idx, perm[:n_train]])
+                    test_idx = torch.cat([test_idx, perm[n_train:]])
+                else:
+                    train_idx = torch.cat([train_idx, torch.arange(current_start_idx, current_start_idx + n_train, device=device)])
+                    test_idx = torch.cat([test_idx, torch.arange(current_start_idx + n_train, current_start_idx + n_cur, device=device)])
+        
+            current_start_idx += n_cur
+        
+        if return2: # swap test and val if only train and val
+            temp = test_idx
+            test_idx = val_idx
+            val_idx = temp
+    
+    else:
+        for ratio_i, ratio in enumerate(dataset_ratio):
+            if ratio_i == len(dataset_ratio) - 1:
+                n_cur = n - current_start_idx
+            else:
+                n_cur = int(n * ratio)
+
+            if isinstance(split_ratio, float):
+                n_train = int(n_cur * split_ratio)
+                n_val = 0
+            else:
+                n_train = int(n_cur * split_ratio[0])
+                n_val = int(n_cur * split_ratio[1])
+                return2 = False
+
+            if shuffle:
+                perm = torch.randperm(n_cur, generator=g).to(device) + current_start_idx
+                cur_train_idx = perm[:n_train]
+                cur_val_idx = perm[n_train:n_train + n_val]
+                if isinstance(split_ratio, float):
+                    cur_test_idx = perm[n_train:n_cur]
+                else:
+                    cur_test_idx = perm[n_train + n_val:n_cur]
+            else:
+                cur_train_idx = torch.arange(current_start_idx, current_start_idx + n_train, device=device)
+                cur_val_idx = torch.arange(current_start_idx + n_train, current_start_idx + n_train + n_val, device=device)
+                if isinstance(split_ratio, float):
+                    cur_test_idx = torch.arange(current_start_idx + n_train, current_start_idx + n_cur, device=device)
+                else:
+                    cur_test_idx = torch.arange(current_start_idx + n_train + n_val, current_start_idx + n_cur, device=device)
+
+            # Concatenate indices for each split
+            train_idx = torch.cat([train_idx, cur_train_idx])
+            val_idx = torch.cat([val_idx, cur_val_idx])
+            test_idx = torch.cat([test_idx, cur_test_idx])
+
+            current_start_idx += n_cur
+
+    if return2:
         if return_masks:
             return ((x[train_idx], y[train_idx]), (x[test_idx], y[test_idx])), (train_idx, test_idx)
         else:
@@ -244,10 +318,16 @@ def add_trial_history(x, y, trial_ts, leadup):
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
 
+    if np.isnan(unique_trials).any():
+        num_trials -= 1
+
     X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
     Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
 
     for idx, trial in enumerate(unique_trials):
+        if np.isnan(trial):
+            continue
+
         mask = trial == trial_ts
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]

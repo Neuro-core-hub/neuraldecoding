@@ -8,6 +8,7 @@ class Trainer(ABC):
         # Each metric has a list of train and validation metrics
         self.metrics = cfg.evaluation.metrics
         self.metric_params = cfg.evaluation.get("params", {})
+        self.compute_train = cfg.evaluation.get("compute_train", [True for metric in range(len(list(self.metrics)))])
         self.logger = {metric: {'train':[], 'valid':[]} for metric in self.metrics}
         self.logger_save_path = cfg.evaluation.get("save_path", None)
         self.print_results = cfg.training.get("print_results", True)
@@ -45,5 +46,43 @@ class Trainer(ABC):
             print(text)
         return text
 
+    def save_print_log_v2(self, epoch = 0, iteration = 0, train_loss = None, val_loss = None):
+        # Save log
+        if self.logger_save_path:
+            with open(self.logger_save_path, 'a') as f:
+                entries = [epoch] + [f'"{self.logger[metric]["train"][-1]}"' for metric in self.metrics] + [f'"{self.logger[metric]["valid"][-1]}"' for metric in self.metrics]
+                f.write(','.join(map(str, entries)) + '\n')
+
+        # Print log
+        text = ""
+        if self.print_results and ((epoch % self.print_every == 0 or epoch == self.num_epochs - 1) and self.print_on == 'epoch'):
+            if train_loss is None and val_loss is None:
+                text += f"Epoch {epoch}/{self.num_epochs - 1}\n"
+            else:
+                text += f"Epoch {epoch}/{self.num_epochs - 1}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n"
+            for metric in self.logger:
+                train_metric = self.logger[metric]['train'][-1]
+                val_metric = self.logger[metric]['valid'][-1]
+                text += f"    {metric:>12}{': train = ':>12}{train_metric}\n"
+                text += f"    {'':>12}{'  val = ':>12}{val_metric}\n"
+        if self.print_results and ((iteration % self.print_every == 0 or iteration == self.max_iters) and self.print_on == 'iters'):
+            if train_loss is None and val_loss is None:
+                if self.max_iters is not None:
+                    text += f"Iteration {iteration}/{self.max_iters}\n"
+                else:
+                    text += f"Iteration {iteration}\n"
+            else:
+                if self.max_iters is not None:
+                    text += f"Iteration {iteration}/{self.max_iters}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n"
+                else:
+                    text += f"Iteration {iteration}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}\n"
+            for metric in self.logger:
+                train_metric = self.logger[metric]['train'][-1]
+                val_metric = self.logger[metric]['valid'][-1]
+                text += f"    {metric:>12}{': train = ':>12}{train_metric}\n"
+                text += f"    {'':>12}{'  val = ':>12}{val_metric}\n"
+        if text:
+            print(text)
+        return text
 
     
