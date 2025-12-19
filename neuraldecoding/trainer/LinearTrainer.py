@@ -50,6 +50,9 @@ class LinearTrainer(Trainer):
         self.model.train_step((self.train_X, self.train_Y))
         # Validate model
         self.validate_model(plot_results)
+        # for metric in self.metrics:
+        #     self.writer.add_scalar(f"{metric}/train", np.nanmean(self.logger[metric]['train'][-1]), 0)
+        #     self.writer.add_scalar(f"{metric}/val", np.nanmean(self.logger[metric]['valid'][-1]), 0)
         print("Model trained, metrics:")
         self.save_print_log()
         return self.model, self.logger
@@ -61,4 +64,56 @@ class LinearTrainer(Trainer):
             metric_method = getattr(eval_metrics, metric)
             self.logger[metric]['train'].append(metric_method(train_prediction, self.train_Y))
             self.logger[metric]['valid'].append(metric_method(valid_prediction, self.valid_Y))
+        
+        # Show predictions vs targets
+        # Get number of output dimensions
+        num_outputs = valid_prediction.shape[-1] if len(valid_prediction.shape) > 1 else 1
+        
+        # Create subplots for each output dimension - validation
+        fig_predictions, axes_predictions = plt.subplots(num_outputs, 1, figsize=(10, 4 * num_outputs))
+        if num_outputs == 1:
+            axes_predictions = [axes_predictions]
+        
+        for i in range(num_outputs):
+            if len(valid_prediction.shape) > 1:
+                pred_data = valid_prediction[:, i]
+                target_data = self.valid_Y[:, i]
+            else:
+                pred_data = valid_prediction
+                target_data = self.valid_Y
+            
+            axes_predictions[i].plot(target_data, label='Target', alpha=0.7)
+            axes_predictions[i].plot(pred_data, label='Prediction', alpha=0.7)
+            axes_predictions[i].set_xlabel('Sample')
+            axes_predictions[i].set_ylabel(f'Output {i}')
+            axes_predictions[i].set_title(f'Validation Predictions vs Targets - Dimension {i}')
+            axes_predictions[i].legend()
+            axes_predictions[i].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        self.writer.add_figure('validation/predictions_vs_targets', fig_predictions, global_step=0)
+        
+        # Create subplots for each output dimension - training
+        fig_train_predictions, axes_train_predictions = plt.subplots(num_outputs, 1, figsize=(10, 4 * num_outputs))
+        if num_outputs == 1:
+            axes_train_predictions = [axes_train_predictions]
+        
+        for i in range(num_outputs):
+            if len(train_prediction.shape) > 1:
+                pred_data = train_prediction[:, i]
+                target_data = self.train_Y[:, i]
+            else:
+                pred_data = train_prediction
+                target_data = self.train_Y
+            
+            axes_train_predictions[i].plot(target_data, label='Target', alpha=0.7)
+            axes_train_predictions[i].plot(pred_data, label='Prediction', alpha=0.7)
+            axes_train_predictions[i].set_xlabel('Sample')
+            axes_train_predictions[i].set_ylabel(f'Output {i}')
+            axes_train_predictions[i].set_title(f'Train Predictions vs Targets - Dimension {i}')
+            axes_train_predictions[i].legend()
+            axes_train_predictions[i].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        self.writer.add_figure('train/predictions_vs_targets', fig_train_predictions, global_step=0)
 

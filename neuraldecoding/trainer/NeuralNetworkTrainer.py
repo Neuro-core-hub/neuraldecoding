@@ -11,6 +11,7 @@ from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model import neural_network_models
 import neuraldecoding
 import warnings
+import matplotlib.pyplot as plt
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
@@ -124,8 +125,8 @@ class NNTrainer(Trainer):
                 loss, yhat, y = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache, return_y=True)
 
                 running_loss += loss.item()
-                train_all_predictions.append(yhat.detach().cpu().numpy())
-                train_all_targets.append(y.detach().cpu().numpy())
+                train_all_predictions.append(yhat.detach().cpu().numpy().squeeze().T)
+                train_all_targets.append(y.detach().cpu().numpy().squeeze().T)
                 if(self.clear_cache):
                     del y, yhat
                 
@@ -138,7 +139,16 @@ class NNTrainer(Trainer):
                         running_loss = 0.0
                         
                         val_loss, val_all_predictions, val_all_targets = self.validate_model()
-
+                        self.writer.add_scalar("train/loss", train_loss, iteration)
+                        self.writer.add_scalar("val/loss", val_loss, iteration)
+                        fig, ax = plt.subplots(val_all_predictions.shape[1])
+                        for i in range(val_all_predictions.shape[1]):
+                            ax[i].plot(val_all_targets[:,i])
+                            ax[i].plot(val_all_predictions[:, i])
+                        ax[0].set_title("Validation Predictions")
+                        ax[0].legend(["True", "Prediction"], loc='best')
+                        self.writer.add_figure("val/predictions", fig, iteration)
+                        plt.close(fig)
                         # Save best model
                         if self.take_best and val_loss < best_val_loss:
                             best_val_loss = val_loss

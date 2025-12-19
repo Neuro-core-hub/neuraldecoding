@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from omegaconf import DictConfig
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 import os
 class Trainer(ABC):
@@ -18,6 +20,13 @@ class Trainer(ABC):
             with open(self.logger_save_path, 'a') as f:
                 headers = ['epoch'] + [f'{metric}_train' for metric in self.metrics] + [f'{metric}_val' for metric in self.metrics]
                 f.write(','.join(headers) + '\n')
+        log_dir = cfg.training.get("log_dir", "/home/admin/temp/logs/")
+        # Add current date and time to log directory
+        date_str = datetime.now().strftime("%Y%m%d")
+        time_str = datetime.now().strftime("%H%M%S")
+        log_dir = os.path.join(log_dir, date_str, time_str)
+        os.makedirs(log_dir, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=log_dir)
 
     @abstractmethod
     def train_model(self):
@@ -84,5 +93,7 @@ class Trainer(ABC):
         if text:
             print(text)
         return text
+    def __del__(self):
+        self.writer.close()
 
     
