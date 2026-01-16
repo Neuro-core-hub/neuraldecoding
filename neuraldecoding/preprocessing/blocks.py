@@ -1717,3 +1717,5 @@ class CycleGanBlock(DataProcessingBlock):
 			data_out['behaviour_train'] = cGAN.dayk_Y_train
 			data_out['behaviour_test'] = cGAN.dayk_Y_test
 			return data_out, interpipe
+		
+

@@ -206,6 +206,9 @@ class cycleGAN():
         x_dim = self.day0_X_train.shape[1]
         if self.verbose:
             print("Training cycleGAN aligner...")
+        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        print('Using device:', device)
         #============================================= Specifying hyper-parameters =============================================
         D_hidden_dim = cycleGAN_params['D_params']['hidden_dim']
         G_hidden_dim = cycleGAN_params['G_params']['hidden_dim']
@@ -226,6 +229,11 @@ class cycleGAN():
         
         generator1, generator2 = Generator(x_dim, G_hidden_dim, drop_out_G), Generator(x_dim, G_hidden_dim, drop_out_G)
         discriminator1, discriminator2 = Discriminator(x_dim, D_hidden_dim, drop_out_D), Discriminator(x_dim, D_hidden_dim, drop_out_D)
+
+        generator1.to(device)
+        generator2.to(device)
+        discriminator1.to(device)
+        discriminator2.to(device)
 
         #==================================== Specifying the type of the losses ===============================================
         if loss_type == 'L1':
@@ -295,11 +303,11 @@ class cycleGAN():
                 data1, data2 = data1_[0], data2_[0]
                 if data1.__len__() != data2.__len__():
                     continue
+                data1, data2 = data1.to(device), data2.to(device)
                 #------------ The labels for real samples --------------
-                target_real = torch.ones((data1.shape[0], 1), requires_grad = False).type('torch.FloatTensor')
+                target_real = torch.ones((data1.shape[0], 1), requires_grad = False).type('torch.FloatTensor').to(device)
                 #------------ The labels for fake samples --------------
-                target_fake = torch.zeros((data1.shape[0], 1), requires_grad = False).type('torch.FloatTensor')
-
+                target_fake = torch.zeros((data1.shape[0], 1), requires_grad = False).type('torch.FloatTensor').to(device)
                 #================================================== Generators ==================================================
                 gen1_optim.zero_grad()
                 gen2_optim.zero_grad()
@@ -392,7 +400,7 @@ class cycleGAN():
                 #--------- Feed the day-0 decoder with x2_valid_aligned to evaluate the performance of the aligner ----------
                 
                 # x2_valid_aligned_, y2_valid_ = format_data_from_trials(x2_valid_aligned, y2_valid, n_lags)
-                x2_valid_align = generator2(torch.from_numpy(x2_valid).type('torch.FloatTensor')).detach().numpy()
+                x2_valid_align = generator2(torch.from_numpy(x2_valid).type('torch.FloatTensor').to(device)).detach().cpu().numpy()
                 x2_valid_, y2_valid_ = self.preprocess_val_data({'neural': x2_valid_align, 'behaviour': y2_valid, 'neural_train': x2_train, 'behaviour_train': y2_train})
                 kl_origin = kl_divergence_per_channel_rob(x1, x2_valid)
                 kl_align = kl_divergence_per_channel_rob(x1, x2_valid_align)
@@ -447,8 +455,9 @@ class cycleGAN():
         """
         #------ Put the net in eval mode ------ #
         aligner = self.trained_aligner.eval()
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         #------ Use the trained aligner to process the dayk_data ------#
-        self.dayk_X_test_aligned = aligner(torch.from_numpy(self.dayk_X_test).type('torch.FloatTensor')).detach().numpy()
+        self.dayk_X_test_aligned = aligner(torch.from_numpy(self.dayk_X_test).type('torch.FloatTensor').to(device)).detach().cpu().numpy()
 
         return self.dayk_X_test_aligned
