@@ -40,6 +40,7 @@ class Preprocessing:
             current_data, inter_pipeline_data = step_instance.transform(current_data, inter_pipeline_data)
         for key in inter_pipeline_data.get('save_keys_ram', []):
             self.saved_data[key] = inter_pipeline_data[key]
+        self.interpipeline_data = inter_pipeline_data
         return current_data
 
     def preprocess_step(self, data, step_name, inter_pipeline_data = {'is_train': True}):

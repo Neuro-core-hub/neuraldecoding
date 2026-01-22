@@ -30,7 +30,6 @@ def apply_modifications(nicknames, kinematics, interpipe, param_dict):
     
     return kinematics
 
-
 def shift_kinematics(kinematics: torch.Tensor, shift: int) -> torch.Tensor:
     """
     Shift kinematics data forward or backward in time.
@@ -565,8 +564,11 @@ def bias_endpoints(kinematics: torch.Tensor,
     pos_dim = N // 2
     prev_bias = np.zeros(pos_dim, dtype=np.float32)
     for trial in unique_trials:
+        if np.isnan(trial):
+            continue
         # Get mask for this trial
         trial_mask = trial_indices == trial
+        
         if individuate_dofs:
             current_bias = np.random.uniform(bias_min, bias_max, size=pos_dim)
         else:
@@ -586,6 +588,16 @@ def bias_endpoints(kinematics: torch.Tensor,
         new_trial_data[:, :pos_dim] = (trial_data[:, :pos_dim] - first_pos) * scale + firstplusbias
 
         biased[trial_mask, :pos_dim] = new_trial_data[:, :pos_dim]
+
+        # Get the index after the trial_mask and fill all NaN positions
+        trial_mask_indices = np.where(trial_mask)[0]
+        if len(trial_mask_indices) > 0:
+            last_trial_idx = trial_mask_indices[-1]
+            # Fill all NaN positions after this trial with the last position of current trial
+            next_idx = last_trial_idx + 1
+            while next_idx < len(trial_indices) and np.isnan(trial_indices[next_idx]):
+                biased[next_idx, :pos_dim] = biased[last_trial_idx, :pos_dim]
+                next_idx += 1
 
         prev_bias = current_bias
 

@@ -191,7 +191,7 @@ class LSTMTrialInput(LSTM):
         # search through the preprocessing params to find the leadup
         self.leadup = model_params.get("leadup", 0)
 
-    def forward(self, x, h=None, return_all_tsteps=True, return_h = False, remove_leadup=False):
+    def forward(self, x, h=None, return_h = False, remove_leadup=False, return_all_tsteps=True):
         if return_h:
             out, h = super().forward(x, h, return_h=True, return_all_tsteps=True)
             # Remove leadup should only be used for training, and thus a batched input
@@ -235,3 +235,43 @@ class LSTMTrialInput(LSTM):
             return loss, yhat, y
         else:
             return loss, yhat
+
+class LSTMTrialInput_RankDist(LSTMTrialInput):
+    def __init__(self, model_params):
+        """
+        Initializes a LSTM with trial input support
+
+        Args:
+            model_params:                dict containing the same parameters as LSTM
+        """
+        super(LSTMTrialInput_RankDist, self).__init__(model_params)
+        
+    def train_step(self, x, x_full, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False): 
+        """
+        Trains LSTM Model
+        """
+        trial_length = (~torch.isnan(x[0, 0, :])).sum().max().item() - self.leadup
+        # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
+        if torch.isnan(x[0, 0, 0]):
+            x = x[:, :, self.leadup:]
+            yhat = self.forward(x[:, :, :trial_length], remove_leadup=False)
+        else:
+            yhat = self.forward(x[:, :, :self.leadup + trial_length], remove_leadup=True)
+        yhat = yhat.permute(0, 2, 1)
+
+        with torch.no_grad():
+            predictions_full = self.forward(x_full, remove_leadup=False)
+        
+        # TODO: make loss function ignore nans to enable batch processing
+        loss = loss_func(yhat, predictions_full, directions, onsets)
+        # print(loss)
+        if loss is None:
+            optimizer.zero_grad(set_to_none=True)
+            return torch.tensor(0.0), yhat
+        
+        loss.backward()
+        optimizer.step()
+        if(clear_cache):
+            del x
+
+        return loss, yhat

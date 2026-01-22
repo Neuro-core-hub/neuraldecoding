@@ -308,27 +308,43 @@ def add_history(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
 
-def add_trial_history(x, y, trial_ts, leadup):
+def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
     # TODO: add device
     X_temp = torch.tensor(x)
     Y_temp = torch.tensor(y)
 
     # find max trial length
     unique_trials, trial_lengths = np.unique(trial_ts, return_counts=True)
+
+    # remove 'nan' trial (points between trials, if any)
+    nan_idx = np.where(np.isnan(unique_trials))[0]
+    if len(nan_idx) > 0: 
+        unique_trials = np.delete(unique_trials, nan_idx)
+        trial_lengths = np.delete(trial_lengths, nan_idx)
+    
+    directions = directions[unique_trials.astype(int)]
+    targets  = targets[unique_trials.astype(int)]
+
+    if onsets is not None:
+        onsets = onsets[unique_trials.astype(int)]
+    
+    # Trim first and last trials to avoid partial trials
+    trial_lengths = trial_lengths[1:-1] 
+    unique_trials = unique_trials[1:-1]
+    onsets = onsets[1:-1] if onsets is not None else None
+    directions = directions[1:-1]
+    targets = targets[1:-1]
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
-
-    if np.isnan(unique_trials).any():
-        num_trials -= 1
 
     X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
     Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
 
     for idx, trial in enumerate(unique_trials):
-        if np.isnan(trial):
-            continue
-
         mask = trial == trial_ts
+        if onsets is not None:
+            first_nonzero_idx = mask.nonzero()[0][0]
+            onsets[idx] = onsets[idx] - first_nonzero_idx # onset relative to trial start
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]
         if first_nonzero_idx < leadup:
@@ -339,7 +355,7 @@ def add_trial_history(x, y, trial_ts, leadup):
             mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
             X[idx,:,:np.count_nonzero(mask)] = X_temp[mask,:].T
 
-    return X, Y, trial_lengths
+    return X, Y, trial_lengths, directions, targets, onsets
 
 
 def add_history_numpy(neural_data, seq_len):

@@ -390,7 +390,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', is_human = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets', 'movement_directions': 'movement_directions'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', is_human = True):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -436,11 +436,14 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
 		targets = targets[self.skip_first_n_trials:]
+		movement_directions = np.concatenate((np.zeros_like(targets[0:1]), np.sign(np.diff(targets, axis=0))), axis=0)
 
 		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
 		interpipe[self.interpipe_keys['trial_start_times']] = trial_start_times
 		interpipe[self.interpipe_keys['trial_end_times']] = trial_end_times
-		interpipe[self.interpipe_keys['targets']] = targets[:]
+		interpipe[self.interpipe_keys['targets']] = targets
+		interpipe['save_keys_ram'].append(self.interpipe_keys['targets'])
+		interpipe[self.interpipe_keys['movement_directions']] = movement_directions
 		interpipe[f'{self.data_keys[0]}_ts'] = neural_ts
 		interpipe[f'{self.data_keys[1]}_ts'] = behaviour_ts
 		interpipe[f"{self.data_keys[0]}_units"] = neural_units
@@ -610,14 +613,26 @@ class TrialHistoryBlock(DataProcessingBlock):
 	A block to add history but have each sequence be the length of an entire trial, plus padding and leadup.
 	Uses 'add_trial_history' to add history.
 	"""
-	def __init__(self, leadup = 20):
+	def __init__(self, set = 'train', leadup = 20, onset_location = 'onset_indices', direction_location = 'movement_directions', targets_location = 'targets', save_2d = False):
 		"""
 		Initializes the TrialHistoryBlock.
 		Args:
 			leadup (int): The length of the history to be added before the first bin of each trial. Default is 20.
 		"""
+		super().__init__()
 		self.set = set
+		self.location_neural = f'neural_{set}'
+		self.location_behavior = f'behavior_{set}'
+		self.location_trial_lengths = f'trial_lengths_{set}'
+		self.location_onsets_output = f'onsets_{set}'
+		self.location_directions_output = f'directions_{set}'
+		self.location_targets_output = f'targets_{set}'
+		self.mask = f'mask_{set}'
 		self.leadup = leadup
+		self.onset_location = onset_location
+		self.direction_location = direction_location
+		self.targets_location = targets_location
+		self.save_2d = save_2d
 
 	def transform(self, data, interpipe):
 		"""
@@ -629,11 +644,29 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data (dict): The data dictionary with history added at the specified locations.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		trial_per_bin_train = interpipe['bin_trial_idx'][interpipe['mask_train']]
-		data['neural_train'], data['behavior_train'], trial_lengths_train = \
-			neuraldecoding.utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_per_bin_train, self.leadup)
-		data['trial_lengths_train'] = trial_lengths_train
-		interpipe['leadup'] = self.leadup
+		trial_per_bin = interpipe['bin_trial_idx'][interpipe[self.mask]]
+		global_first_idx = int(interpipe[self.mask][0])
+		if self.onset_location not in interpipe:
+			onsets = None
+			Warning(f'onset location {self.onset_location} not found in interpipe. Not splitting onsets by trial.')
+		else:
+			onsets = interpipe[self.onset_location]
+			onsets = onsets - global_first_idx # zero the onsets to match the data being used
+		
+		directions = interpipe[self.direction_location]
+		targets = interpipe[self.targets_location]
+
+		if self.save_2d:
+			data[f'{self.location_neural}_2d'] = data[self.location_neural].copy()
+			data[f'{self.location_behavior}_2d'] = data[self.location_behavior].copy()
+		
+		data[self.location_neural], data[self.location_behavior], trial_lengths, directions, targets, onsets = \
+			neuraldecoding.utils.add_trial_history(data[self.location_neural], data[self.location_behavior], trial_per_bin, self.leadup, directions, targets, onsets=onsets)
+		data[self.location_trial_lengths] = trial_lengths
+		if onsets is not None:
+			data[self.location_onsets_output] = onsets
+		data[self.location_directions_output] = directions
+		data[self.location_targets_output] = targets
 		return data, interpipe
 
 class NormalizationBlock(DataProcessingBlock):
@@ -929,6 +962,7 @@ class LabelModificationBlock(DataProcessingBlock):
 		return data, interpipe
 
 class SaveDataBlock(DataProcessingBlock):
+	
 	def __init__(self, save_path, exclude_data_keys = [], exclude_interpipe_keys = []):
 		super().__init__()
 		self.save_path = save_path
@@ -1147,7 +1181,7 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 	
 class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 	"""
-	A block for detecting movement onset in the EMG data by thresholding kinematics. Should only be used for monkey data.
+	A block for detecting movement onset in the EMG data by thresholding kinematics. 
 	"""
 	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = 'mask_train'):
 		super().__init__()
@@ -1163,13 +1197,16 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		Transform the data by detecting movement onset in the EMG data.
 		"""
 		behavior = data[self.location_behavior]
-		trial_idx = interpipe['bin_trial_idx'][interpipe[self.mask_key]]
+		if self.mask_key is not None:
+			trial_idx = interpipe['bin_trial_idx'][interpipe[self.mask_key]]
+		else:
+			trial_idx = interpipe['bin_trial_idx']
 
 		# Detect movement onsets
 		onsets = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
 
 		# Add onsets to data dictionary
-		interpipe[self.onset_key] = np.nanmean(onsets, axis=1) if onsets.ndim > 1 else onsets
+		interpipe[self.onset_key] = onsets
 
 		fig, ax = plt.subplots(1, 1, figsize=(12, 6))
 
@@ -1227,7 +1264,8 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		# Get onsets from interpipe
 		movement_onsets = interpipe[self.location_onsets]
-		
+		movement_onsets = np.nanmean(movement_onsets, axis=1) if movement_onsets.ndim > 1 else movement_onsets
+
 		# Get trial timing information from interpipe
 		trial_start_times = interpipe['trial_start_times']
 		trial_end_times = interpipe['trial_end_times']
