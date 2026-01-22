@@ -223,6 +223,8 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
+            "neural_scaler": getattr(self, 'neural_scaler', None),
+            "behavior_scaler": getattr(self, 'behavior_scaler', None),
             "model_type": "Transformer"
         }
         folder = os.path.dirname(filepath)
@@ -242,6 +244,9 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
         self.load_state_dict(checkpoint["model_state_dict"])
 
         self.model_params = checkpoint["model_params"]
+
+        self.neural_scaler = checkpoint["neural_scaler"]
+        self.behavior_scaler = checkpoint["behavior_scaler"]
     
 class TransformerGRUModel(nn.Module, NeuralNetworkModel):
 

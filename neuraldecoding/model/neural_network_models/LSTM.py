@@ -149,7 +149,9 @@ class LSTM(nn.Module, NeuralNetworkModel):
                 "hidden_size": self.hidden_size,
                 "num_layers": self.num_layers,
             },
-            "model_type": "LSTM"
+            "model_type": "LSTM",
+            "neural_scaler": getattr(self, 'neural_scaler', None),
+            "behavior_scaler": getattr(self, 'behavior_scaler', None)
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -177,6 +179,9 @@ class LSTM(nn.Module, NeuralNetworkModel):
         model_params = checkpoint["model_params"]
         self.hidden_size = model_params["hidden_size"]
         self.num_layers = model_params["num_layers"]
+
+        self.neural_scaler = checkpoint["neural_scaler"]
+        self.behavior_scaler = checkpoint["behavior_scaler"]
 
 class LSTMTrialInput(LSTM):
     def __init__(self, model_params):

@@ -74,6 +74,8 @@ class TCN(nn.Module, NeuralNetworkModel):
             "model_state_dict": self.state_dict(),
             "model_scaler": self.scaler,
             "model_params": self.model_params,
+            "neural_scaler": getattr(self, 'neural_scaler', None),
+            "behavior_scaler": getattr(self, 'behavior_scaler', None),
             "model_type": "TCN"
         }
         folder = os.path.dirname(filepath)
@@ -93,6 +95,9 @@ class TCN(nn.Module, NeuralNetworkModel):
         self.load_state_dict(checkpoint["model_state_dict"])
         self.scaler = checkpoint["model_scaler"]
         self.model_params = checkpoint["model_params"]
+
+        self.neural_scaler = checkpoint["neural_scaler"]
+        self.behavior_scaler = checkpoint["behavior_scaler"]
 
 class TCN_old(nn.Module, NeuralNetworkModel):
     # Old version

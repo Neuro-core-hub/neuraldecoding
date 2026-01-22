@@ -43,6 +43,16 @@ class NNTrainer(Trainer):
         if dataset is not None:
             self.data_dict = self.load_data(dataset)
             self.train_loader, self.valid_loader = self.create_dataloaders()
+        if 'behavior_train_normalizer' in preprocessor.saved_data:
+            self.model.behavior_scaler = preprocessor.saved_data['behavior_train_normalizer']
+        else:
+            warnings.warn("No behavior scaler found in preprocessor saved data.")
+            self.model.behavior_scaler = None
+        if 'neural_train_normalizer' in preprocessor.saved_data:
+            self.model.neural_scaler = preprocessor.saved_data['neural_train_normalizer']
+        else:
+            warnings.warn("No neural scaler found in preprocessor saved data.")
+            self.model.neural_scaler = None
                 
     def load_data(self, data): # TODO, finalize this when dataset is merged to main
         data_dict = self.preprocessor.preprocess_pipeline(data, params={'is_train': True})
