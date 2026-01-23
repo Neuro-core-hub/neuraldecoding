@@ -126,11 +126,18 @@ class NeuralNetworkDecoder(Decoder):
     def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
     def predict(self, input):
-        if not isinstance(input, torch.Tensor):
-            input = torch.tensor(input, dtype=torch.float32)
+        if self.neural_scaler is not None:
+            input = torch.tensor(self.neural_scaler.transform(input))
+        else:
+            input = torch.tensor(input)
+
         with torch.no_grad():
             input = input.to(self.device)
             prediction = self.model(input)
+        
+        if self.behavior_scaler is not None:
+            prediction = torch.tensor(self.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()))
+
         return prediction
     
 class DummyDecoder(Decoder):
