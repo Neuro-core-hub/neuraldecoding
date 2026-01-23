@@ -390,7 +390,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets', 'movement_directions': 'movement_directions'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', is_human = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets', 'movement_directions': 'movement_directions'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -406,7 +406,6 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
 		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
 		self.nwb_targets_loc = nwb_targets_loc
-		self.is_human = is_human
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -429,9 +428,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_end_times = np.array(resolve_path(data.dataset, self.nwb_trial_end_times_loc))
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
-		if self.is_human:
-			trial_start_times = trial_start_times[:] * 1000
-			trial_end_times = trial_end_times[:] * 1000
+		trial_start_times = trial_start_times[:] * 1000
+		trial_end_times = trial_end_times[:] * 1000
 		# Skip trials as needed
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
