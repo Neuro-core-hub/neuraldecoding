@@ -46,6 +46,8 @@ class NNTrainer(Trainer):
             self.train_loader, self.valid_loader = self.create_dataloaders()
         if 'behavior_train_normalizer' in preprocessor.saved_data:
             self.model.behavior_scaler = preprocessor.saved_data['behavior_train_normalizer']
+        elif config.model.type == 'LSTMTrialInput_RankDist':
+            pass # Rank loss behavior scaler handled in child class, calculated after training
         else:
             warnings.warn("No behavior scaler found in preprocessor saved data.")
             self.model.behavior_scaler = None
@@ -372,6 +374,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
                                 if self.take_best and best_model_state is not None:
                                     self.model.load_state_dict(best_model_state)
                                     print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                                self.compute_behavior_scaler()
                                 return self.model, self.logger
                     
                         self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
@@ -381,6 +384,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
                     if self.take_best and best_model_state is not None:
                         self.model.load_state_dict(best_model_state)
                         print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                    self.compute_behavior_scaler()
                     return self.model, self.logger
 
             # Update logger
@@ -407,6 +411,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
                             if self.take_best and best_model_state is not None:
                                 self.model.load_state_dict(best_model_state)
                                 print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+                            self.compute_behavior_scaler()
                             return self.model, self.logger
                     self.update_logger(train_loss, val_loss, train_all_predictions, train_all_targets, val_all_predictions, val_all_targets, epoch, iteration)
         
@@ -414,6 +419,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
         if self.take_best and best_model_state is not None:
             self.model.load_state_dict(best_model_state)
             print(f"Loaded best model from epoch {best_epoch}, iteration {best_iteration} with validation loss: {best_val_loss:.4f}")
+        self.compute_behavior_scaler()
         return self.model, self.logger
     
     def validate_model(self):
@@ -465,6 +471,16 @@ class LSTMRankDistTrainer(LSTMTrainer):
         val_all_targets = self.y_full_val.detach().cpu().numpy()
 
         return val_loss, val_all_predictions, val_all_targets
+    
+    def compute_behavior_scaler(self):
+        # After training, compute behavior scaler via MinMax on output of model with input x_full_train
+        self.model.eval()
+        with torch.no_grad():
+            train_predictions = self.model.forward(self.x_full_train.to(self.device), remove_leadup=False).detach().cpu().numpy()
+        from sklearn.preprocessing import MinMaxScaler
+        behavior_scaler = MinMaxScaler()
+        behavior_scaler.fit(train_predictions)
+        self.model.behavior_scaler = behavior_scaler
 
 class IterationNNTrainer(NNTrainer):
     '''
