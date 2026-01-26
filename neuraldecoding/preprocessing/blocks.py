@@ -433,7 +433,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		# Skip trials as needed
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
-		targets = targets[self.skip_first_n_trials:]
+		targets = np.array(targets[self.skip_first_n_trials:])
 
 		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
 		interpipe[self.interpipe_keys['trial_start_times']] = trial_start_times
