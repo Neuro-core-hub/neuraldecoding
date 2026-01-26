@@ -108,7 +108,7 @@ class RecurrentModel(nn.Module, NeuralNetworkModel):
         torch.save(checkpoint_dict, filepath)
     
     def load_model(self, filepath):
-        checkpoint = torch.load(filepath)
+        checkpoint = torch.load(filepath, weights_only=False)
 
         if checkpoint["model_type"] != "GenericRNN":
             raise Exception("Tried to load model that isn't a GenericRNN Instance")
@@ -119,5 +119,11 @@ class RecurrentModel(nn.Module, NeuralNetworkModel):
         self.load_state_dict(checkpoint["model_state_dict"])
 
         self.model_params = checkpoint["model_params"]
-        self.neural_scaler = checkpoint["neural_scaler"]
-        self.behavior_scaler = checkpoint["behavior_scaler"]
+        if "neural_scaler" in checkpoint:
+            self.neural_scaler = checkpoint["neural_scaler"]
+        else:
+            self.neural_scaler = None
+        if "behavior_scaler" in checkpoint:
+            self.behavior_scaler = checkpoint["behavior_scaler"]
+        else:
+            self.behavior_scaler = None

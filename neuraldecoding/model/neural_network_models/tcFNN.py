@@ -96,8 +96,14 @@ class TCN(nn.Module, NeuralNetworkModel):
         self.scaler = checkpoint["model_scaler"]
         self.model_params = checkpoint["model_params"]
 
-        self.neural_scaler = checkpoint["neural_scaler"]
-        self.behavior_scaler = checkpoint["behavior_scaler"]
+        if "neural_scaler" in checkpoint:
+            self.neural_scaler = checkpoint["neural_scaler"]
+        else:
+            self.neural_scaler = None
+        if "behavior_scaler" in checkpoint:
+            self.behavior_scaler = checkpoint["behavior_scaler"]
+        else:
+            self.behavior_scaler = None
 
 class TCN_old(nn.Module, NeuralNetworkModel):
     # Old version
