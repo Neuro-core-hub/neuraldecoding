@@ -663,9 +663,10 @@ class NormalizationBlock(DataProcessingBlock):
 				os.makedirs(os.path.dirname(self.normalizer_params['save_path']), exist_ok=True)
 				with open(self.normalizer_params['save_path'], 'wb') as f:
 					pickle.dump(normalizer, f)
-			if self.normalizer_params.get('save_normalizer_ram', False):
-				interpipe[f'{self.location[0]}_normalizer'] = normalizer
-				interpipe['save_keys_ram'].append(f'{self.location[0]}_normalizer')
+		
+			interpipe[f'{self.location[0]}_normalizer'] = normalizer
+			interpipe['save_keys_ram'].append(f'{self.location[0]}_normalizer')
+			
 			return data, interpipe
 		else:
 			with open(self.normalizer_params['save_path'], 'rb') as f:

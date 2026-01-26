@@ -149,7 +149,9 @@ class LSTM(nn.Module, NeuralNetworkModel):
                 "hidden_size": self.hidden_size,
                 "num_layers": self.num_layers,
             },
-            "model_type": "LSTM"
+            "model_type": "LSTM",
+            "neural_scaler": getattr(self, 'neural_scaler', None),
+            "behavior_scaler": getattr(self, 'behavior_scaler', None)
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -165,7 +167,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
             fpath (path-like object) indicates the file path to load the model from
         """
         
-        checkpoint = torch.load(fpath)
+        checkpoint = torch.load(fpath, weights_only=False)
 
         if checkpoint["model_type"] != "LSTM":
             raise Exception("Tried to load model that isn't a LSTM Instance")
@@ -177,6 +179,15 @@ class LSTM(nn.Module, NeuralNetworkModel):
         model_params = checkpoint["model_params"]
         self.hidden_size = model_params["hidden_size"]
         self.num_layers = model_params["num_layers"]
+
+        if "neural_scaler" in checkpoint:
+            self.neural_scaler = checkpoint["neural_scaler"]
+        else:
+            self.neural_scaler = None
+        if "behavior_scaler" in checkpoint:
+            self.behavior_scaler = checkpoint["behavior_scaler"]
+        else:
+            self.behavior_scaler = None
 
 class LSTMTrialInput(LSTM):
     def __init__(self, model_params):
