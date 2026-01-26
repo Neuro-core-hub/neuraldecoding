@@ -477,11 +477,25 @@ class LSTMRankDistTrainer(LSTMTrainer):
         self.model.eval()
         with torch.no_grad():
             train_predictions = self.model.forward(self.x_full_train.to(self.device), remove_leadup=False).detach().cpu().numpy()
+
         from sklearn.preprocessing import MinMaxScaler
-        behavior_scaler = MinMaxScaler()
-        behavior_scaler.fit(train_predictions)
+        behavior_scaler_internal = MinMaxScaler()
+        behavior_scaler_internal.fit(train_predictions)
+
+        # We need the inverse_transform method to go from min-max to 0-1, and not the transform method
+        # Creating this dummy class to swap the methods
+        behavior_scaler = BehaviorScalerRank(behavior_scaler_internal)
+        
         self.model.behavior_scaler = behavior_scaler
 
+class BehaviorScalerRank:
+    def __init__(self, scaler):
+        self.scaler = scaler
+    def transform(self, data):
+        return self.scaler.inverse_transform(data)
+    def inverse_transform(self, data):
+        return self.scaler.transform(data)
+    
 class IterationNNTrainer(NNTrainer):
     '''
     The trainer used in LINK dataset multiday training. Archived here for reference.
