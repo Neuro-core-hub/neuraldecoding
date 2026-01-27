@@ -433,7 +433,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		# Skip trials as needed
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
-		targets = targets[self.skip_first_n_trials:]
+		targets = np.array(targets[self.skip_first_n_trials:])
 		movement_directions = np.concatenate((np.zeros_like(targets[0:1]), np.sign(np.diff(targets, axis=0))), axis=0)
 
 		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
