@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 class RankDistLoss:
-    def __init__(self, vel_preds_path, binmax=9, binmin=-9, nbins=99, min_bound=-0.5, max_bound = 0.5, transition_time = 5, lambda_kl = 0, lambda_bound = 0, lambda_flat = 40, device='cuda'):
+    def __init__(self, vel_preds_path=None, binmax=9, binmin=-9, nbins=99, min_bound=-0.5, max_bound = 0.5, transition_time = 5, lambda_kl = 0, lambda_bound = 0, lambda_flat = 40, device='cuda'):
         """
         
         :param self: RankDistLoss instance
@@ -15,30 +15,35 @@ class RankDistLoss:
 
         TODO: kl divergence for different dofs
         """
-        vel_preds = np.load(vel_preds_path)
+        if vel_preds_path is None:
+            self.only_rank = True
+        else:
+            vel_preds = np.load(vel_preds_path)
 
-        binedges = np.linspace(binmin, binmax, nbins+1)
-        # bin centers
-        bin_centers = 0.5 * (binedges[:-1] + binedges[1:])
-        sigma = binedges[1] - binedges[0]
+            binedges = np.linspace(binmin, binmax, nbins+1)
+            # bin centers
+            bin_centers = 0.5 * (binedges[:-1] + binedges[1:])
+            sigma = binedges[1] - binedges[0]
 
-        # flatten velocities across time and DOFs
-        vel_preds_flat = vel_preds.reshape(-1, 1)
+            # flatten velocities across time and DOFs
+            vel_preds_flat = vel_preds.reshape(-1, 1)
 
-        # soft histogram (numpy version)
-        weights = np.exp(-0.5 * ((vel_preds_flat - bin_centers[None, :]) / sigma) ** 2)
-        v_hist = weights.mean(axis=0)
+            # soft histogram (numpy version)
+            weights = np.exp(-0.5 * ((vel_preds_flat - bin_centers[None, :]) / sigma) ** 2)
+            v_hist = weights.mean(axis=0)
 
-        self.gt_dist = torch.tensor(
-            v_hist / (np.sum(v_hist) + 1e-8),
-            device=device,
-            dtype=torch.float32
-        )
+            self.gt_dist = torch.tensor(
+                v_hist / (np.sum(v_hist) + 1e-8),
+                device=device,
+                dtype=torch.float32
+            )
+            self.bincenters = torch.tensor(bin_centers, device=device, dtype=torch.float32)
+
+            self.only_rank = False
 
         self.min_bound = min_bound
         self.max_bound = max_bound
 
-        self.bincenters = torch.tensor(bin_centers, device=device, dtype=torch.float32)
 
         self.transition_time = transition_time
 
@@ -51,7 +56,7 @@ class RankDistLoss:
     def __call__(self, predictions_batch, predictions_full, directions, onsets):
         return self.rank_dist_loss(predictions_batch, predictions_full, directions, onsets)
     
-    def rank_dist_loss(self, predictions_batch, predictions_full, directions, onsets, only_rank=False):
+    def rank_dist_loss(self, predictions_batch, predictions_full, directions, onsets):
         """
         Data should be loaded with TrialHistory activated, and the a loss-compatible trainer should be used. Only position should be predicted.
         
@@ -102,6 +107,9 @@ class RankDistLoss:
         
         rank_loss = rank_loss / (batch_size * D)
         flat_loss = flat_loss / (batch_size * D)
+
+        if self.only_rank:
+            return rank_loss + self.lambda_flat * flat_loss
 
         pred_vels = predictions_full[1:] - predictions_full[:-1]  # (N-1, D)
 

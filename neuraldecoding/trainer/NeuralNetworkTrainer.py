@@ -461,11 +461,11 @@ class LSTMRankDistTrainer(LSTMTrainer):
 
             print("Validation Rank loss:", rank_loss_total, "Flat loss:", flat_loss_total)
             
-            predictions_full = self.model.forward(self.x_full_val, remove_leadup=False)
+            # predictions_full = self.model.forward(self.x_full_val, remove_leadup=False)
 
-            kl_loss, bound_loss = self.loss_func.dist_loss_only(predictions_full)
-            val_loss += self.loss_func.lambda_kl * kl_loss + self.loss_func.lambda_bound * bound_loss
-            print("Validation KL loss:", kl_loss.cpu().detach().numpy(), "Bound loss:", bound_loss.cpu().detach().numpy())
+            # kl_loss, bound_loss = self.loss_func.dist_loss_only(predictions_full)
+            # val_loss += self.loss_func.lambda_kl * kl_loss + self.loss_func.lambda_bound * bound_loss
+            # print("Validation KL loss:", kl_loss.cpu().detach().numpy(), "Bound loss:", bound_loss.cpu().detach().numpy())
         
         val_all_predictions = self.model.forward(self.x_full_val.to(self.device), remove_leadup=False).detach().cpu().numpy()
         val_all_targets = self.y_full_val.detach().cpu().numpy()
