@@ -231,4 +231,33 @@ def bitrate_zstruct(nwb_file: NWBFile, exclude_failed_trials = True, exclude_int
     
     # Return throughputs for all trials
     return trial_throughputs
+
+def success_rate_zstruct(nwb_file: NWBFile) -> float:
+    """
+    Calculate the success rate of the task.
     
+    Parameters:
+    -----------
+    nwb_file : NWBFile
+        The NWB file containing trial data
+    success_field : str, optional
+        The field name for success data (default: 'success')
+    exclude_trials : list, optional
+        List of trial indices to exclude from calculation
+    
+    Returns:
+    --------
+    float
+        The success rate as a proportion (0-1)
+    """
+    success_data = nwb_file.trials['TrialSuccess'][:]
+
+    exclude_trials = np.where(np.array(nwb_file.trials['BlankTrial'][:], dtype=bool) | ~np.array(nwb_file.trials['ClosedLoop'][:], dtype=bool) | (np.array(nwb_file.trials['DecodeConfig'], dtype=bool)[:][:, 0] == 0))[0]
+    
+    if exclude_trials is not None and len(exclude_trials) > 0:
+        # Create a mask to exclude specified trials
+        mask = np.ones(len(success_data), dtype=bool)
+        mask[exclude_trials] = False
+        success_data = success_data[mask]
+    
+    return np.mean(success_data), success_data
