@@ -572,6 +572,7 @@ def add_run_data(
     time_series_dict,
     exp_cfg,
     verbose=False,
+    trial_times_ms=False
 ):
     """
     Add experimental data to the NWB file, including neural, behavioral, and spike data.
@@ -679,8 +680,13 @@ def add_run_data(
         if data_dict[trl_idx][exp_cfg.reference_time] is None:
             continue
         # trial times
-        nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0] / 1000 # convert to seconds
-        nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0] / 1000 # convert to seconds
+        if trial_times_ms: 
+            # There are some zstructs (around June 2025, maybe more), where trial times are in ms
+            nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0] / 1000 # convert to seconds
+            nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0] / 1000 # convert to seconds
+        else:
+            nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0]
+            nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0]
 
         # looping through the data frame keys for dynamically adding them
         for key in data_dict[trl_idx].keys():
@@ -712,7 +718,9 @@ def load_xpc_run(cfg):
                 date of the experiment
             runs: int
                 the run you are currently loading
-
+            trial_times_seconds: bool
+                whether the trial times are already in seconds (some zstructs have this; around Summer 2025)
+            
     Returns
     -------
     pynwb.NWBFile
@@ -744,12 +752,16 @@ def load_xpc_run(cfg):
     # initializing the nwb modules and columns
     time_series_dict = initialize_nwb_columns(nwb_file, data_dict, exp_cfg)
 
+    # Getting trial times in seconds flag
+    trial_times_ms = cfg.get("trial_times_ms", False)
+
     # populate the nwb file with the run data
     add_run_data(
         nwb_file,
         data_dict,
         time_series_dict,
-        exp_cfg
+        exp_cfg,
+        trial_times_ms=trial_times_ms
     )
 
     return nwb_file
