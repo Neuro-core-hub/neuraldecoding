@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 import warnings
 
 def apply_modifications(nicknames, kinematics, interpipe, param_dict):
-    trial_filt = interpipe['trial_filt'][interpipe['train_mask']]
-    targets_filt = interpipe['targets_filt'][interpipe['train_mask']]
+    trial_filt = interpipe['bin_trial_idx'][interpipe['mask_train']]
+
+    targets = interpipe['targets']
 
     for name in nicknames:
         current_params = param_dict[name]
@@ -21,14 +22,13 @@ def apply_modifications(nicknames, kinematics, interpipe, param_dict):
         elif mod == 'random_warp':
             kinematics = random_warp(kinematics, trial_filt, current_params['hold_time'], current_params['individuate_dofs'])
         elif mod == 'sigmoid_replacement':
-            kinematics = replace_with_sigmoid(kinematics, trial_filt, targets_filt, current_params['sigmoid_k'], current_params['center'])
+            kinematics = replace_with_sigmoid(kinematics, trial_filt, targets, current_params['sigmoid_k'], current_params['center'])
         elif mod == 'bias_endpoints':
             kinematics = bias_endpoints(kinematics, trial_filt, current_params['bias_range'], current_params['individuate_dofs'])
         else:
             warnings.warn(f'Modification {mod} is not an option. Skipping...')
     
     return kinematics
-
 
 def shift_kinematics(kinematics: torch.Tensor, shift: int) -> torch.Tensor:
     """
@@ -65,7 +65,7 @@ def shift_kinematics(kinematics: torch.Tensor, shift: int) -> torch.Tensor:
         for i in range(-shift):
             shifted[T - i - 1] = kinematics[T - 1]
 
-    return shifted
+    return np.array(shifted)
 
 def shift_kinematics_by_trial(
     kinematics: torch.Tensor, trial_indices: np.ndarray, shift_range: Tuple[int, int], individuate_dofs: bool = False, 
@@ -185,7 +185,7 @@ def shift_kinematics_by_trial(
         plt.show()
         """
 
-    return shifted
+    return np.array(shifted)
 
 def random_warp(
     kinematics: torch.Tensor,
@@ -275,7 +275,7 @@ def random_warp(
         plt.show()
         """
         
-    return warped
+    return np.array(warped)
         
 def warp_kinematics_by_trial(
     kinematics: torch.Tensor,
@@ -451,7 +451,7 @@ def warp_kinematics_by_trial(
 
     # Compute average warp factor actually applied
     print(f"Average warp factor: {np.mean(actual_warp_factors)}")
-    return warped, np.mean(actual_warp_factors)
+    return np.array(warped), np.mean(actual_warp_factors)
 
 def replace_with_sigmoid(
     kinematics: torch.Tensor,
@@ -475,14 +475,14 @@ def replace_with_sigmoid(
     pos_dim = N // 2
     prev_target = None
 
-    for trial in unique_trials:
+    for idx, trial in enumerate(unique_trials):
         # Get mask for this trial
         trial_mask = trial_indices == trial
 
         trial_data = kinematics[trial_mask]
         trial_length = len(trial_data)
 
-        trial_target = targets[trial_mask][0]
+        trial_target = targets[idx]
         if prev_target is None:
             prev_target = trial_target
             continue
@@ -530,7 +530,7 @@ def replace_with_sigmoid(
         plt.show()
         """
         
-    return sigmoid_data
+    return np.array(sigmoid_data)
 
 def bias_endpoints(kinematics: torch.Tensor,
     trial_indices: np.ndarray,
@@ -564,8 +564,11 @@ def bias_endpoints(kinematics: torch.Tensor,
     pos_dim = N // 2
     prev_bias = np.zeros(pos_dim, dtype=np.float32)
     for trial in unique_trials:
+        if np.isnan(trial):
+            continue
         # Get mask for this trial
         trial_mask = trial_indices == trial
+        
         if individuate_dofs:
             current_bias = np.random.uniform(bias_min, bias_max, size=pos_dim)
         else:
@@ -586,6 +589,16 @@ def bias_endpoints(kinematics: torch.Tensor,
 
         biased[trial_mask, :pos_dim] = new_trial_data[:, :pos_dim]
 
+        # Get the index after the trial_mask and fill all NaN positions
+        trial_mask_indices = np.where(trial_mask)[0]
+        if len(trial_mask_indices) > 0:
+            last_trial_idx = trial_mask_indices[-1]
+            # Fill all NaN positions after this trial with the last position of current trial
+            next_idx = last_trial_idx + 1
+            while next_idx < len(trial_indices) and np.isnan(trial_indices[next_idx]):
+                biased[next_idx, :pos_dim] = biased[last_trial_idx, :pos_dim]
+                next_idx += 1
+
         prev_bias = current_bias
 
     for dim in range(pos_dim):
@@ -599,4 +612,4 @@ def bias_endpoints(kinematics: torch.Tensor,
         # Update the velocity in the output tensor
         biased[:, pos_dim + dim] = torch.tensor(vel, dtype=kinematics.dtype)
 
-    return biased
+    return np.array(biased)
