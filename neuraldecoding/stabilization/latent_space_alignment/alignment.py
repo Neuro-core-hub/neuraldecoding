@@ -43,8 +43,7 @@ class ProcrustesAlignment(Alignment):
     def align(self, lm):     
         print("Aligning with Procrustes") 
         print(f"baseline: {self.baseline}")
-        print(np.linalg.norm(self.baseline, ord = "fro"))
-        print(np.linalg.norm(lm - self.baseline, ord = 'fro'))        
+        print("PRE NORM", np.linalg.norm(lm - self.baseline, ord = 'fro'))        
         m = self.baseline.T @ lm
         U, _, V = np.linalg.svd(m)
         
@@ -52,6 +51,10 @@ class ProcrustesAlignment(Alignment):
         
         aligned_lm = lm @ S.T
         self.save_dict = {'U': U, 'V': V, 'S': S, 'aligned_lm': aligned_lm, 'lm': lm, 'baseline': self.baseline}
+
+        # see if SST is identity 
+        print("POST NORM", np.linalg.norm(aligned_lm - self.baseline, ord = "fro"))
+        
         return aligned_lm
 
 class TestProcrustesAlignment(Alignment):
@@ -184,3 +187,66 @@ class CCA(Alignment):
         aligned_ls = ls @ Mk @ np.linalg.inv(M0)
         
         return aligned_ls
+
+
+
+class NeuralNetworkAlignment(Alignment):
+    """
+    Nonlinear latent alignment via a small neural network (MLP)
+    Maps day_k latent space -> day_0 latent space
+    """
+    def __init__(self, hidden_sizes=[64, 64], lr=1e-3, epochs=100):
+        self.name = "nn_alignment"
+        self.hidden_sizes = hidden_sizes
+        self.lr = lr
+        self.epochs = epochs
+        self.model = None
+
+    def set_baseline(self, lm):
+        """
+        Baseline is day_0 latent space (shape: [timepoints x ndims])
+        """
+        self.baseline = lm
+        self.ndims = lm.shape[1]
+
+    def get_aligned_lm(self, lm):
+        return self.align(lm)
+
+    def align(self, lm):
+        """
+        lm: day_k latent space [timepoints x ndims]
+        returns aligned latent space
+        """
+        import torch
+        import torch.nn as nn
+        import torch.optim as optim
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        X = torch.tensor(lm, dtype=torch.float32, device=device)
+        Y = torch.tensor(self.baseline, dtype=torch.float32, device=device)
+
+        # Define simple MLP
+        layers = []
+        in_dim = self.ndims
+        for h in self.hidden_sizes:
+            layers.append(nn.Linear(in_dim, h))
+            layers.append(nn.ReLU())
+            in_dim = h
+        layers.append(nn.Linear(in_dim, self.ndims))  # output dim = ndims
+        model = nn.Sequential(*layers).to(device)
+
+        optimizer = optim.Adam(model.parameters(), lr=self.lr)
+        loss_fn = nn.MSELoss()
+
+        # Training
+        for _ in range(self.epochs):
+            optimizer.zero_grad()
+            Y_pred = model(X)
+            loss = loss_fn(Y_pred, Y)
+            loss.backward()
+            optimizer.step()
+
+        # Return aligned latent space
+        with torch.no_grad():
+            aligned = model(X).cpu().numpy()
+        return aligned
