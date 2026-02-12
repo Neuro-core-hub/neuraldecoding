@@ -139,6 +139,28 @@ class NeuralNetworkDecoder(Decoder):
             prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
 
         return prediction
+
+class RNNDecoder(Decoder):
+    def __init__(self, cfg: DictConfig) -> None:
+        super().__init__(cfg)
+        self.input_shape = cfg.model.input_size
+        self.conv_size = cfg.conv_size
+        self.input_hist = torch.tensor((1, self.input_shape, self.conv_size), dtype=torch.float32)
+    def predict(self, input):
+        if self.model.neural_scaler is not None:
+            input = torch.tensor(self.model.neural_scaler.transform(input), dtype=torch.float32)
+        else:
+            input = torch.tensor(input, dtype=torch.float32)
+
+        self.input_hist = torch.cat((self.input_hist[:, :, 1:], input.unsqueeze(0)), dim=2)
+
+        with torch.no_grad():
+            prediction = self.model(self.input_hist.to(self.device))
+        
+        if self.model.behavior_scaler is not None:
+            prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
+
+        return prediction
     
 class DummyDecoder(Decoder):
     def __init__(self, cfg: DictConfig) -> None:
