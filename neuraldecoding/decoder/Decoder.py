@@ -144,8 +144,8 @@ class RNNDecoder(Decoder):
     def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
         self.input_shape = cfg.model.input_size
-        self.conv_size = cfg.conv_size
-        self.input_hist = torch.tensor((1, self.input_shape, self.conv_size), dtype=torch.float32)
+        self.seq_length = cfg.seq_length
+        self.input_hist = torch.tensor((1, self.input_shape, self.seq_length), dtype=torch.float32)
     def predict(self, input):
         if self.model.neural_scaler is not None:
             input = torch.tensor(self.model.neural_scaler.transform(input), dtype=torch.float32)
