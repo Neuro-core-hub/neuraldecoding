@@ -1371,6 +1371,9 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				)
 				
 				# Get initial value at onset
+				if onset_idx >= len(behavior_ts):
+					continue  # Onset happens after the last timestamp, skip
+
 				initial_value = templated[onset_idx, i]
 				
 				if trial_end_idx <= onset_idx:
@@ -1379,6 +1382,9 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				# Apply template from onset to end of trial
 				num_samples = trial_end_idx - onset_idx
 				duration_s = (behavior_ts[trial_end_idx - 1] - behavior_ts[onset_idx]) / 1000  # Convert ms to seconds
+
+				if duration_s <= 0:
+					continue  # Invalid duration, skip
 				
 				template_values = self._generate_template(
 					template_type=template_type,

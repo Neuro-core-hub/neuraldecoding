@@ -258,6 +258,6 @@ def success_rate_zstruct(nwb_file: NWBFile) -> float:
         # Create a mask to exclude specified trials
         mask = np.ones(len(success_data), dtype=bool)
         mask[exclude_trials] = False
-        success_data = success_data[mask]
+        success_data = np.array(success_data)[mask]
     
     return np.mean(success_data), success_data
