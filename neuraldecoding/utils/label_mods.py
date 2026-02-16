@@ -22,7 +22,7 @@ def apply_modifications(nicknames, kinematics, interpipe, param_dict):
         elif mod == 'random_warp':
             kinematics = random_warp(kinematics, trial_filt, current_params['hold_time'], current_params['individuate_dofs'])
         elif mod == 'sigmoid_replacement':
-            kinematics = replace_with_sigmoid(kinematics, trial_filt, targets, current_params['sigmoid_k'], current_params['center'])
+            kinematics = replace_with_sigmoid(kinematics, trial_filt, targets, current_params['steepness'], current_params['onset_proportion'], current_params['binsize'])
         elif mod == 'bias_endpoints':
             kinematics = bias_endpoints(kinematics, trial_filt, current_params['bias_range'], current_params['individuate_dofs'])
         else:
@@ -457,18 +457,42 @@ def replace_with_sigmoid(
     kinematics: torch.Tensor,
     trial_indices: np.ndarray,
     targets: np.ndarray,
-    sigmoid_k: float = 1.0,
-    center: int = 0.5
+    steepness: float = 1.0,
+    onset_proportion: int = 0.5,
+    binsize: int = 32
 ) -> torch.Tensor:
     
-    def sigmoid(x, x0=0, k=1, y_start=0, y_end=1):
-        return torch.tensor(y_start + (y_end - y_start) / (1 + np.exp(-k * (x - x0)))).to(dtype=torch.float32)
+    def sigmoid(
+        t: np.ndarray,
+		initial_value: float,
+		final_value: float,
+		duration_s: float,
+		steepness: float = 10,
+		start_point: float = 0,
+		start_threshold_percentage: float = 0.005,
+		**kwargs
+	) -> np.ndarray:
+        """Sigmoid template function."""
+        # Normalized steepness
+        s_norm = steepness * duration_s
+        # Amplitude
+        amplitude = final_value - initial_value
+        # Calculate the normalized time midpoint t0_norm using s_norm
+        log_arg = start_threshold_percentage / (1 - start_threshold_percentage)
+        if log_arg <= 0:
+            raise ValueError("Logarithm argument non-positive.")
+        logit_val = np.log(log_arg)
+        t0_norm = start_point - (1 / s_norm) * logit_val
+        # Calculate the sigmoid value(s) using normalized time and s_norm
+        exponent = -s_norm * (t - t0_norm)
+        sigmoid_val = 1 / (1 + np.exp(exponent))
+        return initial_value + amplitude * sigmoid_val
     
-    if not isinstance(kinematics, torch.Tensor):
-        kinematics = torch.tensor(kinematics, dtype=torch.float32)
+    if not isinstance(kinematics, np.ndarray):
+        kinematics = kinematics.cpu().numpy()
     
     unique_trials = np.unique(trial_indices)
-    sigmoid_data = kinematics.clone()
+    sigmoid_data = kinematics.copy()
 
     # Get the number of dimensions and separate position and velocity
     N = kinematics.shape[1]
@@ -476,8 +500,14 @@ def replace_with_sigmoid(
     prev_target = None
 
     for idx, trial in enumerate(unique_trials):
+        if np.isnan(trial):
+            continue
         # Get mask for this trial
         trial_mask = trial_indices == trial
+        first_idx = np.where(trial_mask)[0][0]
+        if idx != 0:
+            sigmoid_data[last_idx:first_idx, :] = sigmoid_data[last_idx, :]  # Fill in between trials with the last sigmoid values
+        last_idx = np.where(trial_mask)[0][-1]
 
         trial_data = kinematics[trial_mask]
         trial_length = len(trial_data)
@@ -487,16 +517,20 @@ def replace_with_sigmoid(
             prev_target = trial_target
             continue
 
-        sigmoid_trial_data = trial_data.clone()
+        sigmoid_trial_data = trial_data.copy()
 
         for dim in range(pos_dim):
             y_start = prev_target[dim]
             y_end = trial_target[dim]
-            x = np.arange(trial_length)
-            x0 = trial_length * center
-            y_new = sigmoid(x, x0=x0, k=sigmoid_k, y_start=y_start, y_end=y_end)
+            x0 = trial_length * onset_proportion
+
+            duration_s = (trial_length - x0) * binsize / 1000  # Convert to seconds
+
+            t = np.linspace(0, 1, trial_length - int(x0))
+            y_new = sigmoid(t, y_start, y_end, duration_s, steepness=steepness)
 
             # Fill the warped trial data with the interpolated values
+            y_new = np.concatenate((np.full(int(x0), y_start), y_new))
             sigmoid_data[trial_mask, dim] = y_new
             
             if trial_length > 1:
