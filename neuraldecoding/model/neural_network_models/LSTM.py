@@ -54,7 +54,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         # Dropout layer for input (if enabled)
         self.input_dropout = nn.Dropout(self.drop_prob) if self.dropout_input else nn.Identity()
 
-    def forward(self, x, h=None, return_all_tsteps=False, return_h = False):
+    def forward(self, x, h=None, return_all_tsteps=False, return_h=False):
         """
         Runs forward pass of LSTM Model
 
@@ -202,9 +202,9 @@ class LSTMTrialInput(LSTM):
         # search through the preprocessing params to find the leadup
         self.leadup = model_params.get("leadup", 0)
 
-    def forward(self, x, h=None, return_all_tsteps=True, return_h = False, remove_leadup=False):
+    def forward(self, x, h=None, return_all_tsteps=False, return_h=False, remove_leadup=False):
         if return_h:
-            out, h = super().forward(x, h, return_h=True, return_all_tsteps=True)
+            out, h = super().forward(x, h, return_h=True, return_all_tsteps=return_all_tsteps)
             # Remove leadup should only be used for training, and thus a batched input
             if remove_leadup:
                 assert x.dim() == 3, "Remove leadup should only be used for batched input"
@@ -212,7 +212,7 @@ class LSTMTrialInput(LSTM):
             else:
                 return out, h
         else:
-            out = super().forward(x, h, return_all_tsteps=True)
+            out = super().forward(x, h, return_all_tsteps=return_all_tsteps)
             if remove_leadup:
                 assert x.dim() == 3, "Remove leadup should only be used for batched input"
                 return out[:, self.leadup:, :]
@@ -227,9 +227,9 @@ class LSTMTrialInput(LSTM):
         # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
         if torch.isnan(x[0, 0, 0]):
             x = x[:, :, self.leadup:]
-            yhat = self.forward(x[:, :, :trial_length], remove_leadup=False)
+            yhat = self.forward(x[:, :, :trial_length], return_all_tsteps=True, remove_leadup=False)
         else:
-            yhat = self.forward(x[:, :, :self.leadup + trial_length], remove_leadup=True)
+            yhat = self.forward(x[:, :, :self.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
         yhat = yhat.permute(0, 2, 1)
         y = y[:, :, :trial_length]
         

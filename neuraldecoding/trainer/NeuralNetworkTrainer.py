@@ -11,6 +11,7 @@ from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model import neural_network_models
 import neuraldecoding
 import warnings
+import copy
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
@@ -69,7 +70,7 @@ class NNTrainer(Trainer):
                                     self.data_dict["Y_train"].detach().clone().to(torch.float32))
         valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
                                     self.data_dict['Y_val'].detach().clone().to(torch.float32))
-        train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True, drop_last=True)
         if self.full_batch_valid:
             valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
         else:
@@ -120,10 +121,11 @@ class NNTrainer(Trainer):
         best_model_state = None
         best_epoch = 0
         best_iteration = 0
-        running_loss = 0.0
             
         for epoch in range(self.num_epochs):
             # Train
+            running_loss = 0.0
+            within_epoch_iteration = 0
             train_all_predictions = []
             train_all_targets = []
 
@@ -140,19 +142,19 @@ class NNTrainer(Trainer):
                     del y, yhat
                 
                 iteration += 1
+                within_epoch_iteration += 1
                 
                 if self.print_on == 'iters':
                     
                     if iteration % self.print_every == 0:
-                        train_loss = running_loss / self.print_every
-                        running_loss = 0.0
+                        train_loss = running_loss / within_epoch_iteration
                         
                         val_loss, val_all_predictions, val_all_targets = self.validate_model()
 
                         # Save best model
                         if self.take_best and val_loss < best_val_loss:
                             best_val_loss = val_loss
-                            best_model_state = self.model.state_dict().copy()
+                            best_model_state = copy.deepcopy(self.model.state_dict())
                             best_epoch = epoch
                             best_iteration = iteration
                         self.update_scheduler(val_loss)
@@ -176,7 +178,6 @@ class NNTrainer(Trainer):
             # Update logger
             if self.print_on == 'epoch':
                 train_loss = running_loss / len(self.train_loader)
-                running_loss = 0.0
                 
                 if epoch % self.print_every == 0:
                     # Validate
@@ -185,7 +186,7 @@ class NNTrainer(Trainer):
                     # Save best model
                     if self.take_best and val_loss < best_val_loss:
                         best_val_loss = val_loss
-                        best_model_state = self.model.state_dict().copy()
+                        best_model_state = copy.deepcopy(self.model.state_dict())
                         best_epoch = epoch
                         best_iteration = iteration
 
@@ -277,17 +278,20 @@ class LSTMTrainer(NNTrainer):
         # Validate
         self.model.eval()
         running_val_loss = 0.0
-        val_all_predictions = []
-        val_all_targets = []
         h = None
 
         with torch.no_grad():
-            all_x = self.valid_loader.dataset.tensors[0][:,:,-1]
-            val_all_targets = self.valid_loader.dataset.tensors[1]
-            val_all_predictions = self.model.forward(all_x, return_all_tsteps=True)
-            val_loss = self.loss_func(val_all_predictions, val_all_targets).item()
+            for x_val, y_val in self.valid_loader: # Typically only one batch
+                x_val = x_val.to(self.device)
+                y_val = y_val.to(self.device)
+                yhat_val = self.model(x_val, h, return_all_tsteps=True)[:, -1, :]
+                val_loss = self.loss_func(yhat_val, y_val)
 
-        return val_loss, val_all_predictions.detach().cpu().numpy(), val_all_targets.detach().cpu().numpy()
+                running_val_loss += val_loss.item()
+                if(self.clear_cache):
+                    del y_val, yhat_val
+
+        return val_loss, yhat_val.detach().cpu().numpy(), y_val.detach().cpu().numpy()
 
 class IterationNNTrainer(NNTrainer):
     '''

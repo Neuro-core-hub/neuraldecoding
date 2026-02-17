@@ -571,7 +571,7 @@ def add_run_data(
     data_dict,
     time_series_dict,
     exp_cfg,
-    verbose=False,
+    verbose=False
 ):
     """
     Add experimental data to the NWB file, including neural, behavioral, and spike data.
@@ -594,9 +594,25 @@ def add_run_data(
 
     num_trials = len(data_dict)
 
-    # deal with time first
+    # Skip first two trials - start from third trial
+    # Get the start index for truncating time series
+    start_idx = 0
+    for i in range(min(2, len(data_dict))):
+        if data_dict[i][exp_cfg.reference_time] is not None:
+            start_idx += len(data_dict[i][exp_cfg.reference_time])
+    
+    data_dict = data_dict[2:]
+    num_trials = len(data_dict)
+
+    # deal with time first - truncate to start from first kept trial
     times = time_series_dict[exp_cfg.reference_time].reshape(-1)
+    times = times[start_idx:]
     times /= 1000 # set in seconds
+    
+    # Truncate all time series to match the new start
+    for key in time_series_dict.keys():
+        if key != exp_cfg.reference_time:
+            time_series_dict[key] = time_series_dict[key][start_idx:]
 
     # create modules as defined by yaml file
     modules = {}
@@ -656,6 +672,7 @@ def add_run_data(
         all_events = []
         for ch_idx in range(exp_cfg.num_channels):
             cross_trial_spike_times = []
+            # data_dict already has first two trials skipped
             for trial in data_dict:
                 if type(trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]) is int:
                     trial_spike_times = [trial[exp_cfg.units.field][ch_idx]["SpikeTimes"]]
@@ -675,12 +692,25 @@ def add_run_data(
     nwb_trial_dict = dict()
 
     # add the trials to the NWB file
+
+    # Dynamically determine if trial times are in seconds or milliseconds
+    test_time_difference = data_dict[1][exp_cfg.reference_time][0][0] - data_dict[0][exp_cfg.reference_time][0][0]
+    if test_time_difference < 0.99:
+        trial_times_s = True
+    else:
+        trial_times_s = False
+
     for trl_idx in range(num_trials):
         if data_dict[trl_idx][exp_cfg.reference_time] is None:
             continue
         # trial times
-        nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0] / 1000 # convert to seconds
-        nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0] / 1000 # convert to seconds
+        if not trial_times_s: 
+            # There are some zstructs, where trial times are in ms
+            nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0] / 1000 # convert to seconds
+            nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0] / 1000 # convert to seconds
+        else:
+            nwb_trial_dict["start_time"] = data_dict[trl_idx][exp_cfg.reference_time][0][0]
+            nwb_trial_dict["stop_time"] = data_dict[trl_idx][exp_cfg.reference_time][-1][0]
 
         # looping through the data frame keys for dynamically adding them
         for key in data_dict[trl_idx].keys():
@@ -712,7 +742,9 @@ def load_xpc_run(cfg):
                 date of the experiment
             runs: int
                 the run you are currently loading
-
+            trial_times_seconds: bool
+                whether the trial times are already in seconds (some zstructs have this; around Summer 2025)
+            
     Returns
     -------
     pynwb.NWBFile

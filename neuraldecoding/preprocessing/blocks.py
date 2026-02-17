@@ -388,7 +388,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', is_human = True):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -404,7 +404,6 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
 		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
 		self.nwb_targets_loc = nwb_targets_loc
-		self.is_human = is_human
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -427,9 +426,8 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_end_times = np.array(resolve_path(data.dataset, self.nwb_trial_end_times_loc))
 		targets = resolve_path(data.dataset, self.nwb_targets_loc)
 		# Convert to milliseconds
-		if self.is_human:
-			trial_start_times = trial_start_times[:] * 1000
-			trial_end_times = trial_end_times[:] * 1000
+		trial_start_times = trial_start_times[:] * 1000
+		trial_end_times = trial_end_times[:] * 1000
 		# Skip trials as needed
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
@@ -873,7 +871,7 @@ class LabelModificationBlock(DataProcessingBlock):
 	A block to add label modifications to training data.
 	"""
 
-	def __init__(self, nicknames, param_dict, save_unmodified=False, save_name=None):
+	def __init__(self, nicknames, param_dict, save_unmodified=True, save_name=None):
 		"""
 		Initializes the LabelModificationBlock. Below are modification options and the required parameters in param_dict.
 		See the apply_modifications function in utils/label_mods.py function and hover over each individual modification 
@@ -1079,7 +1077,7 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 	"""
 	A block for detecting movement onset in the EMG data.
 	"""
-	def __init__(self, location_emg: str, location_times:str , detection_config: dict, neural_indices: list = None, output_key: str = 'onset_indices'):
+	def __init__(self, location_emg: str, location_times:str , detection_config: dict, neural_indices: list = None, output_key: str = 'onset_indices', plot: bool = True):
 		super().__init__()
 		self.location_emg = location_emg
 		self.location_times = location_times
@@ -1087,6 +1085,7 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 		self.neural_indices = neural_indices
 		self.output_key = output_key
 		self.movement_onset_detection = MovementOnsetDetector(detection_config)
+		self.plot = plot
 
 	def transform(self, data, interpipe):
 		"""
@@ -1107,49 +1106,115 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 
 		# Add onsets to data dictionary
 		interpipe[self.output_key] = onsets
-
-		# Plot all channels together with onset markers
-		n_channels = emg.shape[1]
-		fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-		
-		# Plot all EMG channels
-		for ch in range(n_channels):
-			ax.plot(times, emg[:, ch], alpha=0.7, linewidth=0.8, label=f'Channel {ch}')
-		
-		# Add vertical lines for onsets
-		for onset_time in onsets:
-			if onset_time is not None and not np.isnan(onset_time):
-				ax.axvline(x=onset_time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time == onsets[0] else "")
-		
-		# Add trial boundaries for context
-		for i, start_time in enumerate(trial_start_times):
-			ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.5, linewidth=1.5, 
-					  label='Trial Start' if i == 0 else "")
-		for i, end_time in enumerate(trial_end_times):
-			ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.5, linewidth=1.5, 
-					  label='Trial End' if i == 0 else "")
-		
-		ax.set_xlabel('Time (ms)')
-		ax.set_ylabel('EMG Amplitude')
-		ax.set_title('EMG Channels with Movement Onsets')
-		ax.grid(True, alpha=0.3)
-		ax.legend()
-		plt.tight_layout()
-		plt.show(block=True)
+		if self.plot:
+			# Plot all channels together with onset markers
+			n_channels = emg.shape[1]
+			fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+			
+			# Plot all EMG channels
+			for ch in range(n_channels):
+				ax.plot(times, emg[:, ch], alpha=0.7, linewidth=0.8, label=f'Channel {ch}')
+			
+			# Add vertical lines for onsets
+			for onset_time in onsets:
+				if onset_time is not None and not np.isnan(onset_time):
+					ax.axvline(x=onset_time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time == onsets[0] else "")
+			
+			# Add trial boundaries for context
+			for i, start_time in enumerate(trial_start_times):
+				ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.5, linewidth=1.5, 
+						label='Trial Start' if i == 0 else "")
+			for i, end_time in enumerate(trial_end_times):
+				ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.5, linewidth=1.5, 
+						label='Trial End' if i == 0 else "")
+			
+			ax.set_xlabel('Time (ms)')
+			ax.set_ylabel('EMG Amplitude')
+			ax.set_title('EMG Channels with Movement Onsets')
+			ax.grid(True, alpha=0.3)
+			ax.legend()
+			plt.tight_layout()
+			plt.show(block=True)
 
 		return data, interpipe
 
+class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
+	"""
+	A block for detecting movement onset in the EMG data by thresholding kinematics. 
+	"""
+	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False):
+		super().__init__()
+		self.location_behavior = location_behavior
+		self.vel_threshold = vel_threshold
+		self.movement_onset_detection = MovementOnsetDetector({})
+		
+		self.onset_key = onset_key
+		self.mask_key = mask_key
+
+		self.plot = plot
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by detecting movement onset in the EMG data.
+		"""
+		behavior = data[self.location_behavior]  # Extract velocity dimensions
+
+		D = behavior.shape[1] // 2  # Assuming behavior has position and velocity for D dimensions
+		behavior = behavior[:, D:]  # Extract velocity dimensions
+
+		if self.mask_key is not None:
+			trial_idx = interpipe['bin_trial_idx'][interpipe[self.mask_key]]
+		else:
+			trial_idx = interpipe['bin_trial_idx']
+
+		# Detect movement onsets
+		onsets = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
+
+		# Add onsets to data dictionary
+		interpipe[self.onset_key] = onsets
+
+		if self.plot:
+			fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+
+			ax.axhline(y=self.vel_threshold, color='gray', linestyle='--', alpha=0.8, linewidth=1.5, label='Velocity Threshold')
+			ax.axhline(y=-self.vel_threshold, color='gray', linestyle='--', alpha=0.8, linewidth=1.5, label='Velocity Threshold')
+			
+			pos_dim = behavior.shape[1] // 2
+			# Add vertical lines for onsets
+			for onset_time in onsets:
+				for dim in range(0, pos_dim):
+					time = onset_time[dim]
+					ax.axvline(x=time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time[0] == onsets[0,0] else "")
+			
+			pos_dim = behavior.shape[1] // 2
+
+			for dim in range(pos_dim, pos_dim*2):
+				ax.plot(behavior[:, dim], alpha=0.7, linewidth=0.8, label='Pos Dim {dim - pos_dim}')
+
+			ax.set_xlabel('Time (bin)')
+			ax.set_ylabel('Kinematics')
+			ax.set_title('Movement Onsets from Kinematics')
+			ax.grid(True, alpha=0.3)
+			ax.legend()
+			plt.tight_layout()
+			plt.show(block=True)
+
+		return data, interpipe
+	
 class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing the behavior data with a template behavior.
 	"""
-	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict, kinematic_indices: list = None):
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict, kinematic_indices: list = None, mask_key: str = None, pos_vel: bool = False, plot: bool = True):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.location_out = location_out
 		self.location_onsets = location_onsets
 		self.template_config = template_config
 		self.kinematic_indices = kinematic_indices
+		self.mask_key = mask_key
+		self.pos_vel = pos_vel
+		self.plot = plot
 	
 	def transform(self, data, interpipe):
 		"""
@@ -1161,6 +1226,9 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		if behavior_ts is None:
 			raise ValueError(f"Could not find timestamps for behavior data. Expected '{self.location_behavior}_ts' or 'behavior_ts' in data.")
+		
+		if self.mask_key is not None:
+			behavior_ts = behavior_ts[interpipe[self.mask_key]]
 		
 		# Get onsets from interpipe
 		movement_onsets = interpipe[self.location_onsets]
@@ -1191,19 +1259,21 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 			movement_onsets=movement_onsets,
 			targets=targets,
 			template_type=template_type,
-			template_params=self.template_config.get('template_params', {})
+			template_params=self.template_config.get('template_params', {}),
+			pos_vel=self.pos_vel
 		)
 		
 		# Plot original vs templated kinematics
-		self._plot_kinematics_comparison(
-			original_kinematics=kinematics,
-			templated_kinematics=templated_kinematics,
-			behavior_ts=behavior_ts,
-			trial_start_times=trial_start_times,
-			trial_end_times=trial_end_times,
-			movement_onsets=movement_onsets,
-			kinematic_indices=self.kinematic_indices
-		)
+		if self.plot:
+			self._plot_kinematics_comparison(
+				original_kinematics=kinematics,
+				templated_kinematics=templated_kinematics,
+				behavior_ts=behavior_ts,
+				trial_start_times=trial_start_times,
+				trial_end_times=trial_end_times,
+				movement_onsets=movement_onsets,
+				kinematic_indices=self.kinematic_indices
+			)
 		
 		# Update the behavior data in the data dictionary
 		if self.kinematic_indices is not None:
@@ -1227,7 +1297,8 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		movement_onsets: np.ndarray,
 		targets: np.ndarray,
 		template_type: str = 'sigmoid',
-		template_params: dict = None
+		template_params: dict = None,
+		pos_vel: bool = False
 	) -> np.ndarray:
 		"""
 		Apply template kinematics based on movement onsets and targets.
@@ -1250,8 +1321,11 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 			
 		templated = kinematics.copy()
 
-		# All columns are position data
-		N = kinematics.shape[1]
+		if pos_vel:
+			N = kinematics.shape[1] // 2
+		else:
+			# All columns are assumed position data
+			N = kinematics.shape[1]
 		
 		# Find trial boundaries using searchsorted
 		trial_start_indices = np.searchsorted(behavior_ts, trial_start_times, side='left')
@@ -1266,16 +1340,23 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				continue  # Skip empty trials
 
 			for i in range(N):  # Apply to all position dimensions
+				if movement_onsets.ndim > 1:
+					# If multiple onsets per trial (e.g., per dof), use the onset for this dimension
+					onset_time = movement_onsets[trial_idx, i]
+				else:
+					onset_time = movement_onsets[trial_idx]
 				# Check if we have an onset for this trial
-				if trial_idx >= len(movement_onsets) or movement_onsets[trial_idx] is None or np.isnan(movement_onsets[trial_idx]):
+				if trial_idx >= len(movement_onsets) or movement_onsets[trial_idx] is None or np.isnan(onset_time):
 					# If we don't know the onset, keep original kinematics in trial
 					continue
 				
 				# Find onset index within this trial using the onset time
-				onset_time = movement_onsets[trial_idx]
-				onset_idx = np.searchsorted(behavior_ts[trial_start_idx:trial_end_idx], onset_time, side='left')
-				onset_idx = trial_start_idx + onset_idx
-				onset_idx = np.clip(onset_idx, trial_start_idx, trial_end_idx - 1)
+				if self.pos_vel:
+					onset_idx = int(onset_time) # data is already binned using pos_vel, no need to search times
+				else:
+					onset_idx = np.searchsorted(behavior_ts[trial_start_idx:trial_end_idx], onset_time, side='left')
+					onset_idx = trial_start_idx + onset_idx
+					onset_idx = np.clip(onset_idx, trial_start_idx, trial_end_idx - 1)
 				
 				# Get target for this trial and dimension
 				if trial_idx >= len(targets) or i >= targets.shape[1]:
@@ -1290,6 +1371,9 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				)
 				
 				# Get initial value at onset
+				if onset_idx >= len(behavior_ts):
+					continue  # Onset happens after the last timestamp, skip
+
 				initial_value = templated[onset_idx, i]
 				
 				if trial_end_idx <= onset_idx:
@@ -1298,6 +1382,9 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				# Apply template from onset to end of trial
 				num_samples = trial_end_idx - onset_idx
 				duration_s = (behavior_ts[trial_end_idx - 1] - behavior_ts[onset_idx]) / 1000  # Convert ms to seconds
+
+				if duration_s <= 0:
+					continue  # Invalid duration, skip
 				
 				template_values = self._generate_template(
 					template_type=template_type,
@@ -1309,6 +1396,12 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				)
 				
 				templated[onset_idx:trial_end_idx, i] = template_values
+		
+		if pos_vel:
+			for i in range(N):
+				vel_idx = i + N
+				templated[1:, vel_idx] = templated[1:, i] - templated[:-1, i]
+				templated[0, vel_idx] = 0.0  # Set initial velocity to zero
 
 		return templated
 	
@@ -1415,6 +1508,8 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		# Determine which dimensions to plot
 		# Note: original_kinematics and templated_kinematics are already sliced if kinematic_indices was provided
 		n_dims = original_kinematics.shape[1]
+
+
 		
 		if kinematic_indices is not None:
 			# Data is already sliced, so plot indices 0, 1, 2, ... but label with original indices
@@ -1433,6 +1528,11 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		fig.suptitle('Original vs Templated Kinematics Comparison', fontsize=16, fontweight='bold')
 		
 		for i, (dim_idx, ax, label) in enumerate(zip(plot_indices, axes, plot_labels)):
+			if movement_onsets.ndim > 1:
+				movement_onsets_dof = movement_onsets[:, i%2]  # Assuming pos_vel=True
+			else:
+				movement_onsets_dof = movement_onsets
+
 			# Plot original kinematics
 			ax.plot(behavior_ts, original_kinematics[:, dim_idx], 
 				   color='blue', alpha=0.7, linewidth=1.5, label='Original')
@@ -1450,8 +1550,9 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.6, linewidth=1,
 						  label='Trial End' if i == 0 and j == 0 else "")
 			
+
 			# Add movement onsets
-			for j, onset_time in enumerate(movement_onsets):
+			for j, onset_time in enumerate(movement_onsets_dof):
 				if onset_time is not None and not np.isnan(onset_time):
 					ax.axvline(x=onset_time, color='purple', linestyle='--', alpha=0.8, linewidth=2,
 							  label='Movement Onset' if i == 0 and j == 0 else "")
@@ -1469,7 +1570,6 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		plt.tight_layout()
 		plt.show(block=True)
-
 
 class ReFITTransformationBlock(DataProcessingBlock):
 
