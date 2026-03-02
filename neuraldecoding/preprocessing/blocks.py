@@ -1403,6 +1403,14 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 				templated[1:, vel_idx] = templated[1:, i] - templated[:-1, i]
 				templated[0, vel_idx] = 0.0  # Set initial velocity to zero
 
+				# You may notice a shift of 1 bin if using the above implementation when an onset is not detected.
+				# Below is the correct implementation, but the above was used for online runs for softdtw analyses,
+				# so the sigmoid template was fitted with the former, so it is left for consistency. Will be updated
+				# after softdtw code is made public and this repository is branched permanently.
+				
+				# templated[0:-1, vel_idx] = templated[1:, i] - templated[:-1, i]
+				# templated[-1, vel_idx] = 0.0  # Set last velocity to zero
+
 		return templated
 	
 	def _generate_template(
