@@ -1205,7 +1205,7 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing the behavior data with a template behavior.
 	"""
-	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict, kinematic_indices: list = None, mask_key: str = None, pos_vel: bool = False, plot: bool = True):
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, template_config: dict, kinematic_indices: list = None, mask_key: str = None, pos_vel: bool = False, plot: bool = True, shift_to_onset: bool = False):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.location_out = location_out
@@ -1691,3 +1691,94 @@ class NoiseAdditionBlock(DataProcessingBlock):
 		# Repeat behavior data for each noisy neural data
 		data[self.location_behavior] = data[self.location_behavior].repeat(self.iterations + 1, 1, 1)
 		return data, interpipe
+	
+
+class ShiftPromptToOnsetBlock(TemplateBehaviorReplacementBlock):
+	"""
+	A block for shifting the prompt to target from the trial start to the movement onset. Compatible with monkey data but is truly meant for human data.
+	"""
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, kinematic_indices: list = None, mask_key: str = None, pos_vel: bool = False, plot: bool = True, threshold: float = 1e-6):
+		super().__init__(location_behavior, location_out, location_onsets, {}, kinematic_indices, mask_key, pos_vel, plot)
+		self.threshold = threshold # Threshold for determining current start of prompt
+	
+	def _apply_template_kinematics(
+		self,
+		kinematics: np.ndarray,
+		behavior_ts: np.ndarray,
+		trial_start_times: np.ndarray,
+		trial_end_times: np.ndarray,
+		movement_onsets: np.ndarray,
+		targets: np.ndarray,
+		template_type: str = 'sigmoid',
+		template_params: dict = None,
+		pos_vel: bool = False
+	) -> np.ndarray:
+		"""
+		Shift the prompt to target from trial start to movement onset by circularly shifting the kinematics.
+		
+		Args:
+			kinematics: Original kinematic data (T, N)
+			behavior_ts: Timestamps for each time point (T,)
+			trial_start_times: Start times for each trial (n_trials,)
+			trial_end_times: End times for each trial (n_trials,)
+			movement_onsets: Movement onset times for each trial (n_trials,)
+			targets: Target positions for each trial (n_trials, D)
+			template_type: Not used in this block
+			template_params: Not used in this block
+			pos_vel: Whether the kinematics include velocity dimensions
+		"""
+
+		shifted_kinematics = kinematics.copy()
+		N = kinematics.shape[1] // 2 if pos_vel else kinematics.shape[1]
+		
+		# Find trial boundaries using searchsorted
+		trial_start_indices = np.searchsorted(behavior_ts, trial_start_times, side='left')
+		trial_end_indices = np.searchsorted(behavior_ts, trial_end_times, side='right')
+
+		for trial_idx, (trial_start_idx, trial_end_idx) in enumerate(zip(trial_start_indices, trial_end_indices)):
+			for i in range(N):
+				if movement_onsets.ndim > 1:
+					movement_onset_time = movement_onsets[trial_idx, i%2]  # Assuming pos_vel=True
+				else:
+					movement_onset_time = movement_onsets[trial_idx]
+				
+				# Check if we have a valid onset time for this trial
+				if trial_idx >= len(movement_onsets) or movement_onsets[trial_idx] is None or np.isnan(movement_onset_time):
+					continue
+
+				# Find onset index within this trial using the onset time
+				if self.pos_vel:
+					onset_idx = int(movement_onset_time) # data is already binned using pos_vel, no need to search times
+				else:
+					onset_idx = np.searchsorted(behavior_ts[trial_start_idx:trial_end_idx], movement_onset_time, side='left')
+					onset_idx = trial_start_idx + onset_idx
+					onset_idx = np.clip(onset_idx, trial_start_idx, trial_end_idx - 1)
+				
+				# Determine current prompt start by finding when kinematics first exceed threshold
+				current_prompt_mask = np.abs(np.diff(kinematics[trial_start_idx:trial_end_idx, i])) > self.threshold
+				if not np.any(current_prompt_mask):
+					continue  # If no values exceed threshold, skip this trial
+				current_prompt_start_idx = trial_start_idx + np.argmax(current_prompt_mask)
+
+				# Calculate shift amount
+				shift_amount = onset_idx - current_prompt_start_idx
+
+				# Shift kinematics and pad with 0s on edges
+				shifted_kinematics[trial_start_idx:trial_end_idx, i] = np.roll(kinematics[trial_start_idx:trial_end_idx, i], shift_amount)
+				if shift_amount > 0:
+					# If shifting forward, pad the beginning with the first value
+					shifted_kinematics[trial_start_idx:trial_start_idx+shift_amount, i] = kinematics[trial_start_idx, i]
+				elif shift_amount < 0:
+					# If shifting backward, pad the end with the last value
+					shifted_kinematics[trial_end_idx+shift_amount:trial_end_idx, i] = kinematics[trial_end_idx-1, i]
+				
+				# If pos_vel, also shift the velocity dimensions
+				if pos_vel:
+					vel_idx = i + N
+					shifted_kinematics[trial_start_idx:trial_end_idx, vel_idx] = np.roll(kinematics[trial_start_idx:trial_end_idx, vel_idx], shift_amount)
+					if shift_amount > 0:
+						shifted_kinematics[trial_start_idx:trial_start_idx+shift_amount, vel_idx] = kinematics[trial_start_idx, vel_idx]
+					elif shift_amount < 0:
+						shifted_kinematics[trial_end_idx+shift_amount:trial_end_idx, vel_idx] = kinematics[trial_end_idx-1, vel_idx]
+				
+		return shifted_kinematics
