@@ -1,5 +1,7 @@
 from abc import abstractmethod
 import numpy as np
+import pickle
+import os
 # import jax
 # import jax.numpy as jnp
 # from jax.example_libraries import optimizers
@@ -43,17 +45,15 @@ class ProcrustesAlignment(Alignment):
     def align(self, lm):     
         print("Aligning with Procrustes") 
         print(f"baseline: {self.baseline}")
-        print("PRE NORM", np.linalg.norm(lm - self.baseline, ord = 'fro'))        
         m = self.baseline.T @ lm
         U, _, V = np.linalg.svd(m)
         
         S =  U @ V
         
         aligned_lm = lm @ S.T
-        self.save_dict = {'U': U, 'V': V, 'S': S, 'aligned_lm': aligned_lm, 'lm': lm, 'baseline': self.baseline}
-
-        # see if SST is identity 
-        print("POST NORM", np.linalg.norm(aligned_lm - self.baseline, ord = "fro"))
+        self.save_dict = {'U': U, 'V': V, 'S': S, 'aligned_lm': aligned_lm, 'lm': lm, 'baseline': self.baseline, 
+                          'pre_aligned_norm_from_baseline':np.linalg.norm(lm - self.baseline, ord = 'fro'), 
+                          'post_aligned_norm_from_baseline': np.linalg.norm(aligned_lm - self.baseline, ord='fro')}
         
         return aligned_lm
 
