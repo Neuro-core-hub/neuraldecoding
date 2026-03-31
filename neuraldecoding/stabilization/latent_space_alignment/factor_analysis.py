@@ -591,8 +591,34 @@ def get_stabilization_matrices(loading, psi, d):
 
     return beta, o
 
+def build_loading_alignment_save_dict(baseline_lm, lm, aligned_lm, extra=None):
+    """
+    Build a save dictionary matching Alignment-class diagnostics for loading matrices.
+
+    Parameters
+    ----------
+    baseline_lm: numpy.array
+        Baseline/day0 loading matrix.
+    lm: numpy.array
+        Unaligned loading matrix (e.g., dayk).
+    aligned_lm: numpy.array
+        Aligned loading matrix.
+    extra: dict (optional)
+        Additional values to include in the save dictionary.
+    """
+    save_dict = {
+        'aligned_lm': aligned_lm,
+        'lm': lm,
+        'baseline': baseline_lm,
+        'pre_aligned_norm_from_baseline': np.linalg.norm(lm - baseline_lm, ord='fro'),
+        'post_aligned_norm_from_baseline': np.linalg.norm(aligned_lm - baseline_lm, ord='fro')
+    }
+    if extra is not None:
+        save_dict.update(extra)
+    return save_dict
+
 def update_factor_analysis_loading(day0_loading, calibration_data, n_components, 
-    n_restarts=5, n_stable_rows=60, threshold=0.01): 
+    n_restarts=5, n_stable_rows=60, threshold=0.01, return_save_dict=False): 
     '''
     Returns the FA model of the calibration data aligned to the day0_loading 
 
@@ -619,11 +645,17 @@ def update_factor_analysis_loading(day0_loading, calibration_data, n_components,
         aligned loading matrix for day K data 
     aligned_channels: numpy.array 
         array indicating which channels were selected for alignment 
+    save_dict: dict (optional, only when return_save_dict=True)
+        Diagnostic dictionary containing aligned/unaligned loading matrices and
+        pre/post alignment norms from the baseline loading matrix.
     '''
     # Fit a FA model to the calibration data 
-    dayk_loading, psi, d = get_factor_analysis_loading(calibration_data, 
-                                               n_components=n_components, 
-                                               n_restarts=n_restarts)
+    d, dayk_loading, psi, _, _ = get_factor_analysis_loading(
+        calibration_data,
+        n_components=n_components,
+        n_restarts=n_restarts
+    )
+    unaligned_dayk_loading = dayk_loading
 
     # Rotate the FA model 
     W, aligned_channels = align_loading_matrices(day0_loading, dayk_loading, 
@@ -633,6 +665,22 @@ def update_factor_analysis_loading(day0_loading, calibration_data, n_components,
 
     # get the stabilization matrices 
     beta, o = get_stabilization_matrices(dayk_loading, psi, d)
+
+    if return_save_dict:
+        save_dict = build_loading_alignment_save_dict(
+            baseline_lm=day0_loading,
+            lm=unaligned_dayk_loading,
+            aligned_lm=dayk_loading,
+            extra={
+                'W': W,
+                'aligned_channels': aligned_channels,
+                'psi': psi,
+                'd': d,
+                'beta': beta,
+                'o': o
+            }
+        )
+        return beta, o, aligned_channels, save_dict
 
     return beta, o, aligned_channels
 
