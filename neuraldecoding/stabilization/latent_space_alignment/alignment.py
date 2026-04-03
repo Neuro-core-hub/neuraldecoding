@@ -167,6 +167,7 @@ class CCA(Alignment):
         self.name = 'cca'
     
     def set_baseline(self, ds):
+        self.baseline = ds
         self.Q0, self.R0 = np.linalg.qr(ds)
 
     def align(self, ls):
@@ -185,6 +186,17 @@ class CCA(Alignment):
         M0 = np.linalg.inv(self.R0) @ U
         # base_ls = self.baseline @ M0
         aligned_ls = ls @ Mk @ np.linalg.inv(M0)
+        self.save_dict = {
+            'U': U,
+            'Vt': Vt,
+            'Mk': Mk,
+            'M0': M0,
+            'aligned_lm': aligned_ls,
+            'lm': ls,
+            'baseline': self.baseline,
+            'pre_aligned_norm_from_baseline': np.linalg.norm(ls - self.baseline, ord='fro'),
+            'post_aligned_norm_from_baseline': np.linalg.norm(aligned_ls - self.baseline, ord='fro')
+        }
         
         return aligned_ls
 
@@ -204,7 +216,7 @@ class NeuralNetworkAlignment(Alignment):
 
     def set_baseline(self, lm):
         """
-        Baseline is day_0 latent space (shape: [timepoints x ndims])
+        Baseline is day_0 latent space (shape: [channels x ndims])
         """
         self.baseline = lm
         self.ndims = lm.shape[1]
@@ -214,7 +226,7 @@ class NeuralNetworkAlignment(Alignment):
 
     def align(self, lm):
         """
-        lm: day_k latent space [timepoints x ndims]
+        lm: day_k latent space [channels x ndims]
         returns aligned latent space
         """
         import torch
@@ -249,4 +261,11 @@ class NeuralNetworkAlignment(Alignment):
         # Return aligned latent space
         with torch.no_grad():
             aligned = model(X).cpu().numpy()
+        self.save_dict = {
+            'aligned_lm': aligned,
+            'lm': lm,
+            'baseline': self.baseline,
+            'pre_aligned_norm_from_baseline': np.linalg.norm(lm - self.baseline, ord='fro'),
+            'post_aligned_norm_from_baseline': np.linalg.norm(aligned - self.baseline, ord='fro')
+        }
         return aligned
