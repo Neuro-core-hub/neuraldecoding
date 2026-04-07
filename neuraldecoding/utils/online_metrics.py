@@ -28,7 +28,7 @@ def success_rate(nwb_file: NWBFile, success_field: str = 'success', exclude_tria
         mask[exclude_trials] = False
         success_data = success_data[mask]
     
-    return np.mean(success_data)
+    return np.mean(success_data), success_data
 
 def get_timeseries_from_trial(nwb_file: NWBFile, trial_index: int, timeseries_path: str, start_label: str = "start_time", stop_label: str = "stop_time") -> np.ndarray:
     """
@@ -261,3 +261,23 @@ def success_rate_zstruct(nwb_file: NWBFile) -> float:
         success_data = np.array(success_data)[mask]
     
     return np.mean(success_data), success_data
+
+def targets_per_second_zstruct(nwb_file: NWBFile) -> float:
+    """
+    Calculate the average number of targets per second.
+    
+    Parameters:
+    -----------
+    nwb_file : NWBFile
+        The NWB file containing trial data
+    
+    Returns:
+    --------
+    float
+        The average number of targets per second
+    """
+    trial_durations = nwb_file.trials['stop_time'][:] - nwb_file.trials['start_time'][:]
+    total_time = np.sum(trial_durations)
+    num_targets = len(nwb_file.trials)
+    
+    return num_targets / total_time if total_time > 0 else 0
