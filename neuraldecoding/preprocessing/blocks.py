@@ -8,6 +8,8 @@ from neuraldecoding.utils.data_tools import load_one_nwb
 from neuraldecoding.utils.training_utils import OutputScaler
 from neuraldecoding.preprocessing.onset_detection import MovementOnsetDetector
 import sklearn.preprocessing
+from neuraldecoding.model.neural_network_models import LSTM
+from hydra import initialize_config_dir, compose
 
 import torch
 
@@ -1782,3 +1784,60 @@ class ShiftPromptToOnsetBlock(TemplateBehaviorReplacementBlock):
 						shifted_kinematics[trial_end_idx+shift_amount:trial_end_idx, vel_idx] = kinematics[trial_end_idx-1, vel_idx]
 				
 		return shifted_kinematics
+
+class LSTMTemplateReplacementBlock(DataProcessingBlock):
+	"""
+	A block for replacing behavior data using a pre-trained LSTM (from a subset of electrodes, optional)
+	"""
+	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list = None, device='cuda', align_amplitudes=False):
+		super().__init__()
+		if isinstance(location_neural, str):
+			self.location_neural = [location_neural]
+		else:
+			self.location_neural = location_neural
+		
+		if isinstance(location_behavior, str):
+			self.location_behavior = [location_behavior]
+		else:
+			self.location_behavior = location_behavior
+		self.m_electrodes = m_electrodes
+		self.device = device
+
+		# Load model
+		with initialize_config_dir(version_base=None, config_dir=os.path.dirname(cfg_path)):
+			cfg = compose(config_name=os.path.basename(cfg_path))
+		self.model = LSTM(cfg.trainer.model.params)
+		self.model.load_model(model_path)
+
+		self.align_amplitudes = align_amplitudes
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by replacing the behavior data using a MiniModel from a subset of electrodes.
+		"""
+		for loc_neu, loc_beh in zip(self.location_neural, self.location_behavior):
+			# Get neural data, if not aligning amplitudes, should already be normalized
+			if self.m_electrodes is None:
+				neural_data = data[loc_neu]
+			else:
+				neural_data = data[loc_neu][:, self.m_electrodes] # Select subset of electrodes
+
+			# Align the amplitudes of the neural data, if desired. Incorporated originally to better match human and monkey EMG amplitude ranges.
+			if self.align_amplitudes:
+				minmax_scaler = sklearn.preprocessing.MinMaxScaler()
+				neural_data = minmax_scaler.fit_transform(neural_data)
+
+				# Standard scale the neural data
+				standard_scaler = sklearn.preprocessing.StandardScaler()
+				neural_data = standard_scaler.fit_transform(neural_data)
+
+			# Predict behavior using MiniModel
+			neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
+			predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
+			# Inverse transform predicted behavior
+			predicted_behavior = self.model.behavior_scaler.inverse_transform(predicted_behavior)
+			
+			# Update the behavior data in the data dictionary
+			data[loc_beh] = predicted_behavior
+		
+		return data, interpipe
