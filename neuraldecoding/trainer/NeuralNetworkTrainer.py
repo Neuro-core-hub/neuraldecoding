@@ -56,10 +56,16 @@ class NNTrainer(Trainer):
 
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
-        train_dataset = TensorDataset(self.data_dict["X_train"].detach().clone().to(torch.float32), 
-                                    self.data_dict["Y_train"].detach().clone().to(torch.float32))
-        valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
-                                    self.data_dict['Y_val'].detach().clone().to(torch.float32))
+        if (type(self.data_dict['X_train']) == torch.Tensor):
+            train_dataset = TensorDataset(self.data_dict["X_train"].detach().clone().to(torch.float32), 
+                                        self.data_dict["Y_train"].detach().clone().to(torch.float32))
+            valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
+                                        self.data_dict['Y_val'].detach().clone().to(torch.float32))
+        else:
+            train_dataset = TensorDataset(torch.from_numpy(self.data_dict["X_train"]).float(), 
+                                        torch.from_numpy(self.data_dict["Y_train"]).float())
+            valid_dataset = TensorDataset(torch.from_numpy(self.data_dict['X_val']).float(), 
+                                        torch.from_numpy(self.data_dict['Y_val']).float())
         train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
         if self.full_batch_valid:
             valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
@@ -205,7 +211,7 @@ class IterationNNTrainer(NNTrainer):
     Based on Joey's training code for LINK dataset BCI-decoding section.
     '''
     def __init__(self, preprocessor, config, dataset = None):
-        super().__init__(preprocessor, config, dataset = None)
+        super().__init__(preprocessor, config, dataset = dataset)
     
     def train_model(self, train_loader=None, valid_loader=None):
         # Override loaders if provided
@@ -240,15 +246,18 @@ class IterationNNTrainer(NNTrainer):
                         val_loss = self.loss_func(yhat_val, y_val)
                         total_loss += val_loss.item()
                         num_batches += 1
-                if self.print_results and (iteration % self.print_every == 0 or iteration == self.num_epochs - 1):
-                    print(f"Iteration {iteration}, Train Loss: {loss.item():.4f}, Val Loss: {(total_loss / num_batches):.4f}")
-
+                
                 # Scheduler step
                 if self.scheduler:
                     if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                         self.scheduler.step(val_loss)
                     else:
                         self.scheduler.step()
+
+                self.logger['loss']['train'].append(loss.item())
+                self.logger['loss']['valid'].append(total_loss / num_batches)
+
+                self.save_print_log(iteration, loss.item(), total_loss / num_batches)
                 iteration += 1
         return self.model, self.logger
 
