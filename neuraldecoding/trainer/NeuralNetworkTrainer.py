@@ -219,6 +219,12 @@ class IterationNNTrainer(NNTrainer):
             self.train_loader = train_loader
         if(valid_loader is not None):
             self.valid_loader = valid_loader
+
+        patience = self.cfg.training.get('patience', 200)
+        best_val_loss = float('inf')
+        best_model_state = None
+        no_improve_count = 0
+
         iteration = 0
 
         while iteration < self.num_epochs:
@@ -246,7 +252,23 @@ class IterationNNTrainer(NNTrainer):
                         val_loss = self.loss_func(yhat_val, y_val)
                         total_loss += val_loss.item()
                         num_batches += 1
-                
+
+                avg_val_loss = total_loss / num_batches
+
+                # --- Early stopping check --- #
+                if avg_val_loss < best_val_loss:                    # NEW
+                    best_val_loss = avg_val_loss                    # NEW
+                    best_model_state = {k: v.clone() for k, v in self.model.state_dict().items()}  # NEW
+                    no_improve_count = 0                            # NEW
+                else:                                               # NEW
+                    no_improve_count += 1                           # NEW
+                                                                    # NEW
+                if no_improve_count >= patience:                    # NEW
+                    print(f"Early stopping at iteration {iteration}, best val loss: {best_val_loss:.4f}")  # NEW
+                    self.model.load_state_dict(best_model_state)    # NEW
+                    return self.model, self.logger                  # NEW
+                # --- End early stopping check --- #
+
                 # Scheduler step
                 if self.scheduler:
                     if isinstance(self.scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
@@ -255,10 +277,12 @@ class IterationNNTrainer(NNTrainer):
                         self.scheduler.step()
 
                 self.logger['loss']['train'].append(loss.item())
-                self.logger['loss']['valid'].append(total_loss / num_batches)
+                self.logger['loss']['valid'].append(avg_val_loss)
 
-                self.save_print_log(iteration, loss.item(), total_loss / num_batches)
+                self.save_print_log(iteration, loss.item(), avg_val_loss)
                 iteration += 1
+        if best_model_state is not None:                            # NEW
+            self.model.load_state_dict(best_model_state)            # NEW
         return self.model, self.logger
 
 class TCFNNTrainer(NNTrainer):

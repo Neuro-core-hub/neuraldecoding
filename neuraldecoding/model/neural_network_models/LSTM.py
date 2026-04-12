@@ -157,14 +157,14 @@ class LSTM(nn.Module, NeuralNetworkModel):
         torch.save(checkpoint_dict, filepath)
 
 
-    def load_model(self, filepath):
+    def load_model(self, fpath=None, filepath=None, running_online=False):
         """
         Load model parameters from a specified location
 
         Parameters:
             filepath (path-like object) indicates the file path to load the model from
         """
-        
+        filepath = fpath or filepath
         checkpoint = torch.load(filepath)
 
         if checkpoint["model_type"] != "LSTM":
