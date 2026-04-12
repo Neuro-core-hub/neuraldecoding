@@ -75,6 +75,7 @@ class PCA(LoadingMatrixDimRed):
         # cumvar = np.cumsum(pca.explained_variance_ratio_)
         # print(f"Cum Var of PCA: {cumvar}")
         print(lm.shape)
+        self.save_dict = {'lm': lm, 'PCA': pca}
         return lm, None
     
     def reduce(self, data, lm, args = None):
