@@ -1,6 +1,5 @@
 import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
-from neuraldecoding.stabilization.latent_space_alignment import cycleGAN
 import neuraldecoding.dataaugmentation.DataAugmentation
 from neuraldecoding.dataaugmentation import SequenceScaler
 from neuraldecoding.feature_extraction import FeatureExtractor
@@ -22,7 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 from omegaconf import OmegaConf
-
+import os
 
 class PreprocessingBlock(ABC):
 	"""
@@ -1648,7 +1647,7 @@ class SmoothBlock(DataProcessingBlock):
 
 class CycleGanBlock(DataProcessingBlock):
 	"""
-	A block for quick testing cycle gan. it does all the shit like loading data and do smoothing
+	A block for quick testing cycle gan. it does all the stuff like loading data and do smoothing
 	TODO: terrible for a block design but useful for current timeframe to implement cycleGAN
 	"""
 
@@ -1660,7 +1659,9 @@ class CycleGanBlock(DataProcessingBlock):
 				verbose = False,
 				normalizer_path = None,
 				nested_pipeline_config = None,
-				is_xds = False
+				is_xds = False,
+				is_optimized = False,
+				checkpoint_save_dir = None  # new
 				):
 		"""
 		Initializes the CycleGanBlock.
@@ -1675,31 +1676,43 @@ class CycleGanBlock(DataProcessingBlock):
 		self.verbose = verbose
 		self.neural_type = neural_type
 		self.train_test_split = train_test_split
+		self.is_optimized = is_optimized
+		self.checkpoint_save_dir = checkpoint_save_dir
 		if normalizer_path is not None:
 			self.normalizer_path = normalizer_path
 		else:
 			self.normalizer_path = None
 
 		if nested_pipeline_config is not None:
-			self.preprocessor = Preprocessing(nested_pipeline_config) # its 21:00 and i am writing some real cursed shit
+			self.preprocessor = Preprocessing(nested_pipeline_config)
 		else:
 			self.preprocessor = None
 		self.is_xds = is_xds
 		
 
 	def transform(self, data, interpipe):
+		from neuraldecoding.stabilization.latent_space_alignment import cycleGAN, cycleGAN_optimized
 		if 'is_train' not in interpipe:
 			raise ValueError("CycleGANBlock requires 'is_train' in interpipe.")
 
 		if interpipe['is_train']:
+			print("Training CycleGAN..., it is optimized:" + self.is_optimized*'True' + (not self.is_optimized)*'False')
 			# load data
 			if not self.is_xds:
 				day0_data_dir = data['data_path']
-				cGAN = cycleGAN(day0_data_dir, self.verbose)
+				if(self.is_optimized):
+					print("Using optimized CycleGAN implementation.")
+					cGAN = cycleGAN_optimized(day0_data_dir, self.verbose)
+				else:
+					cGAN = cycleGAN(day0_data_dir, self.verbose)
 				cGAN.save_cycleGAN(self.fpath)
 			else:
 				day0_data_dir = 'placeholder'
-				cGAN = cycleGAN(day0_data_dir, self.verbose)
+				if(self.is_optimized):
+					print("Using optimized CycleGAN implementation.")
+					cGAN = cycleGAN_optimized(day0_data_dir, self.verbose)
+				else:
+					cGAN = cycleGAN(day0_data_dir, self.verbose)
 				cGAN.save_cycleGAN(self.fpath)
 			return data, interpipe
 		else:
@@ -1711,6 +1724,17 @@ class CycleGanBlock(DataProcessingBlock):
 				cGAN.load_process_data(data['data_path'], interpipe['decoder'], self.neural_type, self.preprocessor, self.normalizer_path, train_test_split=self.train_test_split)
 			cGAN.train_cycle_gan_aligner((OmegaConf.to_container(self.cycleGAN_params)))
 			cGAN.test_cycle_gan_aligner()
+			if self.checkpoint_save_dir is not None:
+				if self.is_xds and 'day_pair' in interpipe:
+					tag = f"{interpipe['day_pair'][0]}_{interpipe['day_pair'][1]}"
+				else:
+					day0day = os.path.basename(cGAN.day0_data_dir).split('_')[1].split('-')[1]
+					daykday = os.path.basename(cGAN.dayk_data_dir).split('_')[1].split('-')[1]
+					if(self.is_optimized):
+						tag = f"{day0day}_{daykday}"
+					else:
+						tag = f"{day0day}_{daykday}_nonoptimized"
+				cGAN.save_checkpoint(save_dir=self.checkpoint_save_dir, tag=tag)
 			data_out = {}
 			data_out['neural_train'] = cGAN.dayk_X_train
 			data_out['neural_test'] = cGAN.dayk_X_test_aligned
