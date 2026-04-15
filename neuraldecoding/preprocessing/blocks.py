@@ -1736,17 +1736,17 @@ class CycleGanBlock(DataProcessingBlock):
 						tag = f"{day0day}_{daykday}_nonoptimized"
 				cGAN.save_checkpoint(save_dir=self.checkpoint_save_dir, tag=tag)
 			data_out = {}
-			# data_out['neural_train'] = cGAN.dayk_X_train.copy()
-			# data_out['neural_test'] = cGAN.dayk_X_test_aligned.copy()
-			# data_out['behaviour_train'] = cGAN.dayk_Y_train.copy()
-			# data_out['behaviour_test'] = cGAN.dayk_Y_test.copy()
+			data_out['neural_train'] = cGAN.dayk_X_train.copy()
+			data_out['neural_test'] = cGAN.dayk_X_test_aligned.copy()
+			data_out['behaviour_train'] = cGAN.dayk_Y_train.copy()
+			data_out['behaviour_test'] = cGAN.dayk_Y_test.copy()
 
-			# del cGAN
-			# torch.cuda.empty_cache()
-			data_out['neural_train'] = cGAN.dayk_X_train
-			data_out['neural_test'] = cGAN.dayk_X_test_aligned
-			data_out['behaviour_train'] = cGAN.dayk_Y_train
-			data_out['behaviour_test'] = cGAN.dayk_Y_test
+			del cGAN
+			torch.cuda.empty_cache()
+			# data_out['neural_train'] = cGAN.dayk_X_train
+			# data_out['neural_test'] = cGAN.dayk_X_test_aligned
+			# data_out['behaviour_train'] = cGAN.dayk_Y_train
+			# data_out['behaviour_test'] = cGAN.dayk_Y_test
 			return data_out, interpipe
 		
 
