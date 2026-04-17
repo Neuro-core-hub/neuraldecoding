@@ -41,6 +41,21 @@ def get_timeseries_from_trial(nwb_file: NWBFile, trial_index: int, timeseries_pa
     stop_idx = np.searchsorted(timeseries.timestamps[:], stop_time)
     return timeseries.data[start_idx:stop_idx]
 
+def get_all_trial_info(nwb_file: NWBFile, continuous_path: str = 'acquisition.continuous', neural_path: str = 'acquisition.neural', start_label: str = "start_time", stop_label: str = "stop_time") -> list[dict]:
+    trial_info_list = []
+    for trial_index in range(len(nwb_file.trials)):
+        trial_info = {}
+        continuous_data = get_timeseries_from_trial(nwb_file, trial_index, continuous_path, start_label, stop_label)
+        neural_data = get_timeseries_from_trial(nwb_file, trial_index, neural_path, start_label, stop_label)
+        target = nwb_file.trials['targets'][trial_index]
+        target_radius = nwb_file.trials['target_radius'][trial_index]
+        trial_info['continuous_data'] = continuous_data
+        trial_info['neural_data'] = neural_data
+        trial_info['target'] = target
+        trial_info['target_radius'] = target_radius
+        trial_info_list.append(trial_info)
+    return trial_info_list
+
 def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "cue_time", trial_stop_label: str = "stop_time", target_label: str = "targets", target_radius_label: str = "target_radius", exclude_failed_trials: bool = True, exclude_intarget_trials: bool = True, pos_indices: list|np.ndarray|None = None) -> float:
     """
     Calculate the throughput/bitrate using the formula:
