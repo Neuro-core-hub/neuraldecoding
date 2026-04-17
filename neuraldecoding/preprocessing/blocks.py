@@ -795,6 +795,9 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		interpipe['bin_trial_end_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_end_times'])
 		interpipe['save_keys_ram'].append('bin_trial_start_idx')
 		interpipe['save_keys_ram'].append('bin_trial_end_idx')
+		if 'onsets' in interpipe:
+			interpipe['bin_onsets'] = np.searchsorted(bin_timestamps, interpipe['onsets'])
+			interpipe['save_keys_ram'].append('bin_onsets')
 		return data, interpipe
 
 	def transform_online(self, data, interpipe):
