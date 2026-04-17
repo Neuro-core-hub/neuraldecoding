@@ -22,11 +22,7 @@ def apply_modifications(nicknames, kinematics, interpipe, param_dict):
         elif mod == 'random_warp':
             kinematics = random_warp(kinematics, trial_filt, current_params['hold_time'], current_params['individuate_dofs'])
         elif mod == 'sigmoid_replacement':
-<<<<<<< HEAD
-            kinematics = replace_with_sigmoid(kinematics, trial_filt, targets, current_params['sigmoid_k'], current_params['center'])
-=======
             kinematics = replace_with_sigmoid(kinematics, trial_filt, targets, current_params['steepness'], current_params['onset_proportion'], current_params['binsize'])
->>>>>>> trial_info
         elif mod == 'bias_endpoints':
             kinematics = bias_endpoints(kinematics, trial_filt, current_params['bias_range'], current_params['individuate_dofs'])
         else:
@@ -504,11 +500,8 @@ def replace_with_sigmoid(
     prev_target = None
 
     for idx, trial in enumerate(unique_trials):
-<<<<<<< HEAD
-=======
         if np.isnan(trial):
             continue
->>>>>>> trial_info
         # Get mask for this trial
         trial_mask = trial_indices == trial
         first_idx = np.where(trial_mask)[0][0]
