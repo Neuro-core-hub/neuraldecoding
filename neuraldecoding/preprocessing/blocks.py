@@ -444,7 +444,29 @@ class Dataset2DictBlock(DataFormattingBlock):
 		interpipe[f"{self.data_keys[0]}_units"] = neural_units
 		interpipe[f"{self.data_keys[1]}_units"] = behaviour_units
 		return data_out, interpipe
+
+class BipolarReferenceBlock(DataFormattingBlock):
+	"""
+	A block for applying bipolar referencing to neural data.
+	"""
+	def __init__(self, location):
+		super().__init__()
+		self.location = location
 	
+	def transform(self, data, interpipe):
+		for loc in self.location:
+			if loc not in data:
+				raise ValueError(f"Location '{loc}' not found in data dictionary.")
+			if data[loc].shape[1] % 2 != 0:
+				raise ValueError(f"Data at location '{loc}' has an odd number of channels, cannot apply bipolar referencing.")
+
+			bipolar = data[loc][:, ::2] - data[loc][:, 1::2]
+			result = np.zeros_like(data[loc])
+			result[:, ::2] = bipolar
+			result[:, 1::2] = bipolar
+			data[loc] = result
+		return data, interpipe
+
 class IndexSelectorBlock(DataFormattingBlock):
 	"""
 	A block for selecting data from a dictionary based on indices.
