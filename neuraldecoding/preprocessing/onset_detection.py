@@ -228,10 +228,9 @@ class MovementOnsetDetector:
         Returns:
             np.ndarray - Array of indices in kinematics where movement onsets were detected
         """
-        ndofs = kinematics.shape[1] // 2
-        import pdb
-        abs_vel = np.abs(kinematics[:, ndofs:])
-        onset_indices = []
+        ndofs = kinematics.shape[1]
+        abs_vel = np.abs(kinematics)
+        onset_indices = np.full((0, ndofs), np.nan)
 
         unique_trial_nums = np.unique(trial_nums)
         unique_trial_nums = unique_trial_nums[~np.isnan(unique_trial_nums)]
@@ -248,10 +247,10 @@ class MovementOnsetDetector:
                 if len(threshold_indices) > 0:
                     # If threshold is crossed, get the first occurrence
                     # Add the first index of the trial to the onset indices
-                    onset_index.append(threshold_indices[0] + trial_start_idx)
+                    onset_index.append(trial_start_idx + threshold_indices[0])
                 else:
                     # If threshold is never crossed, append None
                     onset_index.append(np.nan)
-            onset_indices.append(onset_index)
+            onset_indices = np.vstack([onset_indices, onset_index])
 
         return np.array(onset_indices)

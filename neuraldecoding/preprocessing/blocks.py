@@ -1207,7 +1207,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 	"""
 	A block for detecting movement onset in the EMG data by thresholding kinematics. 
 	"""
-	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False):
+	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False, avg_across_dims: bool = False):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.vel_threshold = vel_threshold
@@ -1217,6 +1217,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		self.mask_key = mask_key
 
 		self.plot = plot
+		self.avg_across_dims = avg_across_dims
 
 	def transform(self, data, interpipe):
 		"""
@@ -1225,6 +1226,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		behavior = data[self.location_behavior]  # Extract velocity dimensions
 
 		D = behavior.shape[1] // 2  # Assuming behavior has position and velocity for D dimensions
+		Donsets = D
 		behavior = behavior[:, D:]  # Extract velocity dimensions
 
 		if self.mask_key is not None:
@@ -1236,6 +1238,9 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		onsets = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
 
 		# Add onsets to data dictionary
+		if self.avg_across_dims:
+			onsets = np.nanmean(onsets, axis=1, keepdims=True)  # Average across dimensions if specified
+			Donsets = 1
 		interpipe[self.onset_key] = onsets
 
 		if self.plot:
@@ -1244,16 +1249,13 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			ax.axhline(y=self.vel_threshold, color='gray', linestyle='--', alpha=0.8, linewidth=1.5, label='Velocity Threshold')
 			ax.axhline(y=-self.vel_threshold, color='gray', linestyle='--', alpha=0.8, linewidth=1.5, label='Velocity Threshold')
 			
-			pos_dim = behavior.shape[1] // 2
 			# Add vertical lines for onsets
 			for onset_time in onsets:
-				for dim in range(0, pos_dim):
+				for dim in range(0, Donsets):
 					time = onset_time[dim]
 					ax.axvline(x=time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time[0] == onsets[0,0] else "")
-			
-			pos_dim = behavior.shape[1] // 2
 
-			for dim in range(pos_dim, pos_dim*2):
+			for dim in range(0, D):
 				ax.plot(behavior[:, dim], alpha=0.7, linewidth=0.8, label='Pos Dim {dim - pos_dim}')
 
 			ax.set_xlabel('Time (bin)')
@@ -1263,7 +1265,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			ax.legend()
 			plt.tight_layout()
 			plt.show(block=True)
-
+				
 		return data, interpipe
 class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 	"""
@@ -1987,65 +1989,6 @@ class WaveletDenoiseBlock(DataProcessingBlock):
 			data[loc] = denoised_data
 		return data, interpipe
 	
-class LSTMTemplateReplacementBlock(DataProcessingBlock):
-	"""
-	A block for replacing behavior data using a pre-trained LSTM (from a subset of electrodes, optional)
-	"""
-	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list = None, device='cuda', align_amplitudes=False):
-		super().__init__()
-		if isinstance(location_neural, str):
-			self.location_neural = [location_neural]
-		else:
-			self.location_neural = location_neural
-		
-		if isinstance(location_behavior, str):
-			self.location_behavior = [location_behavior]
-		else:
-			self.location_behavior = location_behavior
-		self.m_electrodes = m_electrodes
-		self.device = device
-
-		# Load model
-		with initialize_config_dir(version_base=None, config_dir=os.path.dirname(cfg_path)):
-			cfg = compose(config_name=os.path.basename(cfg_path))
-		self.model = LSTM(cfg.model.params)
-		self.model.load_model(model_path)
-
-		self.align_amplitudes = align_amplitudes
-	
-	def transform(self, data, interpipe):
-		"""
-		Transform the data by replacing the behavior data using a MiniModel from a subset of electrodes.
-		"""
-		for loc_neu, loc_beh in zip(self.location_neural, self.location_behavior):
-			# Get neural data, if not aligning amplitudes, should already be normalized
-			if self.m_electrodes is None:
-				neural_data = data[loc_neu]
-			else:
-				neural_data = data[loc_neu][:, self.m_electrodes] # Select subset of electrodes
-
-			# Align the amplitudes of the neural data, if desired. Incorporated originally to better match human and monkey EMG amplitude ranges.
-			if self.align_amplitudes:
-				minmax_scaler = sklearn.preprocessing.MinMaxScaler()
-				neural_data = minmax_scaler.fit_transform(neural_data)
-
-				# Standard scale the neural data
-				standard_scaler = sklearn.preprocessing.StandardScaler()
-				neural_data = standard_scaler.fit_transform(neural_data)
-
-			# Predict behavior using MiniModel
-			neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
-			predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
-			# Inverse transform predicted behavior
-			predicted_behavior = self.model.behavior_scaler.inverse_transform(predicted_behavior)
-			
-			# Update the behavior data in the data dictionary
-			data[loc_beh] = predicted_behavior
-		
-		return data, interpipe
-	
-	
-
 class ShiftPromptToOnsetBlock(TemplateBehaviorReplacementBlock):
 	"""
 	A block for shifting the prompt to target from the trial start to the movement onset. Compatible with monkey data but is truly meant for human data.

@@ -265,9 +265,9 @@ class LSTMTrialInput_RankDist(LSTMTrialInput):
         # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
         if torch.isnan(x[0, 0, 0]):
             x = x[:, :, self.leadup:]
-            yhat = self.forward(x[:, :, :trial_length], remove_leadup=False)
+            yhat = self.forward(x[:, :, :trial_length], return_all_tsteps=True, remove_leadup=False)
         else:
-            yhat = self.forward(x[:, :, :self.leadup + trial_length], remove_leadup=True)
+            yhat = self.forward(x[:, :, :self.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
         yhat = yhat.permute(0, 2, 1)
 
         with torch.no_grad():

@@ -448,9 +448,9 @@ class LSTMRankDistTrainer(LSTMTrainer):
                 # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
                 if torch.isnan(x[0, 0, 0]):
                     x = x[:, :, self.model.leadup:]
-                    yhat = self.model.forward(x[:, :, :trial_length], remove_leadup=False)
+                    yhat = self.model.forward(x[:, :, :trial_length], return_all_tsteps=True, remove_leadup=False)
                 else:
-                    yhat = self.model.forward(x[:, :, :self.model.leadup + trial_length], remove_leadup=True)
+                    yhat = self.model.forward(x[:, :, :self.model.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
                 yhat = yhat.permute(0, 2, 1)
                 
                 # TODO: make loss function ignore nans to enable batch processing
@@ -471,7 +471,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
             # val_loss += self.loss_func.lambda_kl * kl_loss + self.loss_func.lambda_bound * bound_loss
             # print("Validation KL loss:", kl_loss.cpu().detach().numpy(), "Bound loss:", bound_loss.cpu().detach().numpy())
         
-        val_all_predictions = self.model.forward(self.x_full_val.to(self.device), remove_leadup=False).detach().cpu().numpy()
+        val_all_predictions = self.model.forward(self.x_full_val.to(self.device), return_all_tsteps=True, remove_leadup=False).detach().cpu().numpy()
         val_all_targets = self.y_full_val.detach().cpu().numpy()
 
         return val_loss, val_all_predictions, val_all_targets
@@ -480,7 +480,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
         # After training, compute behavior scaler via MinMax on output of model with input x_full_train
         self.model.eval()
         with torch.no_grad():
-            train_predictions = self.model.forward(self.x_full_train.to(self.device), remove_leadup=False).detach().cpu().numpy()
+            train_predictions = self.model.forward(self.x_full_train.to(self.device), return_all_tsteps=True, remove_leadup=False).detach().cpu().numpy()
 
         from sklearn.preprocessing import MinMaxScaler
         behavior_scaler_internal = MinMaxScaler()

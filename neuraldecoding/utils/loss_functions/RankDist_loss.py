@@ -179,7 +179,8 @@ class RankDistLoss:
                 valid_pairs += 1
                 
                 # Flatness loss after onset
-                flat_loss += torch.var(postonset[self.transition_time:])  # encourage flat predictions after onset
+                if postonset.numel() > self.transition_time:
+                    flat_loss += torch.var(postonset[self.transition_time:])  # encourage flat predictions after onset
 
         if valid_pairs == 0:
             return None, None
