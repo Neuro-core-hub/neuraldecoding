@@ -384,3 +384,23 @@ def success_rate_zstruct(nwb_file: NWBFile) -> float:
         success_data = success_data[mask]
     
     return np.mean(success_data), success_data
+
+def targets_per_second_zstruct(nwb_file: NWBFile) -> float:
+    """
+    Calculate the average number of targets per second.
+    
+    Parameters:
+    -----------
+    nwb_file : NWBFile
+        The NWB file containing trial data
+    
+    Returns:
+    --------
+    float
+        The average number of targets per second
+    """
+    trial_durations = nwb_file.trials['stop_time'][:] - nwb_file.trials['start_time'][:]
+    total_time = np.sum(trial_durations)
+    num_targets = len(nwb_file.trials)
+    
+    return num_targets / total_time if total_time > 0 else 0
