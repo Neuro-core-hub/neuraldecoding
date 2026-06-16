@@ -1,4 +1,4 @@
-from .LSTM import LSTM, LSTMTrialInput, LSTMTrialInput_RankDist
+from .LSTM import LSTM, LSTMTrialInput, LSTMTrialInput_Rank
 from .RNN import RecurrentModel
 from .tcFNN import TCN
 import warnings

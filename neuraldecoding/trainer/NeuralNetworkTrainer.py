@@ -296,7 +296,7 @@ class LSTMTrainer(NNTrainer):
 
         return val_loss, yhat_val.detach().cpu().numpy(), y_val.detach().cpu().numpy()
 
-class LSTMRankDistTrainer(LSTMTrainer):
+class LSTMRankTrainer(LSTMTrainer):
     def __init__(self, preprocessor, config, dataset = None):
         super().__init__(preprocessor, config, dataset)
     
@@ -347,7 +347,7 @@ class LSTMRankDistTrainer(LSTMTrainer):
                 self.model.train()
                 self.optimizer.zero_grad()
 
-                loss, yhat = self.model.train_step(x.to(self.device), self.x_full_train.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -436,8 +436,8 @@ class LSTMRankDistTrainer(LSTMTrainer):
 
         with torch.no_grad():
             val_loss = 0.0
-            rank_loss_total = 0.0
-            flat_loss_total = 0.0
+            val_all_predictions = []
+            val_all_targets = []
             for trial in self.valid_loader:
                 x = trial['neu']
                 y = trial['kin']
@@ -454,25 +454,19 @@ class LSTMRankDistTrainer(LSTMTrainer):
                 yhat = yhat.permute(0, 2, 1)
                 
                 # TODO: make loss function ignore nans to enable batch processing
-                rank_loss, flat_loss = self.loss_func.rank_flat_loss_only(yhat, directions, onsets)
-                if rank_loss is None:
+                loss = self.loss_func(yhat, directions, onsets)
+                if loss is None:
                     continue
                 
-                rank_loss_total += rank_loss.item() 
-                flat_loss_total += flat_loss.item()
-                loss = rank_loss + self.loss_func.lambda_flat * flat_loss
                 val_loss += loss.item()
 
-            print("Validation Rank loss:", rank_loss_total, "Flat loss:", flat_loss_total)
-            
-            # predictions_full = self.model.forward(self.x_full_val, remove_leadup=False)
+                yhat_np = np.squeeze(yhat.cpu().numpy().T)
+                y_np = np.squeeze(y.cpu().numpy().T)
+                val_all_predictions.append(yhat_np)
+                val_all_targets.append(y_np[:trial_length, :])
 
-            # kl_loss, bound_loss = self.loss_func.dist_loss_only(predictions_full)
-            # val_loss += self.loss_func.lambda_kl * kl_loss + self.loss_func.lambda_bound * bound_loss
-            # print("Validation KL loss:", kl_loss.cpu().detach().numpy(), "Bound loss:", bound_loss.cpu().detach().numpy())
-        
-        val_all_predictions = self.model.forward(self.x_full_val.to(self.device), return_all_tsteps=True, remove_leadup=False).detach().cpu().numpy()
-        val_all_targets = self.y_full_val.detach().cpu().numpy()
+        val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+        val_all_targets = np.concatenate(val_all_targets, axis=0)
 
         return val_loss, val_all_predictions, val_all_targets
     

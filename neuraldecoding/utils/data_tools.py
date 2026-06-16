@@ -450,3 +450,24 @@ def obtain_trial_idx(bin_start_timestamp_ms: List[float], trial_starts: List[flo
     bin_start_timestamp_ms = np.array(bin_start_timestamp_ms)
     trial_idx = np.searchsorted(trial_starts, bin_start_timestamp_ms)
     return trial_idx
+
+def seq2seq_output_format(data, future_len=1, past_len=0):
+    """
+    Convert data to seq2seq format for RNN decoders.
+    data is of shape (n_samples, n_outs)
+    the output is of shape (n_samples, n_outs*(past_len + future_len))
+    For example, if past = 2 and future = 3, first num_outs correspond to t-2, the next num_outs correspond to t-1,
+        the next num_outs correspond to t (current timestep), 
+        the next num_outs correspond to t+1, and the last num_outs correspond to t+2.
+    """
+    n_samples, n_outs = data.shape
+    seq_len = past_len + future_len
+
+    seq_data = np.zeros((n_samples, n_outs * seq_len))
+    for i in range(n_samples):
+        idxs = []
+        for j in range(i - past_len, i + future_len):
+            idxs.append(min(max(j, 0), n_samples - 1))
+        seq_data[i] = data[idxs].reshape(-1)
+
+    return seq_data

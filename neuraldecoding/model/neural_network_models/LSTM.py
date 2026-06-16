@@ -247,7 +247,7 @@ class LSTMTrialInput(LSTM):
         else:
             return loss, yhat
 
-class LSTMTrialInput_RankDist(LSTMTrialInput):
+class LSTMTrialInput_Rank(LSTMTrialInput):
     def __init__(self, model_params):
         """
         Initializes a LSTM with trial input support
@@ -255,9 +255,9 @@ class LSTMTrialInput_RankDist(LSTMTrialInput):
         Args:
             model_params:                dict containing the same parameters as LSTM
         """
-        super(LSTMTrialInput_RankDist, self).__init__(model_params)
+        super(LSTMTrialInput_Rank, self).__init__(model_params)
         
-    def train_step(self, x, x_full, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False): 
+    def train_step(self, x, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False): 
         """
         Trains LSTM Model
         """
@@ -269,12 +269,9 @@ class LSTMTrialInput_RankDist(LSTMTrialInput):
         else:
             yhat = self.forward(x[:, :, :self.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
         yhat = yhat.permute(0, 2, 1)
-
-        with torch.no_grad():
-            predictions_full = self.forward(x_full, remove_leadup=False)
         
         # TODO: make loss function ignore nans to enable batch processing
-        loss = loss_func(yhat, predictions_full, directions, onsets)
+        loss = loss_func(yhat, directions, onsets, print_components=False)
         # print(loss)
         if loss is None:
             optimizer.zero_grad(set_to_none=True)

@@ -693,6 +693,33 @@ class TrialHistoryBlock(DataProcessingBlock):
 		data[self.location_targets_output] = targets
 		return data, interpipe
 
+class Seq2SeqOutputBlock(DataProcessingBlock):
+	"""
+	A block to edit label formatting for sequence-to-sequence models.
+	"""
+	def __init__(self, location, future = 1, past = 0):
+		"""
+		Initializes the Seq2SeqHistoryBlock.
+		Args:
+			future (int): The number of future bins to include in the history. Default is 1 (i.e. include the current bin)
+			past (int): The number of past bins to include in the history. Default is 0.
+		"""
+		super().__init__()
+		self.location = location
+		self.future = future
+		self.past = past
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the training data by adding history for sequence-to-sequence models.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		"""
+		for loc in self.location:
+			data[loc] = neuraldecoding.utils.seq2seq_output_format(data[loc], self.future, self.past)
+		return data, interpipe
+
 class NormalizationBlock(DataProcessingBlock):
 	def __init__(self, location, method, normalizer_params):
 		super().__init__()	
