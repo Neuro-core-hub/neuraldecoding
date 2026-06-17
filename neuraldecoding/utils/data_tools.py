@@ -342,8 +342,8 @@ def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None, 
 
     for idx, trial in enumerate(unique_trials):
         mask = trial == trial_ts
+        first_nonzero_idx = mask.nonzero()[0][0]
         if onsets is not None:
-            first_nonzero_idx = mask.nonzero()[0][0]
             onsets[idx] = onsets[idx] - first_nonzero_idx + pretrial # onset relative to trial start
 
         if pretrial > first_nonzero_idx:
@@ -351,7 +351,6 @@ def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None, 
             continue
         else:
             mask[first_nonzero_idx-pretrial:first_nonzero_idx] = 1
-            start = 0
             
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]

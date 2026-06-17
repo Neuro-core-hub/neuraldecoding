@@ -637,11 +637,12 @@ class TrialHistoryBlock(DataProcessingBlock):
 	A block to add history but have each sequence be the length of an entire trial, plus padding and leadup.
 	Uses 'add_trial_history' to add history.
 	"""
-	def __init__(self, set = 'train', leadup = 20, onset_location = 'onset_indices', direction_location = 'movement_directions', targets_location = 'targets', save_2d = False):
+	def __init__(self, set = 'train', leadup = 20, pretrial = 0, onset_location = 'onset_indices', direction_location = 'movement_directions', targets_location = 'targets', save_2d = False):
 		"""
 		Initializes the TrialHistoryBlock.
 		Args:
 			leadup (int): The length of the history to be added before the first bin of each trial. Default is 20.
+			pretrial (int): The number of bins to include before the trial start in the trial history. Default is 0.
 		"""
 		super().__init__()
 		self.set = set
@@ -653,6 +654,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 		self.location_targets_output = f'targets_{set}'
 		self.mask = f'mask_{set}'
 		self.leadup = leadup
+		self.pretrial = pretrial
 		self.onset_location = onset_location
 		self.direction_location = direction_location
 		self.targets_location = targets_location
@@ -685,7 +687,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data[f'{self.location_behavior}_2d'] = data[self.location_behavior].copy()
 		
 		data[self.location_neural], data[self.location_behavior], trial_lengths, directions, targets, onsets = \
-			neuraldecoding.utils.add_trial_history(data[self.location_neural], data[self.location_behavior], trial_per_bin, self.leadup, directions, targets, onsets=onsets)
+			neuraldecoding.utils.add_trial_history(data[self.location_neural], data[self.location_behavior], trial_per_bin, self.leadup, directions, targets, onsets=onsets, pretrial=self.pretrial)
 		data[self.location_trial_lengths] = trial_lengths
 		if onsets is not None:
 			data[self.location_onsets_output] = onsets
@@ -693,6 +695,41 @@ class TrialHistoryBlock(DataProcessingBlock):
 		data[self.location_targets_output] = targets
 		return data, interpipe
 
+class ShiftOnsetsBlock(DataProcessingBlock):
+	"""
+	A block to shift onsets by a specified number of bins. Used to predict future or past behavior relative to the current neural data bin with rank loss. 
+	"""
+	def __init__(self, location_onsets, shift_bins):
+		"""
+		Initializes the ShiftOnsetsBlock.
+		Args:
+			location_onsets (str): The key in the interpipe dictionary where the onsets are located.
+			shift_bins (int): The number of bins to shift the onsets. Positive values shift onsets later, negative values shift onsets earlier.
+		"""
+		super().__init__()
+		self.location_onsets = location_onsets
+		self.shift_bins = shift_bins
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by shifting the onsets by the specified number of bins.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary remains unchanged.
+			interpipe (dict): The interpipe dictionary with shifted onsets at the specified location.
+		"""
+		if self.location_onsets not in interpipe:
+			raise ValueError(f"Onset location '{self.location_onsets}' not found in interpipe dictionary.")
+		
+		onsets = interpipe[self.location_onsets]
+		onsets_shifted = onsets + self.shift_bins
+		onsets_shifted[onsets_shifted < 0] = 0 # Ensure no negative indices
+		onsets_shifted[onsets_shifted >= len(interpipe['trial_idx'])] = len(interpipe['trial_idx']) - 1 # Ensure no indices beyond data length
+		interpipe[self.location_onsets] = onsets_shifted
+		return data, interpipe
+	
 class Seq2SeqOutputBlock(DataProcessingBlock):
 	"""
 	A block to edit label formatting for sequence-to-sequence models.
