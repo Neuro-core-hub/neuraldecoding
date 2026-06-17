@@ -453,12 +453,17 @@ class LSTMRankTrainer(LSTMTrainer):
                     yhat = self.model.forward(x[:, :, :self.model.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
                 yhat = yhat.permute(0, 2, 1)
                 
-                # TODO: make loss function ignore nans to enable batch processing
-                loss = self.loss_func(yhat, directions, onsets)
-                if loss is None:
-                    continue
+                cum_loss = torch.tensor(0.0, device=yhat.device)
+                for i in range(0, self.model.past + self.model.future):
+                    idx = np.arange(i*self.model.n_dofs, (i+1)*self.model.n_dofs)
+                    subset = yhat[:, idx, :]
+                    onsets_cur = onsets + self.model.past - i  # shift onsets according to how far in the future we're looking
+                    loss = self.loss_func(subset, directions, onsets_cur)
+                    if loss is None:
+                        continue
+                    cum_loss += loss
                 
-                val_loss += loss.item()
+                val_loss += cum_loss.item()
 
                 yhat_np = np.squeeze(yhat.cpu().numpy().T)
                 y_np = np.squeeze(y.cpu().numpy().T)
@@ -477,6 +482,8 @@ class LSTMRankTrainer(LSTMTrainer):
             train_predictions = self.model.forward(self.x_full_train.to(self.device), return_all_tsteps=True, remove_leadup=False).detach().cpu().numpy()
 
         from sklearn.preprocessing import MinMaxScaler
+        idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
+        train_predictions = train_predictions[:, idx]
         behavior_scaler_internal = MinMaxScaler()
         behavior_scaler_internal.fit(train_predictions)
 

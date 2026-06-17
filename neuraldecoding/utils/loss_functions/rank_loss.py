@@ -26,7 +26,7 @@ class RankLoss:
         """
         Compute only the rank loss + flatness loss component.
         
-        :param self: RankDistLoss instance
+        :param self: Rank loss instance
         :param predictions_batch: predictions for the batch, shape [batch_size, N, D]
         :param directions: directions for each dof for the particular trial, shape [batch_size, D], 1 for positive (flex), -1 for negative (extend)
         :param onsets: onset indices for each dof in the batch, shape [batch_size, D]
@@ -46,6 +46,9 @@ class RankLoss:
                 cur_predictions = predictions_batch[i, dof, :]
                 direction = directions[i, dof]
 
+                if onset < 0 or onset >= N:
+                    continue
+                
                 preonset = cur_predictions[:onset]
                 postonset = cur_predictions[onset:]
 

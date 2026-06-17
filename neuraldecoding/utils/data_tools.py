@@ -308,7 +308,7 @@ def add_history(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
 
-def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
+def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None, pretrial=0):
     # TODO: add device
     X_temp = torch.tensor(x)
     Y_temp = torch.tensor(y)
@@ -337,14 +337,22 @@ def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
 
-    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
-    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
+    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + pretrial + leadup), float('nan'))
+    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length + pretrial), float('nan'))
 
     for idx, trial in enumerate(unique_trials):
         mask = trial == trial_ts
         if onsets is not None:
             first_nonzero_idx = mask.nonzero()[0][0]
-            onsets[idx] = onsets[idx] - first_nonzero_idx # onset relative to trial start
+            onsets[idx] = onsets[idx] - first_nonzero_idx + pretrial # onset relative to trial start
+
+        if pretrial > first_nonzero_idx:
+            warnings.warn(f"Pretrial length {pretrial} exceeds available pretrial data for trial {trial}. Leaving trial as NaN.")
+            continue
+        else:
+            mask[first_nonzero_idx-pretrial:first_nonzero_idx] = 1
+            start = 0
+            
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]
         if first_nonzero_idx < leadup:
@@ -354,6 +362,7 @@ def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
         else:
             mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
             X[idx,:,:np.count_nonzero(mask)] = X_temp[mask,:].T
+
 
     return X, Y, trial_lengths, directions, targets, onsets
 
@@ -456,9 +465,9 @@ def seq2seq_output_format(data, future_len=1, past_len=0):
     Convert data to seq2seq format for RNN decoders.
     data is of shape (n_samples, n_outs)
     the output is of shape (n_samples, n_outs*(past_len + future_len))
-    For example, if past = 2 and future = 3, first num_outs correspond to t-2, the next num_outs correspond to t-1,
-        the next num_outs correspond to t (current timestep), 
-        the next num_outs correspond to t+1, and the last num_outs correspond to t+2.
+    For example, if past = 2 and future = 3, first n_dofs cols correspond to t-2, the next n_dofs cols correspond to t-1,
+        the next n_dofs cols correspond to t (current timestep), 
+        the next n_dofs cols correspond to t+1, and the last num_outs correspond to t+2.
     """
     n_samples, n_outs = data.shape
     seq_len = past_len + future_len

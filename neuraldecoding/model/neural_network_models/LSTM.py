@@ -256,6 +256,11 @@ class LSTMTrialInput_Rank(LSTMTrialInput):
             model_params:                dict containing the same parameters as LSTM
         """
         super(LSTMTrialInput_Rank, self).__init__(model_params)
+
+        # Optional Seq2Seq support
+        self.future = model_params.get("future", 1)
+        self.past = model_params.get("past", 0)
+        self.n_dofs = model_params.get("n_dofs", 2)
         
     def train_step(self, x, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False): 
         """
@@ -270,14 +275,18 @@ class LSTMTrialInput_Rank(LSTMTrialInput):
             yhat = self.forward(x[:, :, :self.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
         yhat = yhat.permute(0, 2, 1)
         
-        # TODO: make loss function ignore nans to enable batch processing
-        loss = loss_func(yhat, directions, onsets, print_components=False)
-        # print(loss)
-        if loss is None:
-            optimizer.zero_grad(set_to_none=True)
-            return torch.tensor(0.0), yhat
+        cum_loss = torch.tensor(0.0, device=x.device)
+        for i in range(0, self.past + self.future):
+            idx = np.arange(i*self.n_dofs, (i+1)*self.n_dofs)
+            subset = yhat[:, idx, :]
+            onsets_cur = onsets + self.past - i  # shift onsets according to how far in the future we're looking
+            loss = loss_func(subset, directions, onsets_cur)
+            if loss is None:
+                # This can happen if all onsets are outside the range of the trial for this subset, so this trial doesn't contribute to the loss
+                return torch.tensor(0.0), yhat
+            cum_loss += loss
         
-        loss.backward()
+        cum_loss.backward()
         optimizer.step()
         if(clear_cache):
             del x
