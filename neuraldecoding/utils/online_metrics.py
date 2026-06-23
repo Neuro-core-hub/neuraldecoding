@@ -41,6 +41,21 @@ def get_timeseries_from_trial(nwb_file: NWBFile, trial_index: int, timeseries_pa
     stop_idx = np.searchsorted(timeseries.timestamps[:], stop_time)
     return timeseries.data[start_idx:stop_idx]
 
+def get_all_trial_info(nwb_file: NWBFile, continuous_path: str = 'acquisition.continuous', neural_path: str = 'acquisition.neural', start_label: str = "start_time", stop_label: str = "stop_time") -> list[dict]:
+    trial_info_list = []
+    for trial_index in range(len(nwb_file.trials)):
+        trial_info = {}
+        continuous_data = get_timeseries_from_trial(nwb_file, trial_index, continuous_path, start_label, stop_label)
+        neural_data = get_timeseries_from_trial(nwb_file, trial_index, neural_path, start_label, stop_label)
+        target = nwb_file.trials['targets'][trial_index]
+        target_radius = nwb_file.trials['target_radius'][trial_index]
+        trial_info['continuous_data'] = continuous_data
+        trial_info['neural_data'] = neural_data
+        trial_info['target'] = target
+        trial_info['target_radius'] = target_radius
+        trial_info_list.append(trial_info)
+    return trial_info_list
+
 def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "cue_time", trial_stop_label: str = "stop_time", target_label: str = "targets", target_radius_label: str = "target_radius", exclude_failed_trials: bool = True, exclude_intarget_trials: bool = True, pos_indices: list|np.ndarray|None = None) -> float:
     """
     Calculate the throughput/bitrate using the formula:
@@ -230,6 +245,114 @@ def bitrate_zstruct(nwb_file: NWBFile, exclude_failed_trials = True, exclude_int
         trial_throughputs.append(trial_throughput)
     
     # Return throughputs for all trials
+    # Return throughputs for all trials
+    return trial_throughputs
+
+def bitrate_zstruct(nwb_file: NWBFile, exclude_failed_trials = True, exclude_intarget_trials = True, pos_indices = [1,3], feature = 1) -> float:
+    """
+    Calculate the throughput/bitrate using the formula:
+    Throughput = Σₖ log₂(1 + (Dₖ-S)/2S) / t_acq
+    
+    Where:
+    - Dₖ is the distance between initial value and target for dimension k
+    - S is the target radius
+    - t_acq is the total trial time
+    
+    Parameters:
+    -----------
+    nwb_file : NWBFile
+        The NWB file containing trial data
+    
+    exclude_failed_trials : bool, optional
+        Whether to exclude failed trials from the calculation (default: True)
+    
+    exclude_intarget_trials : bool, optional
+        Whether to exclude trials where the initial value is within the target radius from the target (default: True)
+    
+    pos_indices : list, optional
+        List of indices in timeseries to use for the position data (default: [1,3], 2dof)
+    
+    feature : int, optional
+        The feature index to use from the timeseries TCFR (0) or SBP (default: 1)
+    Returns:
+    --------
+    float
+        The average throughput across all trials
+    """
+    trial_throughputs = []
+    
+    prev_trial_decode_off = True
+
+    for trial_index in range(len(nwb_file.trials)):
+        
+        # Skip blank trials and trials where decoding was off
+        if nwb_file.trials['BlankTrial'][trial_index] or not nwb_file.trials['ClosedLoop'][trial_index] or nwb_file.trials['DecodeConfig'][trial_index][0] == 0:
+            trial_throughputs.append(np.nan)
+            if not nwb_file.trials['ClosedLoop'][trial_index] or nwb_file.trials['DecodeConfig'][trial_index][0] == 0:
+                prev_trial_decode_off = True
+            continue
+        
+        # If the previous trial had decoding off, skip this trial. Not doing this results in potentially inflated bitrates.
+        if prev_trial_decode_off:
+            prev_trial_decode_off = False
+            trial_throughputs.append(np.nan)
+            continue
+
+        trial_start_time = nwb_file.trials['start_time'][trial_index]
+        trial_stop_time = nwb_file.trials['stop_time'][trial_index]
+        trial_duration = trial_stop_time - trial_start_time - nwb_file.trials['TargetHoldTime'][trial_index]/1000
+        target = nwb_file.trials['TargetPos'][trial_index]
+        target_scaling = nwb_file.trials['TargetScaling'][trial_index]
+        target_radius = .0375*(1+target_scaling/100)
+        if exclude_failed_trials:
+            if not nwb_file.trials['TrialSuccess'][trial_index]:
+                trial_throughputs.append(np.nan)
+                continue
+        timeseries = get_timeseries_from_trial(nwb_file, trial_index, "processing.behavior.decode")
+        # Get initial value of the timeseries
+        # Add extra index if ndim ==1
+        if timeseries.ndim == 1:
+            timeseries = timeseries[: , None]
+        if pos_indices is not None:
+            if feature == 0:
+                # TCFR
+                timeseries = timeseries[:, pos_indices]
+            else:
+                # SBP
+                timeseries = timeseries[:, np.array(pos_indices)+5]
+            target = target[pos_indices]
+        initial_value = timeseries[0, :]
+        if exclude_intarget_trials:
+            if np.all(np.abs(initial_value - target) <= target_radius):
+                trial_throughputs.append(np.nan)
+                continue
+        
+        # Calculate Dₖ for each dimension k (distance between initial value and target)
+        distances = np.abs(initial_value - target)  # Dₖ
+        
+        # Calculate the sum: Σₖ log₂(1 + (Dₖ-S)/2S)
+        # Handle potential division by zero or negative arguments to log
+        log_terms = []
+        for d_k in distances:
+            dk_minus_s = d_k - target_radius if d_k - target_radius > 0 else 0
+            argument = 1 + dk_minus_s / (2 * target_radius)
+            if argument > 0:
+                log_terms.append(np.log2(argument))
+            else:
+                # If argument <= 0, use a small positive value to avoid log(0) or log(negative)
+                log_terms.append(np.log2(1e-10))
+        
+        sum_log_terms = np.sum(log_terms)
+        
+        # Calculate throughput for this trial: Σₖ log₂(1 + (Dₖ-S)/2S) / t_acq
+        trial_throughput = sum_log_terms / trial_duration
+
+        if trial_throughput < 0: # Encountering a weird edge case, seems like the trial skipped even though he was out
+            continue
+
+        trial_throughputs.append(trial_throughput)
+    
+    # Return throughputs for all trials
     return trial_throughputs
 
 def success_rate_zstruct(nwb_file: NWBFile) -> float:
@@ -258,26 +381,6 @@ def success_rate_zstruct(nwb_file: NWBFile) -> float:
         # Create a mask to exclude specified trials
         mask = np.ones(len(success_data), dtype=bool)
         mask[exclude_trials] = False
-        success_data = np.array(success_data)[mask]
+        success_data = success_data[mask]
     
     return np.mean(success_data), success_data
-
-def targets_per_second_zstruct(nwb_file: NWBFile) -> float:
-    """
-    Calculate the average number of targets per second.
-    
-    Parameters:
-    -----------
-    nwb_file : NWBFile
-        The NWB file containing trial data
-    
-    Returns:
-    --------
-    float
-        The average number of targets per second
-    """
-    trial_durations = nwb_file.trials['stop_time'][:] - nwb_file.trials['start_time'][:]
-    total_time = np.sum(trial_durations)
-    num_targets = len(nwb_file.trials)
-    
-    return num_targets / total_time if total_time > 0 else 0

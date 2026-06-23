@@ -214,13 +214,13 @@ class MovementOnsetDetector:
         self,
         kinematics: np.ndarray,
         trial_nums: np.ndarray,
-        vel_threshold: float = 0.005,
+        vel_threshold: float = 0.01,
     ) -> np.ndarray:
         """
         Detect the onset of a movement based directly on the kinematics.
 
         Args:
-            kinematics: np.ndarray - velocity data with shape (n_samples, n_dofs)
+            kinematics: np.ndarray - Kinematics data with shape (n_samples, n_features)
             trial_nums: np.ndarray - Trial numbers corresponding to each sample in kinematics
             times: np.ndarray - Timestamps corresponding to each sample in kinematics
             vel_threshold: float - Velocity threshold to consider as movement onset (default: 0.01)

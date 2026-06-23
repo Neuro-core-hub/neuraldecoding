@@ -7,7 +7,11 @@ from neuraldecoding.utils.utils_general import resolve_path
 from neuraldecoding.utils.data_tools import load_one_nwb
 from neuraldecoding.utils.training_utils import OutputScaler
 from neuraldecoding.preprocessing.onset_detection import MovementOnsetDetector
+from neuraldecoding.utils.eval_metrics import softdtw
+from neuraldecoding.model.neural_network_models import LSTM
+from hydra import initialize_config_dir, compose
 import sklearn.preprocessing
+import pywt
 from neuraldecoding.model.neural_network_models import LSTM
 from hydra import initialize_config_dir, compose
 
@@ -411,7 +415,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets', 'movement_directions': 'movement_directions'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
@@ -455,11 +459,14 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_start_times = trial_start_times[self.skip_first_n_trials:]
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
 		targets = np.array(targets[self.skip_first_n_trials:])
+		movement_directions = np.concatenate((np.zeros_like(targets[0:1]), np.sign(np.diff(targets, axis=0))), axis=0)
 
 		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
 		interpipe[self.interpipe_keys['trial_start_times']] = trial_start_times
 		interpipe[self.interpipe_keys['trial_end_times']] = trial_end_times
-		interpipe[self.interpipe_keys['targets']] = targets[:]
+		interpipe[self.interpipe_keys['targets']] = targets
+		interpipe['save_keys_ram'].append(self.interpipe_keys['targets'])
+		interpipe[self.interpipe_keys['movement_directions']] = movement_directions
 		interpipe[f'{self.data_keys[0]}_ts'] = neural_ts
 		interpipe[f'{self.data_keys[1]}_ts'] = behaviour_ts
 		interpipe[f"{self.data_keys[0]}_units"] = neural_units
@@ -685,14 +692,26 @@ class TrialHistoryBlock(DataProcessingBlock):
 	A block to add history but have each sequence be the length of an entire trial, plus padding and leadup.
 	Uses 'add_trial_history' to add history.
 	"""
-	def __init__(self, leadup = 20):
+	def __init__(self, set = 'train', leadup = 20, onset_location = 'onset_indices', direction_location = 'movement_directions', targets_location = 'targets', save_2d = False):
 		"""
 		Initializes the TrialHistoryBlock.
 		Args:
 			leadup (int): The length of the history to be added before the first bin of each trial. Default is 20.
 		"""
+		super().__init__()
 		self.set = set
+		self.location_neural = f'neural_{set}'
+		self.location_behavior = f'behavior_{set}'
+		self.location_trial_lengths = f'trial_lengths_{set}'
+		self.location_onsets_output = f'onsets_{set}'
+		self.location_directions_output = f'directions_{set}'
+		self.location_targets_output = f'targets_{set}'
+		self.mask = f'mask_{set}'
 		self.leadup = leadup
+		self.onset_location = onset_location
+		self.direction_location = direction_location
+		self.targets_location = targets_location
+		self.save_2d = save_2d
 
 	def transform(self, data, interpipe):
 		"""
@@ -704,11 +723,29 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data (dict): The data dictionary with history added at the specified locations.
 			interpipe (dict): The interpipe dictionary remains unchanged.
 		"""
-		trial_per_bin_train = interpipe['bin_trial_idx'][interpipe['mask_train']]
-		data['neural_train'], data['behavior_train'], trial_lengths_train = \
-			neuraldecoding.utils.add_trial_history(data['neural_train'], data['behavior_train'], trial_per_bin_train, self.leadup)
-		data['trial_lengths_train'] = trial_lengths_train
-		interpipe['leadup'] = self.leadup
+		trial_per_bin = interpipe['bin_trial_idx'][interpipe[self.mask]]
+		global_first_idx = int(interpipe[self.mask][0])
+		if self.onset_location not in interpipe:
+			onsets = None
+			Warning(f'onset location {self.onset_location} not found in interpipe. Not splitting onsets by trial.')
+		else:
+			onsets = interpipe[self.onset_location]
+			onsets = onsets - global_first_idx # zero the onsets to match the data being used
+		
+		directions = interpipe[self.direction_location]
+		targets = interpipe[self.targets_location]
+
+		if self.save_2d:
+			data[f'{self.location_neural}_2d'] = data[self.location_neural].copy()
+			data[f'{self.location_behavior}_2d'] = data[self.location_behavior].copy()
+		
+		data[self.location_neural], data[self.location_behavior], trial_lengths, directions, targets, onsets = \
+			neuraldecoding.utils.add_trial_history(data[self.location_neural], data[self.location_behavior], trial_per_bin, self.leadup, directions, targets, onsets=onsets)
+		data[self.location_trial_lengths] = trial_lengths
+		if onsets is not None:
+			data[self.location_onsets_output] = onsets
+		data[self.location_directions_output] = directions
+		data[self.location_targets_output] = targets
 		return data, interpipe
 
 class AppendOnesBlock(DataProcessingBlock):
@@ -866,6 +903,9 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		interpipe['bin_trial_end_idx'] = np.searchsorted(bin_timestamps, interpipe['trial_end_times'])
 		interpipe['save_keys_ram'].append('bin_trial_start_idx')
 		interpipe['save_keys_ram'].append('bin_trial_end_idx')
+		if 'onsets' in interpipe:
+			interpipe['bin_onsets'] = np.searchsorted(bin_timestamps, interpipe['onsets'])
+			interpipe['save_keys_ram'].append('bin_onsets')
 		return data, interpipe
 
 	def transform_online(self, data, interpipe):
@@ -1016,6 +1056,7 @@ class LabelModificationBlock(DataProcessingBlock):
 		return data, interpipe
 
 class SaveDataBlock(DataProcessingBlock):
+	
 	def __init__(self, save_path, exclude_data_keys = [], exclude_interpipe_keys = []):
 		super().__init__()
 		self.save_path = save_path
@@ -1201,35 +1242,35 @@ class MovementOnsetDetectionBlock(DataProcessingBlock):
 
 		# Add onsets to data dictionary
 		interpipe[self.output_key] = onsets
-		if self.plot:
-			# Plot all channels together with onset markers
-			n_channels = emg.shape[1]
-			fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-			
-			# Plot all EMG channels
-			for ch in range(n_channels):
-				ax.plot(times, emg[:, ch], alpha=0.7, linewidth=0.8, label=f'Channel {ch}')
-			
-			# Add vertical lines for onsets
-			for onset_time in onsets:
-				if onset_time is not None and not np.isnan(onset_time):
-					ax.axvline(x=onset_time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time == onsets[0] else "")
-			
-			# Add trial boundaries for context
-			for i, start_time in enumerate(trial_start_times):
-				ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.5, linewidth=1.5, 
-						label='Trial Start' if i == 0 else "")
-			for i, end_time in enumerate(trial_end_times):
-				ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.5, linewidth=1.5, 
-						label='Trial End' if i == 0 else "")
-			
-			ax.set_xlabel('Time (ms)')
-			ax.set_ylabel('EMG Amplitude')
-			ax.set_title('EMG Channels with Movement Onsets')
-			ax.grid(True, alpha=0.3)
-			ax.legend()
-			plt.tight_layout()
-			plt.show(block=True)
+
+		# Plot all channels together with onset markers
+		n_channels = emg.shape[1]
+		fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+		
+		# Plot all EMG channels
+		for ch in range(n_channels):
+			ax.plot(times, emg[:, ch], alpha=0.7, linewidth=0.8, label=f'Channel {ch}')
+		
+		# Add vertical lines for onsets
+		for onset_time in onsets:
+			if onset_time is not None and not np.isnan(onset_time):
+				ax.axvline(x=onset_time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time == onsets[0] else "")
+		
+		# Add trial boundaries for context
+		for i, start_time in enumerate(trial_start_times):
+			ax.axvline(x=start_time, color='green', linestyle=':', alpha=0.5, linewidth=1.5, 
+					  label='Trial Start' if i == 0 else "")
+		for i, end_time in enumerate(trial_end_times):
+			ax.axvline(x=end_time, color='orange', linestyle=':', alpha=0.5, linewidth=1.5, 
+					  label='Trial End' if i == 0 else "")
+		
+		ax.set_xlabel('Time (ms)')
+		ax.set_ylabel('EMG Amplitude')
+		ax.set_title('EMG Channels with Movement Onsets')
+		ax.grid(True, alpha=0.3)
+		ax.legend()
+		plt.tight_layout()
+		plt.show(block=True)
 
 		return data, interpipe
 
@@ -1237,7 +1278,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 	"""
 	A block for detecting movement onset in the EMG data by thresholding kinematics. 
 	"""
-	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False):
+	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False, avg_across_dims: bool = False):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.vel_threshold = vel_threshold
@@ -1247,6 +1288,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		self.mask_key = mask_key
 
 		self.plot = plot
+		self.avg_across_dims = avg_across_dims
 
 	def transform(self, data, interpipe):
 		"""
@@ -1255,6 +1297,7 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		behavior = data[self.location_behavior]  # Extract velocity dimensions
 
 		D = behavior.shape[1] // 2  # Assuming behavior has position and velocity for D dimensions
+		Donsets = D
 		behavior = behavior[:, D:]  # Extract velocity dimensions
 
 		if self.mask_key is not None:
@@ -1266,6 +1309,9 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 		onsets = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
 
 		# Add onsets to data dictionary
+		if self.avg_across_dims:
+			onsets = np.nanmean(onsets, axis=1, keepdims=True)  # Average across dimensions if specified
+			Donsets = 1
 		interpipe[self.onset_key] = onsets
 
 		if self.plot:
@@ -1274,16 +1320,13 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			ax.axhline(y=self.vel_threshold, color='gray', linestyle='--', alpha=0.8, linewidth=1.5, label='Velocity Threshold')
 			ax.axhline(y=-self.vel_threshold, color='gray', linestyle='--', alpha=0.8, linewidth=1.5, label='Velocity Threshold')
 			
-			pos_dim = behavior.shape[1] // 2
 			# Add vertical lines for onsets
 			for onset_time in onsets:
-				for dim in range(0, pos_dim):
+				for dim in range(0, Donsets):
 					time = onset_time[dim]
 					ax.axvline(x=time, color='red', linestyle='--', alpha=0.8, linewidth=2, label='Onset' if onset_time[0] == onsets[0,0] else "")
-			
-			pos_dim = behavior.shape[1] // 2
 
-			for dim in range(pos_dim, pos_dim*2):
+			for dim in range(0, D):
 				ax.plot(behavior[:, dim], alpha=0.7, linewidth=0.8, label='Pos Dim {dim - pos_dim}')
 
 			ax.set_xlabel('Time (bin)')
@@ -1293,9 +1336,8 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			ax.legend()
 			plt.tight_layout()
 			plt.show(block=True)
-
+				
 		return data, interpipe
-	
 class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing the behavior data with a template behavior.
@@ -1327,7 +1369,8 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		# Get onsets from interpipe
 		movement_onsets = interpipe[self.location_onsets]
-		
+		movement_onsets = np.nanmean(movement_onsets, axis=1) if movement_onsets.ndim > 1 else movement_onsets
+
 		# Get trial timing information from interpipe
 		trial_start_times = interpipe['trial_start_times']
 		trial_end_times = interpipe['trial_end_times']
@@ -1787,7 +1830,236 @@ class NoiseAdditionBlock(DataProcessingBlock):
 		data[self.location_behavior] = data[self.location_behavior].repeat(self.iterations + 1, 1, 1)
 		return data, interpipe
 	
+class MonkeyEMGLibraryGeneratorBlock(DataProcessingBlock):
+	"""
+	A block for saving wavelet-denoised EMG power for a set of trials to be used in EMG-matching to human data.
+	"""
+	def __init__(self, location_neural: str, location_behavior: str, save_path: str):
+		"""
+		Initializes the MonkeyEMGLibraryGeneratorBlock.
+		Args:
+			location (str): Key for the EMG data array in the data dictionary.
+			save_path (str): Path to save the denoised EMG library.
+		"""
+		super().__init__()
+		self.location_neural = location_neural
+		self.location_behavior = location_behavior
+		self.save_path = save_path
 
+	def transform(self, data, interpipe):
+		"""
+		Save the wavelet-denoised EMG power for a set of trials to be used in EMG-matching to human data.
+		Library is in the format of a 3D numpy array with shape (n_trials, n_channels, max_trial_length).
+		Data for pipeline is left unchanged.
+		"""
+		coeffs = pywt.wavedec(data[self.location_neural], 'db4', level=4, axis=0)
+		zero_detail = [coeffs[0], coeffs[1], coeffs[2]] + [np.zeros_like(c) for c in coeffs[3:]]
+		reconstructed = pywt.waverec(zero_detail, 'db4', axis=0)
+		
+		# DWT with db4 might have added extra samples, so truncate back to original length
+		original_len = data[self.location_neural].shape[0]
+		if reconstructed.shape[0] > original_len:
+			reconstructed = reconstructed[:original_len]
+
+		# Normalize reconstructed per channel
+		scaler = sklearn.preprocessing.MinMaxScaler()
+		reconstructed = scaler.fit_transform(reconstructed)
+
+		unique_trials, trial_lengths = np.unique(interpipe['bin_trial_idx'], return_counts=True)
+		zscored_lengths = (trial_lengths - np.mean(trial_lengths)) / np.std(trial_lengths)
+		irregular_trials = np.where(np.abs(zscored_lengths) > 2)[0]
+		unique_trials = np.delete(unique_trials, irregular_trials)
+		trial_lengths = np.delete(trial_lengths, irregular_trials)
+		max_length = np.max(trial_lengths)
+		num_trials = unique_trials.shape[0]
+		X = np.full((num_trials, reconstructed.shape[1], max_length), float('nan'))
+		Y = np.full((num_trials, data[self.location_behavior].shape[1], max_length), float('nan'))
+
+		for idx, trial in enumerate(unique_trials):
+			mask = trial == interpipe['bin_trial_idx']
+			trial_data = reconstructed[mask, :]
+			trial_len = trial_data.shape[0]
+			if trial_len == 0:
+				continue
+			if trial_len != max_length:
+				x_old = np.linspace(0, 1, trial_len)
+				x_new = np.linspace(0, 1, max_length)
+				trial_data_interp = np.empty((max_length, trial_data.shape[1]))
+				for ch in range(trial_data.shape[1]):
+					trial_data_interp[:, ch] = np.interp(x_new, x_old, trial_data[:, ch])
+				trial_data = trial_data_interp
+			X[idx, :, :] = trial_data.T
+			trial_behavior = data[self.location_behavior][mask, :]
+			Y[idx, :, :trial_len] = trial_behavior.T
+		
+		data_to_save = {'neural': X, 'behavior': Y}
+		with open(os.path.join(self.save_path), 'wb') as f:
+			pickle.dump(data_to_save, f)
+
+		return data, interpipe
+	
+class MonkeyEMGTemplateReplacementBlock(DataProcessingBlock):
+	"""
+	A block for replacing the EMG data with a template EMG from a pre-saved library.
+	"""
+	def __init__(self, location_neural: str, location_behavior: str, library_path: str, chans_lib: list = None, chans_data: list = None, mask_key: str = None):
+		super().__init__()
+		self.location_neural = location_neural
+		self.location_behavior = location_behavior
+		self.library_path = library_path
+		assert len(chans_lib) == len(chans_data), "chans_lib and chans_data must have the same length"
+		self.chans_lib = chans_lib
+		self.chans_data = chans_data
+		self.mask_key = mask_key
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by replacing the EMG data with a template EMG from a pre-saved library.
+		"""
+		# Load library
+		with open(self.library_path, 'rb') as f:
+			library = pickle.load(f)
+		library_neural = library['neural']
+		library_behavior = library['behavior']
+
+		# Select channels
+		library_neural = library_neural[:, self.chans_lib, :]
+
+		if self.mask_key is not None:
+			mask = interpipe[self.mask_key]
+			bin_trial_idx = interpipe['bin_trial_idx'][mask]
+		else:
+			bin_trial_idx = interpipe['bin_trial_idx']
+
+		# Get trial indices
+		unique_trials, trial_lengths = np.unique(bin_trial_idx, return_counts=True)
+		zscored_lengths = (trial_lengths - np.mean(trial_lengths)) / np.std(trial_lengths)
+		irregular_trials = np.where(np.abs(zscored_lengths) > 3)[0]
+		unique_trials = np.delete(unique_trials, irregular_trials)
+		trial_lengths = np.delete(trial_lengths, irregular_trials)
+		max_length = np.max(trial_lengths)
+
+		library_neural = np.array([np.interp(
+			np.linspace(0, 1, max_length),
+			np.linspace(0, 1, library_neural.shape[2]),
+			library_neural[i, j, :])
+			for i in range(library_neural.shape[0])
+			for j in range(library_neural.shape[1])
+		]).reshape(library_neural.shape[0], library_neural.shape[1], max_length)
+		
+			
+		coeffs = pywt.wavedec(data[self.location_neural], 'db4', level=4, axis=0)
+		zero_detail = [coeffs[0], coeffs[1], coeffs[2]] + [np.zeros_like(c) for c in coeffs[3:]]
+		denoised_neural = pywt.waverec(zero_detail, 'db4', axis=0)
+		scaler = sklearn.preprocessing.MinMaxScaler()
+		denoised_neural = scaler.fit_transform(denoised_neural)
+
+		# DWT with db4 might have added extra samples, so truncate back to original length
+		original_len = data[self.location_neural].shape[0]
+		if denoised_neural.shape[0] > original_len:
+			denoised_neural = denoised_neural[:original_len]
+
+		# Select channels from data
+		denoised_neural = denoised_neural[:, self.chans_data]
+
+		losses = []
+		new_behavior = data[self.location_behavior].copy()
+		for idx, trial in enumerate(unique_trials):
+			mask = trial == bin_trial_idx
+			trial_data = denoised_neural[mask, :]
+			trial_len = trial_data.shape[0]
+			if trial_len == 0:
+				continue
+			if trial_len != max_length:
+				x_old = np.linspace(0, 1, trial_len)
+				x_new = np.linspace(0, 1, max_length)
+				trial_data_interp = np.empty((max_length, trial_data.shape[1]))
+				for ch in range(trial_data.shape[1]):
+					trial_data_interp[:, ch] = np.interp(x_new, x_old, trial_data[:, ch])
+				trial_data = trial_data_interp # Shape (time, channels)
+			
+			min_loss = float('inf')
+			best_match_idx = -1
+			for lib_idx in range(library_neural.shape[0]):
+				lib_trial = library_neural[lib_idx, :, :].T # Shape (time, channels)
+				loss = softdtw(trial_data, lib_trial, params={'per_dof': False, 'gamma': 0.001, 'device':'cpu'})
+				if loss < min_loss:
+					min_loss = loss
+					best_match_idx = lib_idx
+			
+			losses.append(min_loss)
+			
+
+			# Replace behavior with best matching library behavior
+			best_behavior = library_behavior[best_match_idx, :, :].T # Shape (time, channels)
+			# Find last valid (non-nan) index along time axis
+			if np.isnan(best_behavior).any():
+				# Find the first nan along the time axis (axis=0)
+				nan_mask = np.isnan(best_behavior).any(axis=1)
+				nan_indices = np.where(nan_mask)[0]
+				if nan_indices.size > 0:
+					first_nan = nan_indices[0]
+				else:
+					first_nan = best_behavior.shape[0]
+			else:
+				# No nan found, use max_length - 1
+				first_nan = best_behavior.shape[0]
+			best_behavior = best_behavior[:first_nan, :]
+			best_behavior_interp = np.zeros((trial_len, best_behavior.shape[1]))
+
+			for ch in range(best_behavior.shape[1]):
+				if best_behavior.shape[0] < trial_len:
+					# Interpolate to match trial length
+					x_old = np.linspace(0, 1, best_behavior.shape[0])
+					x_new = np.linspace(0, 1, trial_len)
+					best_behavior_interp[:, ch] = np.interp(x_new, x_old, best_behavior[:, ch])
+				elif best_behavior.shape[0] > trial_len:
+					best_behavior_interp = best_behavior[:trial_len, :]
+
+			new_behavior[mask, :] = best_behavior_interp
+
+		data[self.location_behavior] = new_behavior
+
+		return data, interpipe
+
+class WaveletDenoiseBlock(DataProcessingBlock):
+	"""
+	A block for denoising data using the db4 wavelet.
+	"""
+	def __init__(self, location, detail_level: int = 3):
+		"""
+		Initializes the WaveletDenoiseBlock.
+		Args:
+			location (str or list): Key(s) for the data array(s) in the data dictionary.
+			detail_level (int): Level of detail coefficients at and below to zero out (1-4).
+		"""
+		super().__init__()
+		if isinstance(location, str):
+			self.location = [location]
+		else:
+			self.location = location
+		assert (detail_level >= 1) and (detail_level <= 4), "detail_level must be between 1 and 4"
+		self.detail_level = detail_level
+
+	def transform(self, data, interpipe):
+		"""
+		Apply wavelet denoising to the specified data array(s).
+		"""
+		for loc in self.location:
+			coeffs = pywt.wavedec(data[loc], 'db4', level=4, axis=0)
+			# Zero out detail coefficients up to the specified level
+			for i in range(1, self.detail_level + 1):
+				index = 4 - i + 1
+				coeffs[index] = np.zeros_like(coeffs[index])
+			# Reconstruct the denoised signal
+			denoised_data = pywt.waverec(coeffs, 'db4', axis=0)
+			# DWT with db4 might have added extra samples, so truncate back to original length
+			original_len = data[loc].shape[0]
+			if denoised_data.shape[0] > original_len:
+				denoised_data = denoised_data[:original_len]
+			data[loc] = denoised_data
+		return data, interpipe
+	
 class ShiftPromptToOnsetBlock(TemplateBehaviorReplacementBlock):
 	"""
 	A block for shifting the prompt to target from the trial start to the movement onset. Compatible with monkey data but is truly meant for human data.

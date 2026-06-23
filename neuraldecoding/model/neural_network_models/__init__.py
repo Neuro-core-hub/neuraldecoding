@@ -1,4 +1,4 @@
-from .LSTM import LSTM, LSTMTrialInput
+from .LSTM import LSTM, LSTMTrialInput, LSTMTrialInput_RankDist
 from .RNN import RecurrentModel
 from .tcFNN import TCN, TCNTrialInput
 from .Adaline import Adaline, AdalineTrialInput
