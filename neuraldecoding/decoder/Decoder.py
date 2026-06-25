@@ -162,7 +162,47 @@ class RNNDecoder(Decoder):
             prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
 
         return prediction
-    
+
+class NNDecoder3D(Decoder):
+    def __init__(self, cfg: DictConfig) -> None:
+        super().__init__(cfg)
+        self.input_shape = cfg.model.params.input_size
+        self.seq_length = cfg.seq_length
+        self.input_hist = torch.zeros((1, self.input_shape, self.seq_length), dtype=torch.float32)
+    def predict(self, input):
+        if self.model.neural_scaler is not None:
+            input = torch.tensor(self.model.neural_scaler.transform(input), dtype=torch.float32)
+        else:
+            input = torch.tensor(input, dtype=torch.float32)
+
+        self.input_hist = torch.cat((self.input_hist[:, :, 1:], input.unsqueeze(2)), dim=2)
+
+        with torch.no_grad():
+            prediction = self.model(self.input_hist.to(self.device))
+        
+        if self.model.behavior_scaler is not None:
+            prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
+
+        return prediction
+
+class NNDecoder2D(Decoder):
+    def __init__(self, cfg: DictConfig) -> None:
+        super().__init__(cfg)
+    def predict(self, input):
+        if self.model.neural_scaler is not None:
+            input = torch.tensor(self.model.neural_scaler.transform(input), dtype=torch.float32)
+        else:
+            input = torch.tensor(input, dtype=torch.float32)
+
+        with torch.no_grad():
+            input = input.to(self.device)
+            prediction = self.model(input)
+        
+        if self.model.behavior_scaler is not None:
+            prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
+
+        return prediction
+
 class DummyDecoder(Decoder):
     def __init__(self, cfg: DictConfig) -> None:
         super().__init__(cfg)
