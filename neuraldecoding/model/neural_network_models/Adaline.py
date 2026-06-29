@@ -33,7 +33,7 @@ class Adaline(nn.Module, NeuralNetworkModel):
 
     def forward(self, x):
         """
-        x:                  Neural data tensor of shape (batch_size, num_inputs, history)
+        x:                  Neural data tensor of shape (num_inputs*history, num_outputs)
         """
         
         out = self.linear(x)

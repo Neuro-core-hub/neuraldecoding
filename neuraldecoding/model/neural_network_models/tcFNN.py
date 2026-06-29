@@ -58,7 +58,7 @@ class TCN(nn.Module, NeuralNetworkModel):
 
         # middle layers
         for layer in self.hiddenlayers:
-            x = F.relu( layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
+            x = F.relu(layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
 
         # output 
         if self.denormalize:
