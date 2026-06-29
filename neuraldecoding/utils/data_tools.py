@@ -386,6 +386,26 @@ def add_history_numpy(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1.numpy()
 
+
+def add_full_history(neural_data):
+    """
+    Add full history to the neural data.
+    neural_data is of shape (n_samples, n_channels)
+    the output is of shape (n_samples, n_samples, n_channels)
+    """
+    Xtrain1 = torch.full((int(neural_data.shape[0]), int(neural_data.shape[1]), int(neural_data.shape[0])), float('nan'))
+    if not isinstance(neural_data, np.ndarray):
+        neural_data = neural_data.numpy()
+    Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
+    for k in range(1, neural_data.shape[0]):
+        Xtrain1[k:, :, k] = torch.from_numpy(neural_data[0:-k, :])
+
+    # for RNNs, we want the last timestep to be the most recent data
+    Xtrain1 = torch.flip(Xtrain1, (2,))
+
+    #  (n_samples, n_channels, n_samples)
+    return Xtrain1.numpy()
+
 def prep_data_and_split(data_dict, seq_len, num_train_trials, stabilization=None):
     trial_index = data_dict['trial_index']
     if len(trial_index) > num_train_trials:

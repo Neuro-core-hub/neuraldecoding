@@ -38,6 +38,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
         self.hidden_noise_std = params.get("hidden_noise_std", 0.0)
         self.dropout_input = params.get("dropout_input", False)
         self.drop_prob = params.get("drop_prob", 0.0)
+        self.full_history = params.get("full_history", False)
 
         # Define LSTM layer
         self.rnn = nn.LSTM(
@@ -93,7 +94,7 @@ class LSTM(nn.Module, NeuralNetworkModel):
             out = self.fc(out)  # out now has shape (batch_size, seq_len, num_outs) like (64, 20, 2)
         else:
             if x.dim() == 2:  # unbatched input
-                out = self.fc(out[-1])  # shape: (hidden_size,) -> (num_outputs,)
+                out = self.fc(out)  # shape: (seq_len, num_outs) like (1500, 2)
             else:  # batched input
                 out = self.fc(out[:, -1]) # out now has shape (batch_size, num_outs) like (64, 2)
         if return_h:
@@ -292,3 +293,89 @@ class LSTMTrialInput_Rank(LSTMTrialInput):
             del x
 
         return loss, yhat
+    
+class LSTMFullHistory_Trialized(LSTM):
+    def __init__(self, model_params):
+        """
+        Initializes a LSTM with full history support
+
+        Args:
+            model_params:                dict containing the same parameters as LSTM
+        """
+        super(LSTMFullHistory_Trialized, self).__init__(model_params)   
+    
+    def train_step(self, x, y, trial_starts, trial_ends, optimizer, loss_func, clear_cache = False, return_y = False):
+        """
+        Trains LSTM Model
+
+        x: 2D tensor of shape (seq_len, num_inputs) and y is a 2D tensor of shape (seq_len, num_outputs)
+        otherdata: dict containing other data (and only other data and in the proper order) that may be needed for the loss function, must have trial boundaries, may have onsets etc.
+        optimizer: optimizer to use for training
+        loss_func: loss function to use for training
+        clear_cache: whether to clear the cache after training step
+        return_y: whether to return the predictions and targets after training step
+        """
+        yhat = self.forward(x, return_all_tsteps=True) # x is a 2d tensor of shape (seq_len, num_inputs) and y is a 2d tensor of shape (seq_len, num_outputs)
+
+        cum_loss = torch.tensor(0.0, device=x.device)
+        for start, end in zip(trial_starts, trial_ends):
+            subset_yhat = yhat[start:end, :]
+            subset_y = y[start:end, :]
+            loss = loss_func(subset_yhat, subset_y)
+            cum_loss += loss
+        
+        cum_loss.backward()
+        optimizer.step()
+
+        if(clear_cache):
+            del x, y
+        
+        if return_y:
+            return cum_loss, yhat, y
+        else:
+            return cum_loss, yhat
+
+class LSTMFullHistory_Rank(LSTMTrialInput_Rank):
+    def __init__(self, model_params):
+        """
+        Initializes a LSTM with full history support
+
+        Args:
+            model_params:                dict containing the same parameters as LSTM
+        """
+        super(LSTMFullHistory_Rank, self).__init__(model_params)
+
+    def train_step(self, x, trial_starts, trial_ends, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False):
+        """
+        Trains LSTM Model
+
+        x: 2D tensor of shape (seq_len, num_inputs) and y is a 2D tensor of shape (seq_len, num_outputs)
+        otherdata: dict containing other data (and only other data and in the proper order) that may be needed for the loss function, must have trial boundaries, may have onsets etc.
+        optimizer: optimizer to use for training
+        loss_func: loss function to use for training
+        clear_cache: whether to clear the cache after training step
+        return_y: whether to return the predictions and targets after training step
+        """
+        yhat = self.forward(x, return_all_tsteps=True) # x is a 2d tensor of shape (seq_len, num_inputs) and y is a 2d tensor of shape (seq_len, num_outputs)
+
+        cum_loss = torch.tensor(0.0, device=x.device)
+        for i, start, end in zip(range(len(trial_starts)), trial_starts, trial_ends):
+            subset_yhat = yhat[start:end, :]
+            subset_directions = directions[start+1, :] # TrialToBinsBlock will have directions at start+1 idx
+            subset_onsets = onsets[start+1, :] # TrialToBinsBlock will have onsets at start+1 idx
+            loss = loss_func(subset_yhat, subset_directions, subset_onsets)
+            if loss is None:
+                # This can happen if all onsets are outside the range of the trial for this subset, so this trial doesn't contribute to the loss
+                continue
+            cum_loss += loss
+        
+        cum_loss.backward()
+        optimizer.step()
+
+        if(clear_cache):
+            del x
+        
+        return cum_loss, yhat
+
+
+        

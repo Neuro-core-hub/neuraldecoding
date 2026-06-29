@@ -147,16 +147,23 @@ class RNNDecoder(Decoder):
         self.input_shape = cfg.model.params.input_size
         self.seq_length = cfg.seq_length
         self.input_hist = torch.zeros((1, self.input_shape, self.seq_length), dtype=torch.float32)
+        self.use_prev_hidden = cfg.model.params.get("use_prev_hidden", False)
+        self.h = (torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device),
+                    torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device))
+
     def predict(self, input):
         if self.model.neural_scaler is not None:
             input = torch.tensor(self.model.neural_scaler.transform(input), dtype=torch.float32)
         else:
             input = torch.tensor(input, dtype=torch.float32)
 
-        self.input_hist = torch.cat((self.input_hist[:, :, 1:], input.unsqueeze(2)), dim=2)
-
-        with torch.no_grad():
-            prediction = self.model(self.input_hist.to(self.device))
+        if self.use_prev_hidden:
+            with torch.no_grad():
+                prediction, self.h = self.model(input.unsqueeze(2).to(self.device), self.h, return_h=True)
+        else:
+            self.input_hist = torch.cat((self.input_hist[:, :, 1:], input.unsqueeze(2)), dim=2)
+            with torch.no_grad():
+                prediction = self.model(self.input_hist.to(self.device))
         
         if self.model.behavior_scaler is not None:
             prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
