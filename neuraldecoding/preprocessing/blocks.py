@@ -245,7 +245,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, location = ['neural', 'behavior'], interpipe_location = ['trial_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, split_trials = False, location = ['neural', 'behavior'], interpipe_location = ['bin_trial_start_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -265,11 +265,13 @@ class DataSplitBlock(DataFormattingBlock):
 		self.location = location
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
+		self.split_trials = split_trials
 		self.interpipe_location = interpipe_location
 		self.data_keys = data_keys
 		self.shuffle = shuffle
 		self.masks_suffix = masks_suffix
 		self.val_run = val_run
+
 	def transform(self, data, interpipe):
 		"""
 		Transform the data by splitting it into training and testing sets based on trial indices.
@@ -291,19 +293,38 @@ class DataSplitBlock(DataFormattingBlock):
 		"""
 		
 		trial_idxs = interpipe.get(self.interpipe_location[0], None)
+		if not self.split_trials:
+			trial_idxs = None
+
 		if trial_idxs is None:
 			import warnings
 			warnings.warn(f"DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock). Falling back to direct split.")
 
-		split_data, masks = neuraldecoding.utils.data_split_trial(data[self.location[0]], 
-														   data[self.location[1]], 
-														   trial_idx=trial_idxs, 
-														   split_ratio=self.split_ratio, 
-														   seed=self.split_seed,
-														   shuffle=self.shuffle,
-														   return_masks=True,
-														   dataset_ratio=interpipe['dataset_ratio'] if 'dataset_ratio' in interpipe else 1,
-														   val_run=self.val_run)
+		if self.split_trials:
+			split_data, masks, train_trial_indices = neuraldecoding.utils.data_split_trial_splice(data[self.location[0]], 
+															data[self.location[1]], 
+															trial_idx=trial_idxs, 
+															split_ratio=self.split_ratio, 
+															seed=self.split_seed,
+															shuffle=self.shuffle,
+															return_masks=True,
+															dataset_ratio=interpipe['dataset_ratio'] if 'dataset_ratio' in interpipe else 1,
+															val_run=self.val_run)
+			interpipe['train_bin_trial_start_idx'] = interpipe['bin_trial_start_idx'][train_trial_indices]
+			interpipe['train_bin_trial_end_idx'] = interpipe['bin_trial_end_idx'][train_trial_indices]
+
+			interpipe['save_keys_ram'].append('train_bin_trial_start_idx')
+			interpipe['save_keys_ram'].append('train_bin_trial_end_idx')
+		else:
+			split_data, masks = neuraldecoding.utils.data_split_trial(data[self.location[0]], 
+															data[self.location[1]], 
+															trial_idx=trial_idxs, 
+															split_ratio=self.split_ratio, 
+															seed=self.split_seed,
+															shuffle=self.shuffle,
+															return_masks=True,
+															dataset_ratio=interpipe['dataset_ratio'] if 'dataset_ratio' in interpipe else 1,
+															val_run=self.val_run)
 		assert len(split_data) == len(self.data_keys) // 2, "DataSplitBlock: split_data length mismatch. Did you include keys for validation set?"
 		for i, (x, y) in enumerate(split_data):
 			data[self.data_keys[i]] = x
@@ -630,6 +651,40 @@ class AddHistoryBlock(DataProcessingBlock):
 			data[loc] = neuraldecoding.utils.add_history_numpy(data[loc], self.seq_length)
 
 		return data, interpipe
+	
+class AddHistoryBlock2D(DataProcessingBlock):
+	"""
+	A block for adding history to the data at specified locations.
+	It uses `neuraldecoding.utils.add_history_numpy` to add history.
+	"""
+	def __init__(self, location, seq_length = 10):
+		"""
+		Initializes the AddHistoryBlock2D.
+		Args:
+			location (str or list): The key(s) in the data dictionary where history is added.
+			seq_length (int): The length of the history to be added. Default is 10.
+		"""
+		super().__init__()
+		self.location = location
+		self.seq_length = seq_length
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding history to the specified locations of datastream.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with history added at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+
+		for loc in self.location:
+			data[loc] = neuraldecoding.utils.add_history_2D_numpy(data[loc], self.seq_length)
+
+		return data, interpipe
 
 class FullHistoryBlock(DataProcessingBlock):
 	"""
@@ -813,6 +868,22 @@ class Seq2SeqOutputBlock(DataProcessingBlock):
 		"""
 		for loc in self.location:
 			data[loc] = neuraldecoding.utils.seq2seq_output_format(data[loc], self.future, self.past)
+		return data, interpipe
+
+class AppendOnesBlock(DataProcessingBlock):
+	"""
+	A block for appending a column of ones to the data at specified locations.
+	"""
+	def __init__(self, location, append_ones=False):
+		super().__init__()
+		self.location = location
+		self.append_ones = append_ones
+	
+	def transform(self, data, interpipe):
+		if self.append_ones:
+			for loc in self.location:
+				ones = np.ones((data[loc].shape[0], 1), dtype=np.float32)
+				data[loc] = np.concatenate((data[loc], ones), axis=1)
 		return data, interpipe
 
 class NormalizationBlock(DataProcessingBlock):

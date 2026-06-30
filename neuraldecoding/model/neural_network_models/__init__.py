@@ -1,6 +1,7 @@
 from .LSTM import LSTM, LSTMTrialInput, LSTMTrialInput_Rank, LSTMFullHistory_Trialized, LSTMFullHistory_Rank
 from .RNN import RecurrentModel
-from .tcFNN import TCN
+from .tcFNN import TCN, TCNTrialInput
+from .Adaline import Adaline, AdalineTrialInput
 import warnings
 try:
     import einops
