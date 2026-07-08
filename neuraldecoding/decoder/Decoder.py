@@ -6,8 +6,8 @@ import numpy as np
 import torch
 
 from omegaconf import OmegaConf, DictConfig
-from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA
-from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_Rank
+from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA, AdalineKF
+from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_Rank, TCN, TCNTrialInput, LSTMFullHistory_Rank
 from neuraldecoding.model.Model import DummyModel
 import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.stabilization.latent_space_alignment import LatentSpaceAlignment
@@ -21,7 +21,11 @@ MODEL_REGISTRY = {
     "LDA":LDA,
     "LSTM": LSTM,
     "LSTMTrialInput": LSTMTrialInput,
-    "LSTMTrialInput_RankDist": LSTMTrialInput_Rank,
+    "LSTMTrialInput_Rank": LSTMTrialInput_Rank,
+    "LSTMFullHistory_Rank": LSTMFullHistory_Rank,
+    "TCN": TCN,
+    "TCNTrialInput": TCNTrialInput,
+    "AdalineKF": AdalineKF, 
     "dummy": DummyModel
     }
 
@@ -148,8 +152,10 @@ class RNNDecoder(Decoder):
         self.seq_length = cfg.seq_length
         self.input_hist = torch.zeros((1, self.input_shape, self.seq_length), dtype=torch.float32)
         self.use_prev_hidden = cfg.model.params.get("use_prev_hidden", False)
-        self.h = (torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device),
+        if self.use_prev_hidden:
+            self.h = (torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device),
                     torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device))
+        self.model.eval()
 
     def predict(self, input):
         if self.model.neural_scaler is not None:

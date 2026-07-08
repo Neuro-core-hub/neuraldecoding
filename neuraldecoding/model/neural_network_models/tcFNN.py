@@ -68,7 +68,7 @@ class TCN(nn.Module, NeuralNetworkModel):
             scores = self.fcout(scores)
         return scores
     
-    def save_model(self, filepath):
+    def save_model(self, fpath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_scaler": self.scaler,
@@ -77,13 +77,13 @@ class TCN(nn.Module, NeuralNetworkModel):
             "behavior_scaler": getattr(self, 'behavior_scaler', None),
             "model_type": "TCN"
         }
-        folder = os.path.dirname(filepath)
+        folder = os.path.dirname(fpath)
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
-        torch.save(checkpoint_dict, filepath)
+        torch.save(checkpoint_dict, fpath)
     
-    def load_model(self, filepath):
-        checkpoint = torch.load(filepath, weights_only = False)
+    def load_model(self, fpath, running_online : bool = False):
+        checkpoint = torch.load(fpath, weights_only = False)
 
         if checkpoint["model_type"] != "TCN":
             raise Exception("Tried to load model that isn't a TCN Instance")
@@ -241,19 +241,19 @@ class TCN_old(nn.Module, NeuralNetworkModel):
         
         return scores
     
-    def save_model(self, filepath):
+    def save_model(self, fpath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
             "model_type": "TCFNN_old"
         }
-        folder = os.path.dirname(filepath)
+        folder = os.path.dirname(fpath)
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
-        torch.save(checkpoint_dict, filepath)
+        torch.save(checkpoint_dict, fpath)
     
-    def load_model(self, filepath):
-        checkpoint = torch.load(filepath)
+    def load_model(self, fpath, running_online : bool = False):
+        checkpoint = torch.load(fpath)
 
         if checkpoint["model_type"] != "TCFNN_old":
             raise Exception("Tried to load model that isn't an old TCFNN Instance")
