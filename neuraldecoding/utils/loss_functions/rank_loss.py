@@ -3,7 +3,7 @@ import numpy as np
 import warnings
 
 class RankLoss:
-    def __init__(self, transition_time = 5, lambda_flat_active = 100, lambda_flat_inactive = 400, device='cuda'):
+    def __init__(self, transition_time = 5, lambda_flat_active = 100, lambda_flat_inactive = 1000, device='cuda'):
         """
         
         :param self: RankLoss instance
@@ -54,9 +54,9 @@ class RankLoss:
                 cur_predictions = predictions_batch[i, dof, :]
                 direction = directions[i, dof]
 
-                if onset < 0 or onset >= N:
+                if direction == 0:
                     # DoF is inactive
-                    flat_loss_inactive += torch.var(cur_predictions[onset:onset+self.transition_time])  # encourage flat predictions during inactive period
+                    flat_loss_inactive += torch.var(cur_predictions)  # encourage flat predictions during inactive period
                     continue
                 
                 preonset = cur_predictions[:onset]
