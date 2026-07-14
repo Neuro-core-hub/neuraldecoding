@@ -201,23 +201,39 @@ class dofDecoder():
         self.output_shape = np.array(self.output_shape)
         self.fpath = model_fpath_list
 
-    def load_model(self, model_path):
+    def load_model(self, fpath: list = None, running_online: bool = False) -> None:
+        """
+        (Re)load each per-DoF model.
+
+        Args:
+            fpath: Optional list of override paths, one per DoF. When None, the
+                paths supplied at construction (``model_fpath_list``) are used.
+            running_online: Forwarded to each sub-decoder's ``load_model``.
+        """
+        paths = fpath if fpath is not None else self.fpath
         for i, dec in enumerate(self.decoders):
-            dec.load_model(self.fpath[i])
+            dec_path = paths[i] if paths is not None and i < len(paths) else None
+            dec.load_model(fpath=dec_path, running_online=running_online)
 
     def predict(self, neural_data):
         pos_decodes = []
         vel_decodes = []
         for decoder in self.decoders:
             output_tensor = decoder.predict(neural_data)
+            # Sub-decoders may return numpy (e.g. LinearDecoder) or torch tensors;
+            # normalize to a 2-D torch tensor so stacking/concatenation is safe.
+            if not isinstance(output_tensor, torch.Tensor):
+                output_tensor = torch.as_tensor(np.asarray(output_tensor), dtype=torch.float32)
+            if output_tensor.ndim == 1:
+                output_tensor = output_tensor.unsqueeze(0)
             n_cols = output_tensor.shape[1]
-            if n_cols == 2:
+            if n_cols >= 2:
                 pos_decodes.append(output_tensor[:, 0])
                 vel_decodes.append(output_tensor[:, 1])
             elif n_cols == 1:
                 pos_decodes.append(output_tensor[:, 0])
             else:
-                raise ValueError(f"Unexpected decoder output shape: {output_tensor.shape}")
+                raise ValueError(f"Unexpected decoder output shape: {tuple(output_tensor.shape)}")
 
         if not pos_decodes and not vel_decodes:
             return None
