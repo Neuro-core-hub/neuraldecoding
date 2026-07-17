@@ -269,6 +269,7 @@ class DataSplitBlock(DataFormattingBlock):
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
 		self.split_trials = split_trials
+		self.location = location
 		self.interpipe_location = interpipe_location
 		self.data_keys = data_keys
 		self.shuffle = shuffle
@@ -689,16 +690,49 @@ class AddHistoryBlock2D(DataProcessingBlock):
 
 		return data, interpipe
 
+class FullHistoryBlock(DataProcessingBlock):
+	"""
+	A block for adding history, where each sequence is all previous time points.
+	"""
+	def __init__(self, location):
+		"""
+		Initializes the AddHistoryBlock.
+		Args:
+			location (str or list): The key(s) in the data dictionary where history is added.
+			seq_length (int): The length of the history to be added. Default is 10.
+		"""
+		super().__init__()
+		self.location = location
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding history to the specified locations of datastream.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary with history added at the specified locations.
+			interpipe (dict): The interpipe dictionary remains unchanged.
+		"""
+		if isinstance(self.location, str):
+			self.location = [self.location]
+
+		for loc in self.location:
+			data[loc] = neuraldecoding.utils.add_full_history(data[loc])
+
+		return data, interpipe
+
 class TrialHistoryBlock(DataProcessingBlock):
 	"""
 	A block to add history but have each sequence be the length of an entire trial, plus padding and leadup.
 	Uses 'add_trial_history' to add history.
 	"""
-	def __init__(self, set = 'train', leadup = 20, onset_location = 'onset_indices', direction_location = 'movement_directions', targets_location = 'targets', save_2d = False):
+	def __init__(self, set = 'train', leadup = 20, pretrial = 0, onset_location = 'onset_indices', direction_location = 'movement_directions', targets_location = 'targets', save_2d = False):
 		"""
 		Initializes the TrialHistoryBlock.
 		Args:
 			leadup (int): The length of the history to be added before the first bin of each trial. Default is 20.
+			pretrial (int): The number of bins to include before the trial start in the trial history. Default is 0.
 		"""
 		super().__init__()
 		self.set = set
@@ -710,6 +744,7 @@ class TrialHistoryBlock(DataProcessingBlock):
 		self.location_targets_output = f'targets_{set}'
 		self.mask = f'mask_{set}'
 		self.leadup = leadup
+		self.pretrial = pretrial
 		self.onset_location = onset_location
 		self.direction_location = direction_location
 		self.targets_location = targets_location
@@ -742,12 +777,101 @@ class TrialHistoryBlock(DataProcessingBlock):
 			data[f'{self.location_behavior}_2d'] = data[self.location_behavior].copy()
 		
 		data[self.location_neural], data[self.location_behavior], trial_lengths, directions, targets, onsets = \
-			neuraldecoding.utils.add_trial_history(data[self.location_neural], data[self.location_behavior], trial_per_bin, self.leadup, directions, targets, onsets=onsets)
+			neuraldecoding.utils.add_trial_history(data[self.location_neural], data[self.location_behavior], trial_per_bin, self.leadup, directions, targets, onsets=onsets, pretrial=self.pretrial)
 		data[self.location_trial_lengths] = trial_lengths
 		if onsets is not None:
 			data[self.location_onsets_output] = onsets
 		data[self.location_directions_output] = directions
 		data[self.location_targets_output] = targets
+		return data, interpipe
+
+class ShiftOnsetsBlock(DataProcessingBlock):
+	"""
+	A block to shift onsets by a specified number of bins. Used to predict future or past behavior relative to the current neural data bin with rank loss. 
+	"""
+	def __init__(self, location_onsets, shift_bins):
+		"""
+		Initializes the ShiftOnsetsBlock.
+		Args:
+			location_onsets (str): The key in the interpipe dictionary where the onsets are located.
+			shift_bins (int): The number of bins to shift the onsets. Positive values shift onsets later, negative values shift onsets earlier.
+		"""
+		super().__init__()
+		self.location_onsets = location_onsets
+		self.shift_bins = shift_bins
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by shifting the onsets by the specified number of bins.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		Returns:
+			data (dict): The data dictionary remains unchanged.
+			interpipe (dict): The interpipe dictionary with shifted onsets at the specified location.
+		"""
+		if self.location_onsets not in interpipe:
+			raise ValueError(f"Onset location '{self.location_onsets}' not found in interpipe dictionary.")
+		
+		onsets = interpipe[self.location_onsets]
+		onsets_shifted = onsets + self.shift_bins
+		onsets_shifted[onsets_shifted < 0] = 0 # Ensure no negative indices
+		onsets_shifted[onsets_shifted >= len(interpipe['trial_idx'])] = len(interpipe['trial_idx']) - 1 # Ensure no indices beyond data length
+		interpipe[self.location_onsets] = onsets_shifted
+		return data, interpipe
+
+class OnsetsToTrialStartBlock(DataProcessingBlock):
+	"""
+	A block to change onset time to relative to trial start instead of absolute time.
+	"""
+	def __init__(self, location_onsets, location_trial_starts):
+		"""
+		Initializes the OnsetsToTrialStartBlock.
+		Args:
+			location_onsets (str): The key in the interpipe dictionary where the onsets are located.
+			location_trial_starts (str): The key in the interpipe dictionary where the trial start times are located.
+		"""
+		super().__init__()
+		self.location_onsets = location_onsets
+		self.location_trial_starts = location_trial_starts
+	
+	def transform(self, data, interpipe):
+
+		onsets = interpipe[self.location_onsets]
+		trial_starts = interpipe[self.location_trial_starts]
+
+		new_onsets = np.array(onsets, copy=True)
+		for i in range(len(onsets)):
+			mask = ~np.isnan(onsets[i])
+			new_onsets[i, mask] = onsets[i, mask] - trial_starts[i]
+		interpipe[self.location_onsets] = new_onsets
+		return data, interpipe
+
+class Seq2SeqOutputBlock(DataProcessingBlock):
+	"""
+	A block to edit label formatting for sequence-to-sequence models.
+	"""
+	def __init__(self, location, future = 1, past = 0):
+		"""
+		Initializes the Seq2SeqHistoryBlock.
+		Args:
+			future (int): The number of future bins to include in the history. Default is 1 (i.e. include the current bin)
+			past (int): The number of past bins to include in the history. Default is 0.
+		"""
+		super().__init__()
+		self.location = location
+		self.future = future
+		self.past = past
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the training data by adding history for sequence-to-sequence models.
+		Args:
+			data (dict): Input data dictionary containing the data to which history is added.
+			interpipe (dict): A inter-pipeline bus for one-way sharing data between blocks within the preprocess_pipeline call.
+		"""
+		for loc in self.location:
+			data[loc] = neuraldecoding.utils.seq2seq_output_format(data[loc], self.future, self.past)
 		return data, interpipe
 
 class AppendOnesBlock(DataProcessingBlock):
@@ -916,6 +1040,46 @@ class FeatureExtractionBlock(DataProcessingBlock):
 			data=neural_data_bin,
 		)["features"]
 		data[self.location_data[0]] = features
+		return data, interpipe
+	
+class TrialToBinsBlock(DataProcessingBlock):
+	"""
+	A block to assign one or more trial-level variables to one or more bin-level variables based on the trial indices in interpipe['bin_trial_idx'].
+	"""
+	def __init__(self, trial_variable_name, bin_variable_name):
+		super().__init__()
+		self.trial_variable_name = [trial_variable_name] if isinstance(trial_variable_name, str) else list(trial_variable_name)
+		self.bin_variable_name = [bin_variable_name] if isinstance(bin_variable_name, str) else list(bin_variable_name) # variable is organized like a 2D array with shape (num_trials, variable_dim), e.g. onsets, directions, targets
+		if len(self.trial_variable_name) != len(self.bin_variable_name):
+			raise ValueError("trial_variable_name and bin_variable_name must have the same number of entries.")
+		
+	def transform(self, data, interpipe):
+		if 'bin_trial_idx' not in interpipe:
+			raise ValueError("Bin trial indices 'bin_trial_idx' not found in interpipe dictionary.")
+
+		bin_trial_idx = interpipe['bin_trial_idx']
+
+		for trial_variable_name, bin_variable_name in zip(self.trial_variable_name, self.bin_variable_name):
+			if trial_variable_name not in interpipe:
+				raise ValueError(f"Trial variable '{trial_variable_name}' not found in interpipe dictionary.")
+
+			trial_variable = interpipe[trial_variable_name]
+			shape_trial_variable = trial_variable.shape
+			
+			new_data = np.nan * np.ones((len(bin_trial_idx), *shape_trial_variable[1:]), dtype=trial_variable.dtype)
+			for trial_idx in range(len(trial_variable)):
+				bin_mask = (bin_trial_idx == trial_idx)
+				new_data[bin_mask] = trial_variable[trial_idx]
+			
+			data[bin_variable_name] = new_data
+
+			if 'mask_train' in interpipe:
+				data[f'{bin_variable_name}_train'] = new_data[interpipe['mask_train']]
+			if 'mask_test' in interpipe:
+				data[f'{bin_variable_name}_test'] = new_data[interpipe['mask_test']]
+			if 'mask_val' in interpipe:
+				data[f'{bin_variable_name}_val'] = new_data[interpipe['mask_val']]
+
 		return data, interpipe
 
 class RawToXPC(DataProcessingBlock):
@@ -2069,7 +2233,7 @@ class WaveletDenoiseBlock(DataProcessingBlock):
 	
 class ShiftPromptToOnsetBlock(TemplateBehaviorReplacementBlock):
 	"""
-	A block for shifting the prompt to target from the trial start to the movement onset. Compatible with monkey data but is truly meant for human data.
+	A block for shifting the prompt to target from the trial start to the movement onset. Compatible with monkey data but is meant for human data.
 	"""
 	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, kinematic_indices: list = None, mask_key: str = None, pos_vel: bool = False, plot: bool = True, threshold: float = 1e-6):
 		super().__init__(location_behavior, location_out, location_onsets, {}, kinematic_indices, mask_key, pos_vel, plot)
@@ -2161,7 +2325,7 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing behavior data using a pre-trained LSTM (from a subset of electrodes, optional)
 	"""
-	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list=None, device='cuda', align_amplitudes=False):
+	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list = None, device='cuda', align_amplitudes=False):
 		super().__init__()
 		if isinstance(location_neural, str):
 			self.location_neural = [location_neural]
@@ -2182,6 +2346,7 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 		self.model.load_model(model_path)
 
 		self.align_amplitudes = align_amplitudes
+		self.scale_behavior = scale_behavior
 	
 	def transform(self, data, interpipe):
 		"""
@@ -2207,7 +2372,8 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 			neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
 			predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
 			# Inverse transform predicted behavior
-			predicted_behavior = self.model.behavior_scaler.inverse_transform(predicted_behavior)
+			if self.scale_behavior:
+				predicted_behavior = self.model.behavior_scaler.inverse_transform(predicted_behavior)
 			
 			# Update the behavior data in the data dictionary
 			data[loc_beh] = predicted_behavior

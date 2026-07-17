@@ -6,8 +6,8 @@ import numpy as np
 import torch
 
 from omegaconf import OmegaConf, DictConfig
-from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA
-from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_RankDist
+from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA, AdalineKF
+from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_Rank, TCN, TCNTrialInput, LSTMFullHistory_Rank
 from neuraldecoding.model.Model import DummyModel
 import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.stabilization.latent_space_alignment import LatentSpaceAlignment
@@ -21,7 +21,11 @@ MODEL_REGISTRY = {
     "LDA":LDA,
     "LSTM": LSTM,
     "LSTMTrialInput": LSTMTrialInput,
-    "LSTMTrialInput_RankDist": LSTMTrialInput_RankDist,
+    "LSTMTrialInput_Rank": LSTMTrialInput_Rank,
+    "LSTMFullHistory_Rank": LSTMFullHistory_Rank,
+    "TCN": TCN,
+    "TCNTrialInput": TCNTrialInput,
+    "AdalineKF": AdalineKF, 
     "dummy": DummyModel
     }
 
@@ -147,21 +151,101 @@ class RNNDecoder(Decoder):
         self.input_shape = cfg.model.params.input_size
         self.seq_length = cfg.seq_length
         self.input_hist = torch.zeros((1, self.input_shape, self.seq_length), dtype=torch.float32)
+        self.use_prev_hidden = cfg.model.params.get("use_prev_hidden", False)
+        if self.use_prev_hidden:
+            self.h = (torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device),
+                    torch.zeros(cfg.model.num_layers, 1, cfg.model.hidden_size).to(device=self.device))
+        self.model.eval()
+
     def predict(self, input):
         if self.model.neural_scaler is not None:
             input = torch.tensor(self.model.neural_scaler.transform(input), dtype=torch.float32)
         else:
             input = torch.tensor(input, dtype=torch.float32)
 
-        self.input_hist = torch.cat((self.input_hist[:, :, 1:], input.unsqueeze(2)), dim=2)
-
-        with torch.no_grad():
-            prediction = self.model(self.input_hist.to(self.device))
+        if self.use_prev_hidden:
+            with torch.no_grad():
+                prediction, self.h = self.model(input.unsqueeze(2).to(self.device), self.h, return_h=True)
+        else:
+            self.input_hist = torch.cat((self.input_hist[:, :, 1:], input.unsqueeze(2)), dim=2)
+            with torch.no_grad():
+                prediction = self.model(self.input_hist.to(self.device))
         
         if self.model.behavior_scaler is not None:
             prediction = torch.tensor(self.model.behavior_scaler.inverse_transform(prediction.detach().cpu().numpy()), dtype=torch.float32)
 
         return prediction
+
+class dofDecoder():
+    def __init__(self, cfglist: list, model_fpath_list: list) -> None:
+        # cfglist: list of DictConfig, one per DoF
+        # create a decoder per config
+        # choose decoder type based on model type
+        self.decoders = []
+        self.input_shape = []
+        self.output_shape = []
+        for cfg in cfglist:
+            mtype = cfg.model.type
+            if mtype in ["LSTM", "LSTMTrialInput", "LSTMTrialInput_Rank", "LSTMFullHistory_Rank"]:
+                dec = RNNDecoder(cfg)
+            elif mtype in ["TCN", "TCNTrialInput"]:
+                dec = NeuralNetworkDecoder(cfg)
+            else:
+                dec = LinearDecoder(cfg)
+            self.decoders.append(dec)
+            self.input_shape.append(dec.get_input_shape())
+            self.output_shape.append(dec.get_output_shape())
+
+        # convert shapes to numpy arrays
+        self.input_shape = np.array(self.input_shape)
+        self.output_shape = np.array(self.output_shape)
+        self.fpath = model_fpath_list
+
+    def load_model(self, fpath: list = None, running_online: bool = False) -> None:
+        """
+        (Re)load each per-DoF model.
+
+        Args:
+            fpath: Optional list of override paths, one per DoF. When None, the
+                paths supplied at construction (``model_fpath_list``) are used.
+            running_online: Forwarded to each sub-decoder's ``load_model``.
+        """
+        paths = fpath if fpath is not None else self.fpath
+        for i, dec in enumerate(self.decoders):
+            dec_path = paths[i] if paths is not None and i < len(paths) else None
+            dec.load_model(fpath=dec_path, running_online=running_online)
+
+    def predict(self, neural_data):
+        pos_decodes = []
+        vel_decodes = []
+        for decoder in self.decoders:
+            output_tensor = decoder.predict(neural_data)
+            # Sub-decoders may return numpy (e.g. LinearDecoder) or torch tensors;
+            # normalize to a 2-D torch tensor so stacking/concatenation is safe.
+            if not isinstance(output_tensor, torch.Tensor):
+                output_tensor = torch.as_tensor(np.asarray(output_tensor), dtype=torch.float32)
+            if output_tensor.ndim == 1:
+                output_tensor = output_tensor.unsqueeze(0)
+            n_cols = output_tensor.shape[1]
+            if n_cols >= 2:
+                pos_decodes.append(output_tensor[:, 0])
+                vel_decodes.append(output_tensor[:, 1])
+            elif n_cols == 1:
+                pos_decodes.append(output_tensor[:, 0])
+            else:
+                raise ValueError(f"Unexpected decoder output shape: {tuple(output_tensor.shape)}")
+
+        if not pos_decodes and not vel_decodes:
+            return None
+
+        pos_tensor = torch.stack(pos_decodes, dim=1) if pos_decodes else None
+        vel_tensor = torch.stack(vel_decodes, dim=1) if vel_decodes else None
+
+        if vel_tensor is None:
+            return pos_tensor
+        if pos_tensor is None:
+            return vel_tensor
+        return torch.cat((pos_tensor, vel_tensor), dim=1)
     
 class DummyDecoder(Decoder):
     def __init__(self, cfg: DictConfig) -> None:

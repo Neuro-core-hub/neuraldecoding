@@ -29,7 +29,9 @@ class NNTrainer(Trainer):
         self.min_lr_plateau = config.training.get('min_lr_plateau', 0)
         self.take_best = config.training.get('take_best', False)
         self.batch_size = config.training.get('batch_size', 64)
+        self.full_batch_train = config.training.get('full_batch_train', False)
         self.full_batch_valid = config.training.get('full_batch_valid', False)
+        self.trialized_loss = config.training.get('trialized_loss', False)
         if config.loss_func.type == 'LSTMTrialInput':
             if self.batch_size != 1:
                 warnings.warn("LSTMTrialInput does not support batch_size in model config. Setting batch_size to 1.")
@@ -73,7 +75,10 @@ class NNTrainer(Trainer):
                                     self.data_dict["Y_train"].detach().clone().to(torch.float32))
         valid_dataset = TensorDataset(self.data_dict['X_val'].detach().clone().to(torch.float32), 
                                     self.data_dict['Y_val'].detach().clone().to(torch.float32))
-        train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True, drop_last=True)
+        if self.full_batch_train:
+            train_loader = DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=False)
+        else:
+            train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True, drop_last=True)
         if self.full_batch_valid:
             valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
         else:
@@ -135,8 +140,16 @@ class NNTrainer(Trainer):
             for x,y in self.train_loader:
                 self.model.train()
                 self.optimizer.zero_grad()
+                if self.trialized_loss:
+                    if iteration == 0:
+                        n_bins = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
+                        train_ends_mask = self.preprocessor.saved_data['bin_trial_end_idx'] < n_bins
+                        starts = self.preprocessor.saved_data['bin_trial_start_idx'][train_ends_mask]
+                        ends = self.preprocessor.saved_data['bin_trial_end_idx'][train_ends_mask]
 
-                loss, yhat, y = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache, return_y=True)
+                    loss, yhat, y = self.model.train_step(x.to(self.device), y.to(self.device), starts, ends, self.optimizer, self.loss_func, clear_cache = self.clear_cache, return_y=True)
+                else:
+                    loss, yhat, y = self.model.train_step(x.to(self.device), y.to(self.device), self.optimizer, self.loss_func, clear_cache = self.clear_cache, return_y=True)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -299,6 +312,7 @@ class NNTrialInputTrainer(NNTrainer):
 class LSTMTrainer(NNTrainer):
     def __init__(self, preprocessor, config, dataset = None):
         super().__init__(preprocessor, config, dataset)
+        self.validate_2d = config.training.get('validate_2d', False)
 
     def validate_model(self):
         # Validate
@@ -307,19 +321,29 @@ class LSTMTrainer(NNTrainer):
         h = None
 
         with torch.no_grad():
-            for x_val, y_val in self.valid_loader: # Typically only one batch
-                x_val = x_val.to(self.device)
-                y_val = y_val.to(self.device)
-                yhat_val = self.model(x_val, h, return_all_tsteps=True)[:, -1, :]
+            if self.validate_2d:
+                x_val = self.valid_loader.dataset.tensors[0].to(self.device)
+                y_val = self.valid_loader.dataset.tensors[1].to(self.device)
+                yhat_val = self.model(x_val, h, return_all_tsteps=True)
                 val_loss = self.loss_func(yhat_val, y_val)
 
                 running_val_loss += val_loss.item()
                 if(self.clear_cache):
                     del y_val, yhat_val
+            else:
+                for x_val, y_val in self.valid_loader: # Typically only one batch
+                    x_val = x_val.to(self.device)
+                    y_val = y_val.to(self.device)
+                    yhat_val = self.model(x_val, h, return_all_tsteps=True)[:, -1, :]
+                    val_loss = self.loss_func(yhat_val, y_val)
+
+                    running_val_loss += val_loss.item()
+                    if(self.clear_cache):
+                        del y_val, yhat_val
 
         return val_loss, yhat_val.detach().cpu().numpy(), y_val.detach().cpu().numpy()
-
-class LSTMRankDistTrainer(LSTMTrainer):
+    
+class LSTMRankTrainer(LSTMTrainer):
     def __init__(self, preprocessor, config, dataset = None):
         super().__init__(preprocessor, config, dataset)
     
@@ -332,14 +356,15 @@ class LSTMRankDistTrainer(LSTMTrainer):
         valid_dataset.onsets = valid_dataset.onsets.detach().clone().to(torch.int16).to(self.device)
         train_dataset.directions = train_dataset.directions.detach().clone().to(torch.int16).to(self.device)
         valid_dataset.directions = valid_dataset.directions.detach().clone().to(torch.int16).to(self.device)
+        if self.full_batch_train:
+            train_loader = DataLoader(train_dataset, batch_size=len(train_dataset), shuffle=False)
+        else:
+            train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
 
-        self.x_full_train = self.data_dict['neural_train_2d'].detach().clone()
-        self.y_full_train = self.data_dict['behavior_train_2d'].detach().clone()
-        self.x_full_val = self.data_dict['neural_val_2d'].detach().clone()
-        self.y_full_val = self.data_dict['behavior_val_2d'].detach().clone()
-        
-        train_loader = DataLoader(train_dataset, batch_size=self.train_batch_size, shuffle=True)
-        valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
+        if self.full_batch_valid:
+            valid_loader = DataLoader(valid_dataset, batch_size=len(valid_dataset), shuffle=False)
+        else:
+            valid_loader = DataLoader(valid_dataset, batch_size=self.valid_batch_size, shuffle=False)
         return train_loader, valid_loader
 
     def train_model(self, train_loader = None, valid_loader = None):
@@ -369,8 +394,15 @@ class LSTMRankDistTrainer(LSTMTrainer):
                 
                 self.model.train()
                 self.optimizer.zero_grad()
-
-                loss, yhat = self.model.train_step(x.to(self.device), self.x_full_train.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
+                if self.trialized_loss:
+                    if iteration == 0:
+                        n_bins = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
+                        train_ends_mask = self.preprocessor.saved_data['bin_trial_end_idx'] < n_bins
+                        starts = self.preprocessor.saved_data['bin_trial_start_idx'][train_ends_mask]
+                        ends = self.preprocessor.saved_data['bin_trial_end_idx'][train_ends_mask]
+                    loss, yhat = self.model.train_step(x.to(self.device), starts, ends, directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
+                else:
+                    loss, yhat = self.model.train_step(x.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -459,43 +491,64 @@ class LSTMRankDistTrainer(LSTMTrainer):
 
         with torch.no_grad():
             val_loss = 0.0
-            rank_loss_total = 0.0
-            flat_loss_total = 0.0
+            val_all_predictions = []
+            val_all_targets = []
             for trial in self.valid_loader:
                 x = trial['neu']
                 y = trial['kin']
                 directions = trial['directions']
                 onsets = trial['onsets']
+                if self.trialized_loss:
+                    yhat = self.model.forward(x.to(self.device), return_all_tsteps=True)
 
-                trial_length = (~torch.isnan(x[0, 0, :])).sum().max().item() - self.model.leadup
-                # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
-                if torch.isnan(x[0, 0, 0]):
-                    x = x[:, :, self.model.leadup:]
-                    yhat = self.model.forward(x[:, :, :trial_length], return_all_tsteps=True, remove_leadup=False)
+                    val_bin_start = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
+                    start_mask = self.preprocessor.saved_data['bin_trial_start_idx'] >= val_bin_start
+                    starts = self.preprocessor.saved_data['bin_trial_start_idx'][start_mask] - val_bin_start
+                    ends = self.preprocessor.saved_data['bin_trial_end_idx'][start_mask] - val_bin_start
+
+                    cum_loss = torch.tensor(0.0, device=x.device)
+                    for i, start, end in zip(range(len(starts)), starts, ends):
+                        subset_yhat = yhat[start:end, :]
+                        subset_directions = directions[start, :] # TrialToBinsBlock will have directions at start idx
+                        subset_onsets = onsets[start, :] # TrialToBinsBlock will have onsets at start idx
+                        loss = self.loss_func(subset_yhat, subset_directions, subset_onsets)
+                        if loss is None:
+                            # This can happen if all onsets are outside the range of the trial for this subset, so this trial doesn't contribute to the loss
+                            continue
+                        cum_loss += loss
+                    
+                    val_all_predictions = yhat.cpu().numpy()
+                    val_all_targets = y.cpu().numpy()
                 else:
-                    yhat = self.model.forward(x[:, :, :self.model.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
-                yhat = yhat.permute(0, 2, 1)
+                    trial_length = (~torch.isnan(x[0, 0, :])).sum().max().item() - self.model.leadup
+                    # Edge case: if trial didn't fill leadup, we need to remove the leadup before doing forward pass
+                    if torch.isnan(x[0, 0, 0]):
+                        x = x[:, :, self.model.leadup:]
+                        yhat = self.model.forward(x[:, :, :trial_length], return_all_tsteps=True, remove_leadup=False)
+                    else:
+                        yhat = self.model.forward(x[:, :, :self.model.leadup + trial_length], return_all_tsteps=True, remove_leadup=True)
+                    yhat = yhat.permute(0, 2, 1)
+                    
+                    cum_loss = torch.tensor(0.0, device=yhat.device)
+                    for i in range(0, self.model.past + self.model.future):
+                        idx = np.arange(i*self.model.n_dofs, (i+1)*self.model.n_dofs)
+                        subset = yhat[:, idx, :]
+                        onsets_cur = onsets + self.model.past - i  # shift onsets according to how far in the future we're looking
+                        loss = self.loss_func(subset, directions, onsets_cur)
+                        if loss is None:
+                            continue
+                        cum_loss += loss
+                    
+                    yhat_np = np.squeeze(yhat.cpu().numpy().T)
+                    y_np = np.squeeze(y.cpu().numpy().T)
+                    val_all_predictions.append(yhat_np)
+                    val_all_targets.append(y_np[:trial_length, :])
+                    
+                val_loss += cum_loss.item()
                 
-                # TODO: make loss function ignore nans to enable batch processing
-                rank_loss, flat_loss = self.loss_func.rank_flat_loss_only(yhat, directions, onsets)
-                if rank_loss is None:
-                    continue
-                
-                rank_loss_total += rank_loss.item() 
-                flat_loss_total += flat_loss.item()
-                loss = rank_loss + self.loss_func.lambda_flat * flat_loss
-                val_loss += loss.item()
-
-            print("Validation Rank loss:", rank_loss_total, "Flat loss:", flat_loss_total)
-            
-            # predictions_full = self.model.forward(self.x_full_val, remove_leadup=False)
-
-            # kl_loss, bound_loss = self.loss_func.dist_loss_only(predictions_full)
-            # val_loss += self.loss_func.lambda_kl * kl_loss + self.loss_func.lambda_bound * bound_loss
-            # print("Validation KL loss:", kl_loss.cpu().detach().numpy(), "Bound loss:", bound_loss.cpu().detach().numpy())
-        
-        val_all_predictions = self.model.forward(self.x_full_val.to(self.device), return_all_tsteps=True, remove_leadup=False).detach().cpu().numpy()
-        val_all_targets = self.y_full_val.detach().cpu().numpy()
+            if isinstance(val_all_predictions, list):
+                val_all_predictions = np.concatenate(val_all_predictions, axis=0)
+                val_all_targets = np.concatenate(val_all_targets, axis=0)
 
         return val_loss, val_all_predictions, val_all_targets
     
@@ -503,9 +556,12 @@ class LSTMRankDistTrainer(LSTMTrainer):
         # After training, compute behavior scaler via MinMax on output of model with input x_full_train
         self.model.eval()
         with torch.no_grad():
-            train_predictions = self.model.forward(self.x_full_train.to(self.device), return_all_tsteps=True, remove_leadup=False).detach().cpu().numpy()
+            x_full_train = self.data_dict['neural_train'].to(self.device)
+            train_predictions = self.model.forward(x_full_train, return_all_tsteps=True).detach().cpu().numpy()
 
         from sklearn.preprocessing import MinMaxScaler
+        idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
+        train_predictions = train_predictions[:, idx]
         behavior_scaler_internal = MinMaxScaler()
         behavior_scaler_internal.fit(train_predictions)
 

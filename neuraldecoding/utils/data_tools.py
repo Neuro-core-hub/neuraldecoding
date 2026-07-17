@@ -385,7 +385,7 @@ def add_history(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
 
-def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
+def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None, pretrial=0):
     # TODO: add device
     X_temp = torch.tensor(x)
     Y_temp = torch.tensor(y)
@@ -414,14 +414,21 @@ def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
 
-    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
-    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
+    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + pretrial + leadup), float('nan'))
+    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length + pretrial), float('nan'))
 
     for idx, trial in enumerate(unique_trials):
         mask = trial == trial_ts
+        first_nonzero_idx = mask.nonzero()[0][0]
         if onsets is not None:
-            first_nonzero_idx = mask.nonzero()[0][0]
-            onsets[idx] = onsets[idx] - first_nonzero_idx # onset relative to trial start
+            onsets[idx] = onsets[idx] - first_nonzero_idx + pretrial # onset relative to trial start
+
+        if pretrial > first_nonzero_idx:
+            warnings.warn(f"Pretrial length {pretrial} exceeds available pretrial data for trial {trial}. Leaving trial as NaN.")
+            continue
+        else:
+            mask[first_nonzero_idx-pretrial:first_nonzero_idx] = 1
+            
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]
         if first_nonzero_idx < leadup:
@@ -431,6 +438,7 @@ def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None):
         else:
             mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
             X[idx,:,:np.count_nonzero(mask)] = X_temp[mask,:].T
+
 
     return X, Y, trial_lengths, directions, targets, onsets
 
@@ -453,6 +461,26 @@ def add_history_numpy(neural_data, seq_len):
     Xtrain1 = torch.flip(Xtrain1, (2,))
 
     #  (n_samples, n_channels, seq_len)
+    return Xtrain1.numpy()
+
+
+def add_full_history(neural_data):
+    """
+    Add full history to the neural data.
+    neural_data is of shape (n_samples, n_channels)
+    the output is of shape (n_samples, n_samples, n_channels)
+    """
+    Xtrain1 = torch.full((int(neural_data.shape[0]), int(neural_data.shape[1]), int(neural_data.shape[0])), float('nan'))
+    if not isinstance(neural_data, np.ndarray):
+        neural_data = neural_data.numpy()
+    Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
+    for k in range(1, neural_data.shape[0]):
+        Xtrain1[k:, :, k] = torch.from_numpy(neural_data[0:-k, :])
+
+    # for RNNs, we want the last timestep to be the most recent data
+    Xtrain1 = torch.flip(Xtrain1, (2,))
+
+    #  (n_samples, n_channels, n_samples)
     return Xtrain1.numpy()
 
 def add_history_2D_numpy(neural_data, seq_len):
@@ -548,3 +576,24 @@ def obtain_trial_idx(bin_start_timestamp_ms: List[float], trial_starts: List[flo
     bin_start_timestamp_ms = np.array(bin_start_timestamp_ms)
     trial_idx = np.searchsorted(trial_starts, bin_start_timestamp_ms)
     return trial_idx
+
+def seq2seq_output_format(data, future_len=1, past_len=0):
+    """
+    Convert data to seq2seq format for RNN decoders.
+    data is of shape (n_samples, n_outs)
+    the output is of shape (n_samples, n_outs*(past_len + future_len))
+    For example, if past = 2 and future = 3, first n_dofs cols correspond to t-2, the next n_dofs cols correspond to t-1,
+        the next n_dofs cols correspond to t (current timestep), 
+        the next n_dofs cols correspond to t+1, and the last num_outs correspond to t+2.
+    """
+    n_samples, n_outs = data.shape
+    seq_len = past_len + future_len
+
+    seq_data = np.zeros((n_samples, n_outs * seq_len))
+    for i in range(n_samples):
+        idxs = []
+        for j in range(i - past_len, i + future_len):
+            idxs.append(min(max(j, 0), n_samples - 1))
+        seq_data[i] = data[idxs].reshape(-1)
+
+    return seq_data
