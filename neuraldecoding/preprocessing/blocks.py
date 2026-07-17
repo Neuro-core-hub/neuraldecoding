@@ -1,3 +1,6 @@
+from networkx import sigma
+from pywt import data
+
 import neuraldecoding.utils
 import neuraldecoding.stabilization.latent_space_alignment
 import neuraldecoding.dataaugmentation.DataAugmentation
@@ -266,7 +269,6 @@ class DataSplitBlock(DataFormattingBlock):
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
 		self.split_trials = split_trials
-		self.location = location
 		self.interpipe_location = interpipe_location
 		self.data_keys = data_keys
 		self.shuffle = shuffle
@@ -2026,7 +2028,7 @@ class WaveletDenoiseBlock(DataProcessingBlock):
 	"""
 	A block for denoising data using the db4 wavelet.
 	"""
-	def __init__(self, location, detail_level: int = 3):
+	def __init__(self, location, detail_level: int = 3, new_dict: bool = False):
 		"""
 		Initializes the WaveletDenoiseBlock.
 		Args:
@@ -2034,11 +2036,12 @@ class WaveletDenoiseBlock(DataProcessingBlock):
 			detail_level (int): Level of detail coefficients at and below to zero out (1-4).
 		"""
 		super().__init__()
+		self.new_dict = new_dict
 		if isinstance(location, str):
 			self.location = [location]
 		else:
 			self.location = location
-		assert (detail_level >= 1) and (detail_level <= 4), "detail_level must be between 1 and 4"
+		# assert (detail_level >= 1) and (detail_level <= 4), "detail_level must be between 1 and 4"
 		self.detail_level = detail_level
 
 	def transform(self, data, interpipe):
@@ -2046,10 +2049,11 @@ class WaveletDenoiseBlock(DataProcessingBlock):
 		Apply wavelet denoising to the specified data array(s).
 		"""
 		for loc in self.location:
+			assert (pywt.dwt_max_level(data[loc].shape[0], 'db4') >= self.detail_level), f"Decomposition level {self.detail_level} is too high for {loc} data"
 			coeffs = pywt.wavedec(data[loc], 'db4', level=4, axis=0)
 			# Zero out detail coefficients up to the specified level
-			for i in range(1, self.detail_level + 1):
-				index = 4 - i + 1
+			for i in range(0, self.detail_level):
+				index = 4 - i
 				coeffs[index] = np.zeros_like(coeffs[index])
 			# Reconstruct the denoised signal
 			denoised_data = pywt.waverec(coeffs, 'db4', axis=0)
@@ -2057,7 +2061,10 @@ class WaveletDenoiseBlock(DataProcessingBlock):
 			original_len = data[loc].shape[0]
 			if denoised_data.shape[0] > original_len:
 				denoised_data = denoised_data[:original_len]
-			data[loc] = denoised_data
+			if self.new_dict:
+				data[loc + '_denoised'] = denoised_data
+			else:
+				data[loc] = denoised_data
 		return data, interpipe
 	
 class ShiftPromptToOnsetBlock(TemplateBehaviorReplacementBlock):
@@ -2154,7 +2161,7 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing behavior data using a pre-trained LSTM (from a subset of electrodes, optional)
 	"""
-	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list = None, device='cuda', align_amplitudes=False):
+	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list=None, device='cuda', align_amplitudes=False):
 		super().__init__()
 		if isinstance(location_neural, str):
 			self.location_neural = [location_neural]
@@ -2204,5 +2211,66 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 			
 			# Update the behavior data in the data dictionary
 			data[loc_beh] = predicted_behavior
+		
+		return data, interpipe
+
+class LSTMDenoiseReplacementBlock(DataProcessingBlock):
+	"""
+	A block for replacing behavior data using a pre-trained LSTM (from a subset of electrodes, optional)
+	"""
+	def __init__(self, location_neural: str, cfg_path: str, model_path: str, m_electrodes: list=None, device='cpu', align_amplitudes=False):
+		super().__init__()
+		if isinstance(location_neural, str):
+			self.location_neural = [location_neural]
+		else:
+			self.location_neural = location_neural
+		
+		self.m_electrodes = m_electrodes
+		self.device = device
+
+		# Load model
+		with initialize_config_dir(version_base=None, config_dir=os.path.dirname(cfg_path)):
+			self.cfg = compose(config_name=os.path.basename(cfg_path))
+		self.model = LSTM(self.cfg.trainer.model.params)
+		self.model.load_model(model_path)
+
+		self.align_amplitudes = align_amplitudes
+		self.seq_length = self.cfg.preprocessing.content.trainhist.params.seq_length
+	
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by replacing the behavior data using a MiniModel from a subset of electrodes.
+		"""
+		for loc_neu in self.location_neural:
+			# Get neural data, if not aligning amplitudes, should already be normalized
+			if self.m_electrodes is None:
+				neural_data_denorm = data[loc_neu]
+			else:
+				neural_data_denorm = data[loc_neu][:, self.m_electrodes] # Select subset of electrodes
+
+			# Align the amplitudes of the neural data, if desired. Incorporated originally to better match human and monkey EMG amplitude ranges.
+			if self.align_amplitudes:
+				minmax_scaler = sklearn.preprocessing.MinMaxScaler()
+				neural_data = minmax_scaler.fit_transform(neural_data)
+
+				# Standard scale the neural data
+				standard_scaler = sklearn.preprocessing.StandardScaler()
+				neural_data = standard_scaler.fit_transform(neural_data)
+
+			# Predict behavior using MiniModel
+			neural_data = self.model.neural_scaler.transform(neural_data_denorm)
+			neural_data_hist = np.zeros((int(neural_data.shape[0]), int(neural_data.shape[1]), self.seq_length))
+			neural_data_hist[:, :, 0] = neural_data
+			for k1 in range(self.seq_length - 1):
+				k = k1 + 1
+				neural_data_hist[k:, :, k] = neural_data[0:-k, :]
+			neural_data_hist = torch.tensor(neural_data_hist, dtype=torch.float32, device=self.model.device)
+			neural_data_hist = torch.flip(neural_data_hist, (2,))
+			predicted_behavior = self.model.forward(neural_data_hist).cpu().detach().numpy()
+			# Inverse transform predicted behavior
+			predicted_behavior = self.model.neural_scaler.inverse_transform(predicted_behavior)
+			
+			# Update the behavior data in the data dictionary
+			data[loc_neu] = predicted_behavior
 		
 		return data, interpipe
