@@ -1038,6 +1038,53 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		data[self.location_data[0]] = features
 		return data, interpipe
 	
+class SlidingFeatureExtractionBlock(FeatureExtractionBlock):
+	"""
+	Online sliding-window variant of FeatureExtractionBlock.
+
+	Offline `transform` is inherited unchanged (disjoint bins). Online, instead of
+	averaging only the samples that arrived since the last node tick, this block keeps
+	a raw-sample ring buffer of the trailing `window_ms` and, every tick, emits one
+	feature vector (e.g. MAV) computed over that whole window. The emit rate stays the
+	node tick (bin_size_ms); the averaging window is `window_ms` — the two are
+	decoupled (Posh Sec. II-D: 500 Hz stream, 200 ms window). This is required for
+	online<->offline parity when the model was fit at a 200 ms window.
+
+	`FeatureExtractionBlock` (disjoint bins, used by the KF/LDA configs) is left
+	untouched; use this block only where a sliding window is wanted.
+
+	Args (in addition to FeatureExtractionBlock):
+		window_ms: length of the trailing averaging window, in ms.
+		sampling_rate_hz: sample rate of the incoming neural stream, used to size the
+			ring buffer: window_samples = round(window_ms / 1000 * sampling_rate_hz).
+	"""
+	def __init__(self, location_data: list[str], location_ts: list[str], feature_extractor_config: dict, window_ms: float, sampling_rate_hz: float):
+		super().__init__(location_data, location_ts, feature_extractor_config)
+		self.window_ms = window_ms
+		self.sampling_rate_hz = sampling_rate_hz
+		self.window_samples = max(1, int(round(window_ms / 1000.0 * sampling_rate_hz)))
+		self._buffer = None  # trailing raw samples, shape (n <= window_samples, channels)
+
+	def reset_online_state(self):
+		"""Clear the trailing-sample buffer (e.g. between runs)."""
+		self._buffer = None
+
+	def transform_online(self, data, interpipe):
+		new_samples = np.asarray(data[self.location_data[0]])
+		if new_samples.ndim == 1:
+			new_samples = new_samples[None, :]
+		# push newest samples, keep only the trailing window (ring buffer)
+		if self._buffer is None:
+			self._buffer = new_samples
+		else:
+			self._buffer = np.concatenate([self._buffer, new_samples], axis=0)
+		if self._buffer.shape[0] > self.window_samples:
+			self._buffer = self._buffer[-self.window_samples:]
+		features = self.feature_extractor.compute_bin_features(data=self._buffer)["features"]
+		data[self.location_data[0]] = features
+		return data, interpipe
+
+
 class TrialToBinsBlock(DataProcessingBlock):
 	"""
 	A block to assign one or more trial-level variables to one or more bin-level variables based on the trial indices in interpipe['bin_trial_idx'].
