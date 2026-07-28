@@ -1440,13 +1440,14 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 	"""
 	A block for detecting movement onset in the EMG data by thresholding kinematics. 
 	"""
-	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False, avg_across_dims: bool = False):
+	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', directions_key: str = 'movement_directions', mask_key: str = None, plot: bool = False, avg_across_dims: bool = False):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.vel_threshold = vel_threshold
 		self.movement_onset_detection = MovementOnsetDetector({})
 		
 		self.onset_key = onset_key
+		self.directions_key = directions_key
 		self.mask_key = mask_key
 
 		self.plot = plot
@@ -1468,13 +1469,14 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			trial_idx = interpipe['bin_trial_idx']
 
 		# Detect movement onsets
-		onsets = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
+		onsets, directions = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
 
 		# Add onsets to data dictionary
 		if self.avg_across_dims:
 			onsets = np.nanmean(onsets, axis=1, keepdims=True)  # Average across dimensions if specified
 			Donsets = 1
 		interpipe[self.onset_key] = onsets
+		interpipe[self.directions_key] = directions
 
 		if self.plot:
 			fig, ax = plt.subplots(1, 1, figsize=(12, 6))
@@ -1878,6 +1880,75 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		plt.tight_layout()
 		plt.show(block=True)
+
+class VelocityToPostureBlock(DataProcessingBlock):
+	"""
+	A block that converts velocity prompts into sustained postures
+	"""
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, binary: bool = False):
+		super().__init__()
+		self.location_behavior = location_behavior
+		self.location_out = location_out
+		self.location_onsets = location_onsets
+		self.binary = binary
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by converting velocity prompts into sustained postures.
+		"""
+		# Get behavior data and timestamps
+		kinematics = data[self.location_behavior]
+		movement_onsets = interpipe[self.location_onsets]
+
+		trial_idx = interpipe['bin_trial_idx']
+		unique_trials = np.unique(trial_idx)
+
+		D = kinematics.shape[1] // 2  # Assuming behavior has position and velocity for D dimensions
+
+		if movement_onsets.ndim > 1:
+			movement_onsets = np.nanmean(movement_onsets, axis=1)  # Average across dimensions if needed
+
+		kinematics_new = np.zeros_like(kinematics)
+
+		kinematics_new[:, :D] = kinematics[:, :D]  # Copy position data
+		for i in range(D):
+			kinematics_dof = kinematics[:, D + i]
+			for trial in unique_trials:
+
+				if np.isnan(trial):
+					continue
+
+				trial_mask = trial_idx == trial
+				onset = movement_onsets[int(trial)]
+
+				kinematics_trial = kinematics_dof[trial_mask]
+
+				# Find max height and direction in kinematics_trial
+				abs_kinematics_trial = np.abs(kinematics_trial)
+				max_idx = np.argmax(abs_kinematics_trial)
+				max_height = abs_kinematics_trial[max_idx]
+				direction = np.sign(kinematics_trial[max_idx]) if max_height > 0.001 else 0
+
+				if np.isnan(onset):
+					continue  # Skip trials without detected onset
+
+				# Find the index of the onset in the trial
+				onset_idx = onset - np.where(trial_mask)[0][0]
+				print(onset_idx)
+
+				# Set all subsequent time points in this trial to the posture value at onset
+				if self.binary:
+					posture_value = direction
+				else:
+					posture_value = direction * max_height
+
+				kinematics_trial[onset_idx:] = posture_value
+
+				kinematics_new[trial_mask, D + i] = kinematics_trial
+
+		data[self.location_out] = kinematics_new
+
+		return data, interpipe
 
 class ReFITTransformationBlock(DataProcessingBlock):
 
@@ -2360,8 +2431,12 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 				neural_data = standard_scaler.fit_transform(neural_data)
 
 			# Predict behavior using MiniModel
-			neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
-			predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
+			if neural_data.ndim == 2:
+				neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
+				predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
+			elif neural_data.ndim == 3:
+				neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).permute(0, 2, 1)  # (batch, time, features)
+				predicted_behavior = self.model(neural_data, return_all_tsteps=True).permute(0, 2, 1).cpu().detach().numpy()
 			# Inverse transform predicted behavior
 			if self.scale_behavior:
 				predicted_behavior = self.model.behavior_scaler.inverse_transform(predicted_behavior)

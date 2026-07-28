@@ -345,7 +345,7 @@ class LSTMFullHistory_Rank(LSTMTrialInput_Rank):
         """
         super(LSTMFullHistory_Rank, self).__init__(model_params)
 
-    def train_step(self, x, trial_starts, trial_ends, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False):
+    def train_step(self, x, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False):
         """
         Trains LSTM Model
 
@@ -358,24 +358,15 @@ class LSTMFullHistory_Rank(LSTMTrialInput_Rank):
         """
         yhat = self.forward(x, return_all_tsteps=True) # x is a 2d tensor of shape (seq_len, num_inputs) and y is a 2d tensor of shape (seq_len, num_outputs)
 
-        cum_loss = torch.tensor(0.0, device=x.device)
-        for i, start, end in zip(range(len(trial_starts)), trial_starts, trial_ends):
-            subset_yhat = yhat[start:end, :]
-            subset_directions = directions[start+1, :] # TrialToBinsBlock will have directions at start+1 idx
-            subset_onsets = onsets[start+1, :] # TrialToBinsBlock will have onsets at start+1 idx
-            loss = loss_func(subset_yhat, subset_directions, subset_onsets)
-            if loss is None:
-                # This can happen if all onsets are outside the range of the trial for this subset, so this trial doesn't contribute to the loss
-                continue
-            cum_loss += loss
+        loss = loss_func(yhat, directions, onsets, fullhist=True)
         
-        cum_loss.backward()
+        loss.backward()
         optimizer.step()
 
         if(clear_cache):
             del x
         
-        return cum_loss, yhat
+        return loss, yhat
 
 
         

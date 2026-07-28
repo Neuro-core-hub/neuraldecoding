@@ -3,7 +3,7 @@ import numpy as np
 import warnings
 
 class RankLoss:
-    def __init__(self, transition_time = 5, lambda_flat_active = 100, lambda_flat_inactive = 1000, device='cuda'):
+    def __init__(self, transition_time = 5, lambda_flat_active = 1000, lambda_flat_inactive = 1000, device='cuda'):
         """
         
         :param self: RankLoss instance
@@ -20,9 +20,73 @@ class RankLoss:
         
         self.device = torch.device(device)
 
-    def __call__(self, predictions_batch, directions, onsets, print_components=False):
-        return self.rank_loss(predictions_batch, directions, onsets, print_components)
-    
+    def __call__(self, predictions_batch, directions, onsets, print_components=False, fullhist=False):
+        if fullhist:
+            return self.rank_loss_fullhist(predictions_batch, directions, onsets, print_components)
+        else:
+            return self.rank_loss(predictions_batch, directions, onsets, print_components)
+
+    def rank_loss_fullhist(self, predictions_batch, directions, onsets, print_components=False):
+        """
+        Compute the rank loss + flatness loss component, using the full history of predictions.
+
+        :param self: Rank loss instance
+        :param predictions_batch: predictions for the run, shape [N, D]
+        :param directions: directions of current trial per bin, shape [N, D], 1 for positive (flex), -1 for negative (extend) --> augmented by TrialToBins blcok
+        :param onsets: onset of current trial per bin, shape [N, D] --> augmented by TrialToBins block
+        """
+
+        rank_loss = torch.zeros((), device=predictions_batch.device)
+        flat_loss = torch.zeros((), device=predictions_batch.device)
+
+        directions_diff = torch.diff(directions, axis=0)
+        onset_idx = torch.where(torch.any(directions_diff != 0, axis=1))[0] + 1 # this has extra onsets because of trial transitions, but algorithm ignores them because the directions are 0 for those bins
+        onsets = onsets[onset_idx, :]
+        directions = directions[onset_idx, :]
+
+        D = predictions_batch.shape[1]
+        
+        for dof in range(D):
+            n_flat = 0
+            valid_onsets = onsets[:, dof] != 0  # filter out zero onsets
+            dof_onsets = onsets[valid_onsets, dof]
+            dof_directions = directions[valid_onsets, dof] # filter out corresponding directions
+
+            prev_onsets = dof_onsets[:-2] # length ntrials-2
+            next_onsets = dof_onsets[2:] # length ntrials-2
+            dof_onsets = dof_onsets[1:-1] # length ntrials-2
+            dof_directions = dof_directions[1:-1] # length ntrials-2
+
+            if len(dof_onsets) == 0:
+                D -= 1
+                continue  # skip if no valid onsets for this dof, happens with small dataset
+
+            dof_rank_loss = torch.zeros((), device=predictions_batch.device)
+            dof_flat_loss = torch.zeros((), device=predictions_batch.device)
+
+            for prev_onset, onset, next_onset, direction in zip(prev_onsets, dof_onsets, next_onsets, dof_directions):
+                pre_onset = predictions_batch[prev_onset+self.transition_time:onset, dof]
+                post_onset = predictions_batch[onset+self.transition_time:next_onset, dof]
+
+                diffs = post_onset[None, :] - pre_onset[:, None]
+
+                if direction == -1:
+                    diffs = -diffs
+
+                dof_rank_loss += torch.mean(torch.nn.functional.softplus(-diffs))
+                dof_flat_loss += torch.var(post_onset) * (next_onset - onset - self.transition_time)  # encourage flat predictions after onset
+                n_flat += (next_onset - onset - self.transition_time)
+
+            rank_loss += dof_rank_loss / dof_onsets.shape[0] # normalize by number of trials 
+            flat_loss += dof_flat_loss / n_flat # normalize by number of bins contributing to flatness loss
+
+        if print_components:
+            print(f"Rank Loss: {rank_loss.item():.4f}, Flat Loss: {flat_loss.item():.4f}")
+
+        rank_loss = rank_loss / D
+
+        return rank_loss + self.lambda_flat_active * flat_loss
+                
     def rank_loss(self, predictions_batch, directions, onsets, print_components=False):
         """
         Compute only the rank loss + flatness loss component.

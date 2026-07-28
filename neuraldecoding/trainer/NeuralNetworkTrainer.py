@@ -346,6 +346,7 @@ class LSTMTrainer(NNTrainer):
 class LSTMRankTrainer(LSTMTrainer):
     def __init__(self, preprocessor, config, dataset = None):
         super().__init__(preprocessor, config, dataset)
+        self.fullhist = config.training.get('fullhist', False)
     
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
@@ -394,15 +395,7 @@ class LSTMRankTrainer(LSTMTrainer):
                 
                 self.model.train()
                 self.optimizer.zero_grad()
-                if self.trialized_loss:
-                    if iteration == 0:
-                        n_bins = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
-                        train_ends_mask = self.preprocessor.saved_data['bin_trial_end_idx'] < n_bins
-                        starts = self.preprocessor.saved_data['bin_trial_start_idx'][train_ends_mask]
-                        ends = self.preprocessor.saved_data['bin_trial_end_idx'][train_ends_mask]
-                    loss, yhat = self.model.train_step(x.to(self.device), starts, ends, directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
-                else:
-                    loss, yhat = self.model.train_step(x.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -498,24 +491,13 @@ class LSTMRankTrainer(LSTMTrainer):
                 y = trial['kin']
                 directions = trial['directions']
                 onsets = trial['onsets']
-                if self.trialized_loss:
+                if self.fullhist:
                     yhat = self.model.forward(x.to(self.device), return_all_tsteps=True)
 
                     val_bin_start = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
-                    start_mask = self.preprocessor.saved_data['bin_trial_start_idx'] >= val_bin_start
-                    starts = self.preprocessor.saved_data['bin_trial_start_idx'][start_mask] - val_bin_start
-                    ends = self.preprocessor.saved_data['bin_trial_end_idx'][start_mask] - val_bin_start
+                    onsets = torch.where(onsets != 0, onsets - val_bin_start, onsets)
 
-                    cum_loss = torch.tensor(0.0, device=x.device)
-                    for i, start, end in zip(range(len(starts)), starts, ends):
-                        subset_yhat = yhat[start:end, :]
-                        subset_directions = directions[start, :] # TrialToBinsBlock will have directions at start idx
-                        subset_onsets = onsets[start, :] # TrialToBinsBlock will have onsets at start idx
-                        loss = self.loss_func(subset_yhat, subset_directions, subset_onsets)
-                        if loss is None:
-                            # This can happen if all onsets are outside the range of the trial for this subset, so this trial doesn't contribute to the loss
-                            continue
-                        cum_loss += loss
+                    cum_loss = self.loss_func(yhat, directions, onsets, fullhist=True)
                     
                     val_all_predictions = yhat.cpu().numpy()
                     val_all_targets = y.cpu().numpy()
@@ -553,24 +535,37 @@ class LSTMRankTrainer(LSTMTrainer):
         return val_loss, val_all_predictions, val_all_targets
     
     def compute_behavior_scaler(self):
-        # After training, compute behavior scaler via MinMax on output of model with input x_full_train
+        # After training, compute behavior scaler via 10th-90th percentile scaling on output of model with input x_full_train
         self.model.eval()
         with torch.no_grad():
             x_full_train = self.data_dict['neural_train'].to(self.device)
             train_predictions = self.model.forward(x_full_train, return_all_tsteps=True).detach().cpu().numpy()
 
-        from sklearn.preprocessing import MinMaxScaler
         idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
         train_predictions = train_predictions[:, idx]
-        behavior_scaler_internal = MinMaxScaler()
-        behavior_scaler_internal.fit(train_predictions)
 
-        # We need the inverse_transform method to go from min-max to 0-1, and not the transform method
+        p10 = np.percentile(train_predictions, 10, axis=0)
+        p90 = np.percentile(train_predictions, 90, axis=0)
+        behavior_scaler_internal = PercentileScaler(p10, p90)
+
+        # We need the inverse_transform method to go from percentile-scaled to 0-1, and not the transform method
         # Creating this dummy class to swap the methods
         behavior_scaler = BehaviorScalerRank(behavior_scaler_internal)
-        
+
         self.model.behavior_scaler = behavior_scaler
 
+class PercentileScaler:
+    """Maps the 10th percentile -> 0 and the 90th percentile -> 1, per column."""
+    def __init__(self, p10, p90, eps=1e-8):
+        self.p10 = np.asarray(p10)
+        self.range = np.asarray(p90) - self.p10
+        self.range = np.where(self.range < eps, eps, self.range)  # avoid divide-by-zero on flat DOFs
+
+    def transform(self, data):
+        return (data - self.p10) / self.range
+
+    def inverse_transform(self, data):
+        return data * self.range + self.p10
 class BehaviorScalerRank:
     def __init__(self, scaler):
         self.scaler = scaler
