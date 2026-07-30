@@ -269,7 +269,6 @@ class DataSplitBlock(DataFormattingBlock):
 		self.split_ratio = split_ratio
 		self.split_seed = split_seed
 		self.split_trials = split_trials
-		self.location = location
 		self.interpipe_location = interpipe_location
 		self.data_keys = data_keys
 		self.shuffle = shuffle
@@ -2325,7 +2324,7 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing behavior data using a pre-trained LSTM (from a subset of electrodes, optional)
 	"""
-	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list = None, device='cuda', align_amplitudes=False):
+	def __init__(self, location_neural: str, location_behavior: str, cfg_path: str, model_path: str, m_electrodes: list = None, device='cuda', align_amplitudes=False, scale_behavior=True):
 		super().__init__()
 		if isinstance(location_neural, str):
 			self.location_neural = [location_neural]
@@ -2410,9 +2409,9 @@ class LSTMDenoiseReplacementBlock(DataProcessingBlock):
 		for loc_neu in self.location_neural:
 			# Get neural data, if not aligning amplitudes, should already be normalized
 			if self.m_electrodes is None:
-				neural_data_denorm = data[loc_neu]
+				neural_data = data[loc_neu]
 			else:
-				neural_data_denorm = data[loc_neu][:, self.m_electrodes] # Select subset of electrodes
+				neural_data = data[loc_neu][:, self.m_electrodes] # Select subset of electrodes
 
 			# Align the amplitudes of the neural data, if desired. Incorporated originally to better match human and monkey EMG amplitude ranges.
 			if self.align_amplitudes:
@@ -2424,12 +2423,12 @@ class LSTMDenoiseReplacementBlock(DataProcessingBlock):
 				neural_data = standard_scaler.fit_transform(neural_data)
 
 			# Predict behavior using MiniModel
-			neural_data = self.model.neural_scaler.transform(neural_data_denorm)
-			neural_data_hist = np.zeros((int(neural_data.shape[0]), int(neural_data.shape[1]), self.seq_length))
-			neural_data_hist[:, :, 0] = neural_data
+			neural_data_norm = self.model.neural_scaler.transform(neural_data)
+			neural_data_hist = np.zeros((int(neural_data_norm.shape[0]), int(neural_data_norm.shape[1]), self.seq_length))
+			neural_data_hist[:, :, 0] = neural_data_norm
 			for k1 in range(self.seq_length - 1):
 				k = k1 + 1
-				neural_data_hist[k:, :, k] = neural_data[0:-k, :]
+				neural_data_hist[k:, :, k] = neural_data_norm[0:-k, :]
 			neural_data_hist = torch.tensor(neural_data_hist, dtype=torch.float32, device=self.model.device)
 			neural_data_hist = torch.flip(neural_data_hist, (2,))
 			predicted_behavior = self.model.forward(neural_data_hist).cpu().detach().numpy()
