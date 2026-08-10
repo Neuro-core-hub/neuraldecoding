@@ -938,6 +938,57 @@ class NormalizationBlock(DataProcessingBlock):
 				data[loc] = data[loc].reshape(1, -1)
 			data[loc] = normalizer.transform(data[loc])
 		return data, interpipe
+	
+class WillseyScalingBlock(DataProcessingBlock):
+	"""
+	A block for applying Willsey scaling to the data at specified locations.
+	"""
+	def __init__(self, location, normalizer_params):
+		super().__init__()
+		self.location = location
+		self.normalizer_params = normalizer_params
+	
+	def transform(self, data, interpipe):	
+		if interpipe['is_train']:	
+			if self.normalizer_params.get('save_denorm_data_ram', False):
+				for loc in self.location:
+					interpipe[f'{loc}_denorm_data'] = data[loc].copy()
+					interpipe['save_keys_ram'].append(f'{loc}_denorm_data')
+			
+			self.stretch_factor = self.normalizer_params['stretch_factor']
+			
+			for loc in self.location:
+				normalizer = self.stretch_factor / np.std(data[loc], axis=0)
+				data[loc] = data[loc] * normalizer
+
+			if self.normalizer_params['is_save']:
+				if 'save_path' not in self.normalizer_params:
+					raise ValueError("NormalizationBlock requires 'save_path' in normalizer_params when is_save is True.")
+				os.makedirs(os.path.dirname(self.normalizer_params['save_path']), exist_ok=True)
+				with open(self.normalizer_params['save_path'], 'wb') as f:
+					pickle.dump(normalizer, f)
+			
+			interpipe[f'{self.location[0]}_normalizer'] = normalizer
+			interpipe['save_keys_ram'].append(f'{self.location[0]}_normalizer')
+			
+			return data, interpipe
+		else:
+			with open(self.normalizer_params['save_path'], 'rb') as f:
+				normalizer = pickle.load(f)
+			for loc in self.location:
+				data[loc] = data[loc] * normalizer
+			return data, interpipe
+
+	def transform_online(self, data, interpipe):
+		with open(self.normalizer_params['save_path'], 'rb') as f:
+			normalizer = pickle.load(f)
+		
+		for loc in self.location:
+			if data[loc].ndim == 1:
+				data[loc] = data[loc].reshape(1, -1)
+			data[loc] = data[loc] * normalizer
+		
+		return data, interpipe
 
 class EnforceTensorBlock(DataProcessingBlock):
 	"""
