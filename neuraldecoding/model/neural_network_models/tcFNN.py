@@ -23,7 +23,13 @@ class TCN(nn.Module, NeuralNetworkModel):
         self.history = params['history']
         self.dropout_p = params['dropout_p']
         self.denormalize = params['denormalize']
+        self.willsey_scaling = params.get('willsey_scaling', False)
         self.scaler = OutputScaler(None, None)
+        self.bias_offset = None
+        self.gain = None
+
+        # first batchnorm layer
+        self.bn0 = nn.BatchNorm1d(self.input_size)
 
         # convolutional input layer
         self.cn = nn.Conv1d(self.conv_size, self.conv_size_out, 1, bias=True)
@@ -52,6 +58,9 @@ class TCN(nn.Module, NeuralNetworkModel):
     def forward(self, x, BadChannels=[]):
         x[:, BadChannels, :] = 0
 
+        # first batchnorm
+        x = self.bn0(x)
+
         # conv layer
         x = self.cn(x.permute(0, 2, 1))
         x = flatten(x)
@@ -68,6 +77,21 @@ class TCN(nn.Module, NeuralNetworkModel):
             scores = self.fcout(scores)
         return scores
     
+    def train_step(self, x, y, optimizer, loss_func, clear_cache = False, return_y = False):
+        yhat = self.forward(x)
+
+        loss = loss_func(yhat, y)
+
+        loss.backward()
+        optimizer.step()
+        if(clear_cache):
+            del x, y
+
+        if return_y:
+            return loss, yhat, y
+        else:
+            return loss, yhat
+    
     def save_model(self, fpath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
@@ -77,6 +101,11 @@ class TCN(nn.Module, NeuralNetworkModel):
             "behavior_scaler": getattr(self, 'behavior_scaler', None),
             "model_type": "TCN"
         }
+
+        if self.willsey_scaling:
+            checkpoint_dict["bias"] = getattr(self, 'bias_offset', None)
+            checkpoint_dict["gain"] = getattr(self, 'gain', None)
+
         folder = os.path.dirname(fpath)
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
