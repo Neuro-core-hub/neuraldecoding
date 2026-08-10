@@ -263,7 +263,7 @@ class LSTMTrialInput_Rank(LSTMTrialInput):
         self.past = model_params.get("past", 0)
         self.n_dofs = model_params.get("n_dofs", 2)
         
-    def train_step(self, x, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False): 
+    def train_step(self, x, y, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False): 
         """
         Trains LSTM Model
         """
@@ -345,7 +345,7 @@ class LSTMFullHistory_Rank(LSTMTrialInput_Rank):
         """
         super(LSTMFullHistory_Rank, self).__init__(model_params)
 
-    def train_step(self, x, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False):
+    def train_step(self, x, y, directions, onsets, optimizer, loss_func, clear_cache = False, return_y = False):
         """
         Trains LSTM Model
 
@@ -358,7 +358,7 @@ class LSTMFullHistory_Rank(LSTMTrialInput_Rank):
         """
         yhat = self.forward(x, return_all_tsteps=True) # x is a 2d tensor of shape (seq_len, num_inputs) and y is a 2d tensor of shape (seq_len, num_outputs)
 
-        loss = loss_func(yhat, directions, onsets, fullhist=True)
+        loss = loss_func(yhat, y, directions, onsets, fullhist=True)
         
         loss.backward()
         optimizer.step()

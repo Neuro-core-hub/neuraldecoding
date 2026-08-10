@@ -1933,7 +1933,7 @@ class VelocityToPostureBlock(DataProcessingBlock):
 					continue  # Skip trials without detected onset
 
 				# Find the index of the onset in the trial
-				onset_idx = onset - np.where(trial_mask)[0][0]
+				onset_idx = int(onset - np.where(trial_mask)[0][0])
 				print(onset_idx)
 
 				# Set all subsequent time points in this trial to the posture value at onset
@@ -2444,4 +2444,31 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 			# Update the behavior data in the data dictionary
 			data[loc_beh] = predicted_behavior
 		
+		return data, interpipe
+
+class ConcatYtoXBlock(DataProcessingBlock):
+	"""
+	A block for adding Y data to X data in the data dictionary.
+	"""
+	def __init__(self, location_X: str, location_Y: str, location_out: str, idx_Y: list = None):
+		super().__init__()
+		self.location_X = location_X
+		self.location_Y = location_Y
+		self.location_out = location_out
+		self.idx_Y = idx_Y
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding Y data to X data.
+		"""
+		X_data = data[self.location_X]
+		Y_data = data[self.location_Y]
+
+		if self.idx_Y is not None:
+			Y_data = Y_data[:, self.idx_Y]
+
+		# Concatenate along the last dimension
+		concatenated_data = np.concatenate((X_data, Y_data), axis=-1)
+		data[self.location_out] = concatenated_data
+
 		return data, interpipe

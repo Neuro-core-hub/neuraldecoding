@@ -3,7 +3,7 @@ import numpy as np
 import warnings
 
 class RankLoss:
-    def __init__(self, transition_time = 5, lambda_flat_active = 1000, lambda_flat_inactive = 1000, device='cuda'):
+    def __init__(self, transition_time = 5, lambda_flat_active = 0, lambda_flat_inactive = 1000, device='cuda'):
         """
         
         :param self: RankLoss instance
@@ -20,13 +20,13 @@ class RankLoss:
         
         self.device = torch.device(device)
 
-    def __call__(self, predictions_batch, directions, onsets, print_components=False, fullhist=False):
+    def __call__(self, predictions_batch, y, directions, onsets, print_components=False, fullhist=False):
         if fullhist:
-            return self.rank_loss_fullhist(predictions_batch, directions, onsets, print_components)
+            return self.rank_loss_fullhist(predictions_batch, y, directions, onsets, print_components)
         else:
-            return self.rank_loss(predictions_batch, directions, onsets, print_components)
+            return self.rank_loss(predictions_batch, y, directions, onsets, print_components)
 
-    def rank_loss_fullhist(self, predictions_batch, directions, onsets, print_components=False):
+    def rank_loss_fullhist(self, predictions_batch, y, directions, onsets, print_components=False):
         """
         Compute the rank loss + flatness loss component, using the full history of predictions.
 
@@ -35,6 +35,11 @@ class RankLoss:
         :param directions: directions of current trial per bin, shape [N, D], 1 for positive (flex), -1 for negative (extend) --> augmented by TrialToBins blcok
         :param onsets: onset of current trial per bin, shape [N, D] --> augmented by TrialToBins block
         """
+        if predictions_batch.ndim == 1:
+            predictions_batch = predictions_batch.unsqueeze(1)
+            y = y.unsqueeze(1)
+            directions = directions.unsqueeze(1)
+            onsets = onsets.unsqueeze(1)
 
         rank_loss = torch.zeros((), device=predictions_batch.device)
         flat_loss = torch.zeros((), device=predictions_batch.device)
@@ -85,9 +90,12 @@ class RankLoss:
 
         rank_loss = rank_loss / D
 
+        if torch.isnan(rank_loss):
+            rank_loss = torch.tensor(0.0, device=rank_loss.device) # not enough data to compute loss, return zero
+
         return rank_loss + self.lambda_flat_active * flat_loss
                 
-    def rank_loss(self, predictions_batch, directions, onsets, print_components=False):
+    def rank_loss(self, predictions_batch, y, directions, onsets, print_components=False):
         """
         Compute only the rank loss + flatness loss component.
         
@@ -157,3 +165,39 @@ class RankLoss:
             print(f"Rank Loss: {rank_loss.item():.4f}, Flat Loss Active: {flat_loss_active.item():.4f}, Flat Loss Inactive: {flat_loss_inactive.item():.4f}")
 
         return rank_loss + self.lambda_flat_active * flat_loss_active + self.lambda_flat_inactive * flat_loss_inactive
+
+class RankMSEDOFLoss:
+    def __init__(self, dof_loss = [1,0], transition_time = 5, lambda_flat_active = 0, lambda_flat_inactive = 1000, device='cuda'):
+        """
+        
+        :param self: RankLoss instance
+        :param dof_loss: how much to weight rank vs. MSE for each degree of freedom
+        :param transition_time: number of time steps after onset to apply flatness loss
+        :param lambda_bound: weight for the bounding loss term
+        :param device: device to run the computations on ('cuda', usually)
+
+        TODO: kl divergence for different dofs
+        """
+        self.dof_loss = dof_loss
+        self.rank_loss_class = RankLoss(transition_time, lambda_flat_active, lambda_flat_inactive, device)
+        self.mse_loss = torch.nn.MSELoss()
+        
+        self.device = torch.device(device)
+
+    def __call__(self, predictions_batch, y, directions, onsets, print_components=False, fullhist=False):
+
+        return self.rankmsedofloss(predictions_batch, y, directions, onsets, print_components)
+
+    def rankmsedofloss(self, predictions_batch, y, directions, onsets, print_components=False):
+
+        D = y.shape[1]
+        if D != len(self.dof_loss):
+            raise ValueError("Number of degrees of freedom in y must match the length of dof_loss")
+
+        total_loss = 0
+        for i, lambda_rank in enumerate(self.dof_loss):
+            rank_loss_dof = self.rank_loss_class(predictions_batch[:, i], y[:, i], directions[:, i], onsets[:, i], print_components, fullhist=True)
+            mse_loss_dof = self.mse_loss(y[:, i], predictions_batch[:, i])
+            total_loss += lambda_rank * rank_loss_dof + (1 - lambda_rank) * mse_loss_dof
+
+        return total_loss
