@@ -1,3 +1,5 @@
+from xml.parsers.expat import model
+
 import hydra
 from omegaconf import DictConfig
 import numpy as np
@@ -661,3 +663,34 @@ class IterationNNTrainer(NNTrainer):
                         self.scheduler.step()
                 iteration += 1
         return self.model, self.logger
+
+class TCFNNTrainer(NNTrainer):
+    def __init__(self, preprocessor, config, dataset = None):
+        super().__init__(preprocessor, config, dataset)
+
+    def train_model(self, train_loader=None, valid_loader=None):
+        if self.cfg.training.get("is_refit", False):
+            if self.cfg.model.params.get("prev_model_path", None) is None:
+                raise ValueError("model.params.prev_model_path is not set in config. Necessary for refit training.")
+            else:
+                # Load the model first
+                self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
+
+        self.model, self.logger = super().train_model(train_loader, valid_loader)
+
+        if self.model.willsey_scaling:
+            yhat = self.model.forward(self.data_dict['X_train'].to(self.device)).detach().cpu().numpy()
+            self.model.bias_offset = np.mean(yhat, axis=0) - np.mean(self.data_dict['Y_train'].detach().cpu().numpy(), axis=0)
+            self.model.gain = 1 / (3 * np.std(yhat, axis=0))
+            self.model.behavior_scaler = WillseyBehaviorScaler(self.model.bias_offset, self.model.gain)
+
+        return self.model, self.logger
+    
+class WillseyBehaviorScaler:
+    def __init__(self, bias_offset, gain):
+        self.bias_offset = bias_offset
+        self.gain = gain
+    def transform(self, data):
+        return (data / (0.05 * self.gain)) + self.bias_offset
+    def inverse_transform(self, data):
+        return 0.05 * self.gain * (data - self.bias_offset)
