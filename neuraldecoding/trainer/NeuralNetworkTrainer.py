@@ -10,6 +10,7 @@ from neuraldecoding.utils import loss_functions
 from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model import neural_network_models
 from neuraldecoding.utils.special_datasets import BehaviorDatasetCustom
+import matplotlib.pyplot as plt
 import neuraldecoding
 import warnings
 import copy
@@ -534,7 +535,26 @@ class LSTMRankTrainer(LSTMTrainer):
                 val_all_predictions = np.concatenate(val_all_predictions, axis=0)
                 val_all_targets = np.concatenate(val_all_targets, axis=0)
 
+            self._update_val_plot(val_all_targets[:, 0], val_all_predictions[:, 0])
+
         return val_loss, val_all_predictions, val_all_targets
+
+    def _update_val_plot(self, targets, predictions):
+        if not hasattr(self, '_val_fig') or not plt.fignum_exists(self._val_fig.number):
+            plt.ion()
+            self._val_fig, self._val_ax = plt.subplots(figsize=(10, 5))
+            self._val_target_line, = self._val_ax.plot([], [], label='Target')
+            self._val_pred_line, = self._val_ax.plot([], [], label='Prediction')
+            self._val_ax.legend()
+            self._val_fig.show()
+
+        x = np.arange(len(targets))
+        self._val_target_line.set_data(x, targets)
+        self._val_pred_line.set_data(x, predictions)
+        self._val_ax.relim()
+        self._val_ax.autoscale_view()
+        self._val_fig.canvas.draw_idle()
+        self._val_fig.canvas.flush_events()
     
     def compute_behavior_scaler(self):
         if self.dof_selections is not None:
