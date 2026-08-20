@@ -670,12 +670,11 @@ class TCFNNTrainer(NNTrainer):
 
     def train_model(self, train_loader=None, valid_loader=None):
         if self.cfg.training.get("is_refit", False):
-            if self.cfg.model.params.get("prev_model_path", None) is None:
+            if self.cfg.training.get("prev_model_path", None) is None:
                 raise ValueError("model.params.prev_model_path is not set in config. Necessary for refit training.")
             else:
                 # Load the model first
-                self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
-
+                self.model.load_model(fpath=self.cfg.training.get("prev_model_path"))
         self.model, self.logger = super().train_model(train_loader, valid_loader)
 
         if self.model.willsey_scaling:
