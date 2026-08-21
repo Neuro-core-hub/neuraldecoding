@@ -87,7 +87,7 @@ class FeatureExtractor:
     
     def _validate_config(self):
         """Validate the configuration parameters."""
-        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length']
+        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length', 'zero_crossings']
         
         # Flatten nested feature types for validation
         def flatten_feature_types(ft):
@@ -690,6 +690,22 @@ class FeatureExtractor:
         """
         if data.shape[0] == 0:
             return np.array([])
+
+        if feature_type == 'zero_crossings':
+            # Zero crossings: how often the signal changes sign within the window.
+            # A frequency-domain feature, so it carries information MAV cannot --
+            # MAV is pure amplitude. Requires the signal to be zero-mean, which
+            # holds for band-passed EMG but NOT for an already-rectified envelope:
+            # rectified data never crosses zero and this returns 0 everywhere.
+            #
+            # `threshold` (in raw signal units) rejects sign flips caused by noise
+            # riding near zero, which otherwise dominate the count at low
+            # activation. 0 disables it.
+            thr = float(feature_params.get('threshold', 0.0))
+            crossed = (data[:-1] * data[1:]) < 0
+            if thr > 0:
+                crossed = crossed & (np.abs(np.diff(data, axis=0)) >= thr)
+            return crossed.sum(axis=0).astype(float)
 
         if feature_type == 'mav':
             # Mean Absolute Value
