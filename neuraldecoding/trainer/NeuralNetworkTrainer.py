@@ -12,6 +12,7 @@ from neuraldecoding.utils import loss_functions
 from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model import neural_network_models
 from neuraldecoding.utils.special_datasets import BehaviorDatasetCustom
+import matplotlib.pyplot as plt
 import neuraldecoding
 import warnings
 import copy
@@ -536,21 +537,42 @@ class LSTMRankTrainer(LSTMTrainer):
                 val_all_predictions = np.concatenate(val_all_predictions, axis=0)
                 val_all_targets = np.concatenate(val_all_targets, axis=0)
 
+            self._update_val_plot(val_all_targets[:, 0], val_all_predictions[:, 0])
+
         return val_loss, val_all_predictions, val_all_targets
+
+    def _update_val_plot(self, targets, predictions):
+        if not hasattr(self, '_val_fig') or not plt.fignum_exists(self._val_fig.number):
+            plt.ion()
+            self._val_fig, self._val_ax = plt.subplots(figsize=(10, 5))
+            self._val_target_line, = self._val_ax.plot([], [], label='Target')
+            self._val_pred_line, = self._val_ax.plot([], [], label='Prediction')
+            self._val_ax.legend()
+            self._val_fig.show()
+
+        x = np.arange(len(targets))
+        self._val_target_line.set_data(x, targets)
+        self._val_pred_line.set_data(x, predictions)
+        self._val_ax.relim()
+        self._val_ax.autoscale_view()
+        self._val_fig.canvas.draw_idle()
+        self._val_fig.canvas.flush_events()
     
-    def compute_behavior_scaler(self):
+    def compute_behavior_scaler(self, percentiles = [10, 90]):
         if self.dof_selections is not None:
             # Mixed DOF scaler approach
             self.model.eval()
             with torch.no_grad():
                 x_full_train = self.data_dict['neural_train'].to(self.device)
                 train_predictions = self.model.forward(x_full_train, return_all_tsteps=True).detach().cpu().numpy()
+                scaler_trim = int(0.25 * np.shape(train_predictions)[0])
+                train_predictions = train_predictions[scaler_trim:] # don't use the first points of the network to compute the scaler, RNN isn't warmed up yet
             prompts = self.preprocessor.saved_data['behavior_train_denorm_data']
     
             scalers = []
             for i, selection in enumerate(self.dof_selections):
                 if selection == 1: # rank scaler
-                    scalers.append(BehaviorScalerRank(PercentileScaler(np.percentile(train_predictions[:, i], 10, axis=0), np.percentile(train_predictions[:, i], 90, axis=0))))
+                    scalers.append(BehaviorScalerRank(PercentileScaler(np.percentile(train_predictions[:, i], percentiles[0], axis=0), np.percentile(train_predictions[:, i], percentiles[1], axis=0))))
                 elif selection == 0: # standard scaler
                     prompts_dof = prompts[:, i]
                     scalers.append(sklearn.preprocessing.StandardScaler().fit(prompts_dof.reshape(-1, 1)))
@@ -568,15 +590,15 @@ class LSTMRankTrainer(LSTMTrainer):
             idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
             train_predictions = train_predictions[:, idx]
 
-            p10 = np.percentile(train_predictions, 10, axis=0)
-            p90 = np.percentile(train_predictions, 90, axis=0)
-            behavior_scaler_internal = PercentileScaler(p10, p90)
+            p0 = np.percentile(train_predictions, percentiles[0], axis=0)
+            p1 = np.percentile(train_predictions, percentiles[1], axis=0)
+            behavior_scaler_internal = PercentileScaler(p0, p1)
 
             # We need the inverse_transform method to go from percentile-scaled to 0-1, and not the transform method
             # Creating this dummy class to swap the methods
             behavior_scaler = BehaviorScalerRank(behavior_scaler_internal)
 
-            self.model.behavior_scaler = behavior_scaler
+        self.model.behavior_scaler = behavior_scaler
 
 class MixedDOFScaler:
     def __init__(self, scalers):
@@ -590,16 +612,16 @@ class MixedDOFScaler:
     
 class PercentileScaler:
     """Maps the 10th percentile -> 0 and the 90th percentile -> 1, per column."""
-    def __init__(self, p10, p90, eps=1e-8):
-        self.p10 = np.asarray(p10)
-        self.range = np.asarray(p90) - self.p10
+    def __init__(self, p0, p1, eps=1e-8):
+        self.p0 = np.asarray(p0)
+        self.range = np.asarray(p1) - self.p0
         self.range = np.where(self.range < eps, eps, self.range)  # avoid divide-by-zero on flat DOFs
 
     def transform(self, data):
-        return (data - self.p10) / self.range
+        return (data - self.p0) / self.range
 
     def inverse_transform(self, data):
-        return data * self.range + self.p10
+        return data * self.range + self.p0
     
 class BehaviorScalerRank:
     def __init__(self, scaler):
