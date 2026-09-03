@@ -20,12 +20,18 @@ class TCN(nn.Module, NeuralNetworkModel):
         self.conv_size_out = params['conv_size_out']
         self.layer_size_list = params['layer_size_list']
         self.num_states = params['num_states']
+        self.history = params['history']
         self.dropout_p = params['dropout_p']
         self.denormalize = params['denormalize']
+        self.willsey_scaling = params.get('willsey_scaling', False)
         self.scaler = OutputScaler(None, None)
+        self.bias_offset = None
+        self.gain = None
+
+        # first batchnorm layer
+        self.bn0 = nn.BatchNorm1d(self.input_size)
 
         # convolutional input layer
-        self.bncn = nn.BatchNorm1d(self.input_size)
         self.cn = nn.Conv1d(self.conv_size, self.conv_size_out, 1, bias=True)
 
         # middle layer(s)
@@ -52,14 +58,16 @@ class TCN(nn.Module, NeuralNetworkModel):
     def forward(self, x, BadChannels=[]):
         x[:, BadChannels, :] = 0
 
+        # first batchnorm
+        x = self.bn0(x)
+
         # conv layer
-        x = self.bncn(x)
         x = self.cn(x.permute(0, 2, 1))
         x = flatten(x)
 
         # middle layers
         for layer in self.hiddenlayers:
-            x = F.relu( layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
+            x = F.relu(layer[2](layer[1](layer[0](x))) ) # BN -> linear -> DO -> relu
 
         # output 
         if self.denormalize:
@@ -69,7 +77,22 @@ class TCN(nn.Module, NeuralNetworkModel):
             scores = self.fcout(scores)
         return scores
     
-    def save_model(self, filepath):
+    def train_step(self, x, y, optimizer, loss_func, clear_cache = False, return_y = False):
+        yhat = self.forward(x)
+
+        loss = loss_func(yhat, y)
+
+        loss.backward()
+        optimizer.step()
+        if(clear_cache):
+            del x, y
+
+        if return_y:
+            return loss, yhat, y
+        else:
+            return loss, yhat
+    
+    def save_model(self, fpath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_scaler": self.scaler,
@@ -78,13 +101,18 @@ class TCN(nn.Module, NeuralNetworkModel):
             "behavior_scaler": getattr(self, 'behavior_scaler', None),
             "model_type": "TCN"
         }
-        folder = os.path.dirname(filepath)
+
+        if self.willsey_scaling:
+            checkpoint_dict["bias"] = getattr(self, 'bias_offset', None)
+            checkpoint_dict["gain"] = getattr(self, 'gain', None)
+
+        folder = os.path.dirname(fpath)
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
-        torch.save(checkpoint_dict, filepath)
+        torch.save(checkpoint_dict, fpath)
     
-    def load_model(self, filepath):
-        checkpoint = torch.load(filepath, weights_only = False)
+    def load_model(self, fpath, running_online : bool = False):
+        checkpoint = torch.load(fpath, weights_only = False)
 
         if checkpoint["model_type"] != "TCN":
             raise Exception("Tried to load model that isn't a TCN Instance")
@@ -104,6 +132,33 @@ class TCN(nn.Module, NeuralNetworkModel):
             self.behavior_scaler = checkpoint["behavior_scaler"]
         else:
             self.behavior_scaler = None
+
+class TCNTrialInput(TCN):
+    def __init__(self, params):
+        """
+        Willsey's Convolutional Net with Trial Inputs
+        """
+        super(TCNTrialInput, self).__init__(params)
+
+    def train_step(self, x, y, optimizer, loss_func, clear_cache = False, return_y = False):
+        if x.dim() >= 3:
+            x = x.squeeze(0)  # Remove extra batch dimension for trial input models
+        if y.dim() >= 3:
+            y = y.squeeze(0)  # Remove extra batch dimension for trial input models
+            
+        yhat = self.forward(x)
+
+        loss = loss_func(yhat, y)
+
+        loss.backward()
+        optimizer.step()
+        if(clear_cache):
+            del x, y
+
+        if return_y:
+            return loss, yhat, y
+        else:
+            return loss, yhat
 
 class TCN_old(nn.Module, NeuralNetworkModel):
     # Old version
@@ -215,19 +270,19 @@ class TCN_old(nn.Module, NeuralNetworkModel):
         
         return scores
     
-    def save_model(self, filepath):
+    def save_model(self, fpath):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
             "model_type": "TCFNN_old"
         }
-        folder = os.path.dirname(filepath)
+        folder = os.path.dirname(fpath)
         if folder and not os.path.exists(folder):
             os.makedirs(folder)
-        torch.save(checkpoint_dict, filepath)
+        torch.save(checkpoint_dict, fpath)
     
-    def load_model(self, filepath):
-        checkpoint = torch.load(filepath)
+    def load_model(self, fpath, running_online : bool = False):
+        checkpoint = torch.load(fpath)
 
         if checkpoint["model_type"] != "TCFNN_old":
             raise Exception("Tried to load model that isn't an old TCFNN Instance")

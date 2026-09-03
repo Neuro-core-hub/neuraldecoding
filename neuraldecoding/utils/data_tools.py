@@ -166,29 +166,29 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
 
         for tr in train_trials.tolist():
             s = int(boundaries[tr].item())
-            e = int(boundaries[tr + 1].item())
+            e = int(boundaries[tr+1].item())
             train_mask[s:e] = True
     
         for tr in val_trials.tolist():
             s = int(boundaries[tr].item())
-            e = int(boundaries[tr + 1].item())
+            e = int(boundaries[tr+1].item())
             val_mask[s:e] = True
 
         for tr in test_trials.tolist():
             s = int(boundaries[tr].item())
-            e = int(boundaries[tr + 1].item())
+            e = int(boundaries[tr+1].item())
             test_mask[s:e] = True
-        
+
         if isinstance(split_ratio, float):
             if return_masks:
-                return ((x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])), (train_mask, test_mask)
+                return ((x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])), (train_mask, test_mask), (train_trials.numpy(), test_trials.numpy())
             else:
-                return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])
+                return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask]), (train_trials.numpy(), test_trials.numpy())
         else:
             if return_masks:
-                return ((x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])), (train_mask, val_mask, test_mask)
+                return ((x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])), (train_mask, val_mask, test_mask), (train_trials.numpy(), test_trials.numpy())
             else:
-                return (x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])
+                return (x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask]), (train_trials.numpy(), test_trials.numpy())
 
     # ----- Sample-wise split (no trial info) -----
     current_start_idx = 0
@@ -290,6 +290,83 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
         else:
             return (x[train_idx], y[train_idx]), (x[val_idx], y[val_idx]), (x[test_idx], y[test_idx])
 
+def data_split_trial_splice(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=False, return_masks=False, dataset_ratio=1.0, val_run=None):
+    """
+    Similar to data_split_trial, but returns split data in between the trial at which split_ratio cuts through.
+    """
+    n = len(x)
+    if len(y) != n:
+        raise ValueError("x and y must have the same length.")
+    
+    if isinstance(dataset_ratio, float):
+        dataset_ratio = [dataset_ratio]
+    
+    assert sum(dataset_ratio) == 1, "dataset_ratio must sum to 1"
+
+    g = torch.Generator().manual_seed(seed)
+    device = x.device if torch.is_tensor(x) else torch.device('cpu')
+
+    if torch.is_tensor(trial_idx):
+            tstarts = trial_idx.flatten().long().cpu()
+    else:
+        tstarts = torch.as_tensor(trial_idx, dtype=torch.long)
+    tstarts = tstarts.clamp(0, max(0, n - 1))
+    tstarts, _ = torch.sort(tstarts)
+
+    # Build boundaries: [t0, t1, ..., tn, N]
+    boundaries = torch.cat([tstarts, torch.tensor([n], dtype=torch.long)])
+
+    n_trials = len(tstarts)
+    n_val_trials = 0
+    tsplice1 = 0
+    tsplice2 = 0
+    if isinstance(split_ratio, float):
+        n_train_trials = int(n_trials * split_ratio)
+        trial_splice1 = trial_splice2 = int(split_ratio * n)
+        for i in range(len(boundaries)-1):
+            if trial_splice1 <= boundaries[i+1] & trial_splice1 >= boundaries[i]:
+                tsplice1 = tsplice2 = i+1
+                break
+    else:
+        n_train_trials = int(n_trials * split_ratio[0])
+        n_val_trials = int(n_trials * split_ratio[1])
+        trial_splice1 = int(split_ratio[0] * n)
+        trial_splice2 = int(split_ratio[1] * n)
+        for i in range(len(boundaries)-1):
+            if trial_splice1 <= boundaries[i+1] & trial_splice1 >= boundaries[i]:
+                tsplice1 = i+1
+            if trial_splice2 <= boundaries[i+1] & trial_splice2 >= boundaries[i]:
+                tsplice2 = i+1
+
+    if shuffle:
+        perm = torch.randperm(n_trials, generator=g)
+    else:
+        perm = torch.arange(n_trials)
+
+    train_trials = perm[:n_train_trials][:-1]
+    val_trials = perm[n_train_trials:n_train_trials+n_val_trials][:-1]
+    test_trials = perm[n_train_trials+n_val_trials:]
+
+    # Boolean masks on the same device as x (if tensor)
+    train_mask = torch.zeros(n, dtype=torch.bool, device=device)
+    val_mask = torch.zeros(n, dtype=torch.bool, device=device)
+    test_mask = torch.zeros(n, dtype=torch.bool, device=device)
+
+    train_mask[0:trial_splice1] = True
+    val_mask[trial_splice1:trial_splice2] = True
+    test_mask[trial_splice2:n] = True    
+
+    if isinstance(split_ratio, float):
+        if return_masks:
+            return ((x[train_mask], y[train_mask]), (x[test_mask], y[test_mask])), (train_mask, test_mask), train_trials.numpy()
+        else:
+            return (x[train_mask], y[train_mask]), (x[test_mask], y[test_mask]), train_trials.numpy(),
+    else:
+        if return_masks:
+            return ((x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask])), (train_mask, val_mask, test_mask), train_trials.numpy()
+        else:
+            return (x[train_mask], y[train_mask]), (x[val_mask], y[val_mask]), (x[test_mask], y[test_mask]), train_trials.numpy()
+
 def add_history(neural_data, seq_len):
     """
     Add history to the neural data.
@@ -308,27 +385,50 @@ def add_history(neural_data, seq_len):
     #  (n_samples, n_channels, seq_len)
     return Xtrain1
 
-def add_trial_history(x, y, trial_ts, leadup):
+def add_trial_history(x, y, trial_ts, leadup, directions, targets, onsets=None, pretrial=0):
     # TODO: add device
     X_temp = torch.tensor(x)
     Y_temp = torch.tensor(y)
 
     # find max trial length
     unique_trials, trial_lengths = np.unique(trial_ts, return_counts=True)
+
+    # remove 'nan' trial (points between trials, if any)
+    nan_idx = np.where(np.isnan(unique_trials))[0]
+    if len(nan_idx) > 0: 
+        unique_trials = np.delete(unique_trials, nan_idx)
+        trial_lengths = np.delete(trial_lengths, nan_idx)
+    
+    directions = directions[unique_trials.astype(int)]
+    targets  = targets[unique_trials.astype(int)]
+
+    if onsets is not None:
+        onsets = onsets[unique_trials.astype(int)]
+    
+    # Trim first and last trials to avoid partial trials
+    trial_lengths = trial_lengths[1:-1] 
+    unique_trials = unique_trials[1:-1]
+    onsets = onsets[1:-1] if onsets is not None else None
+    directions = directions[1:-1]
+    targets = targets[1:-1]
     max_length = np.max(trial_lengths)
     num_trials = unique_trials.shape[0]
 
-    if np.isnan(unique_trials).any():
-        num_trials -= 1
-
-    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + leadup), float('nan'))
-    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length), float('nan'))
+    X = torch.full((num_trials, int(X_temp.shape[1]), max_length + pretrial + leadup), float('nan'))
+    Y = torch.full((num_trials, int(Y_temp.shape[1]), max_length + pretrial), float('nan'))
 
     for idx, trial in enumerate(unique_trials):
-        if np.isnan(trial):
-            continue
-
         mask = trial == trial_ts
+        first_nonzero_idx = mask.nonzero()[0][0]
+        if onsets is not None:
+            onsets[idx] = onsets[idx] - first_nonzero_idx + pretrial # onset relative to trial start
+
+        if pretrial > first_nonzero_idx:
+            warnings.warn(f"Pretrial length {pretrial} exceeds available pretrial data for trial {trial}. Leaving trial as NaN.")
+            continue
+        else:
+            mask[first_nonzero_idx-pretrial:first_nonzero_idx] = 1
+            
         Y[idx,:,:np.count_nonzero(mask)] = Y_temp[mask,:].T
         first_nonzero_idx = mask.nonzero()[0][0]
         if first_nonzero_idx < leadup:
@@ -339,7 +439,8 @@ def add_trial_history(x, y, trial_ts, leadup):
             mask[first_nonzero_idx-leadup:first_nonzero_idx] = 1
             X[idx,:,:np.count_nonzero(mask)] = X_temp[mask,:].T
 
-    return X, Y, trial_lengths
+
+    return X, Y, trial_lengths, directions, targets, onsets
 
 
 def add_history_numpy(neural_data, seq_len):
@@ -358,6 +459,47 @@ def add_history_numpy(neural_data, seq_len):
 
     # for RNNs, we want the last timestep to be the most recent data
     Xtrain1 = torch.flip(Xtrain1, (2,))
+
+    #  (n_samples, n_channels, seq_len)
+    return Xtrain1.numpy()
+
+
+def add_full_history(neural_data):
+    """
+    Add full history to the neural data.
+    neural_data is of shape (n_samples, n_channels)
+    the output is of shape (n_samples, n_samples, n_channels)
+    """
+    Xtrain1 = torch.full((int(neural_data.shape[0]), int(neural_data.shape[1]), int(neural_data.shape[0])), float('nan'))
+    if not isinstance(neural_data, np.ndarray):
+        neural_data = neural_data.numpy()
+    Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
+    for k in range(1, neural_data.shape[0]):
+        Xtrain1[k:, :, k] = torch.from_numpy(neural_data[0:-k, :])
+
+    # for RNNs, we want the last timestep to be the most recent data
+    Xtrain1 = torch.flip(Xtrain1, (2,))
+
+    #  (n_samples, n_channels, n_samples)
+    return Xtrain1.numpy()
+
+def add_history_2D_numpy(neural_data, seq_len):
+    """
+    Add history to the neural data.
+    neural_data is of shape (n_samples, n_channels)
+    the output is of shape (n_samples, seq_len * n_channels)
+    """
+    Xtrain1 = torch.zeros((int(neural_data.shape[0]), int(neural_data.shape[1]), seq_len))
+    if not isinstance(neural_data, np.ndarray):
+        neural_data = neural_data.numpy()
+    Xtrain1[:, :, 0] = torch.from_numpy(neural_data)
+    for k1 in range(seq_len - 1):
+        k = k1 + 1
+        Xtrain1[k:, :, k] = torch.from_numpy(neural_data[0:-k, :])
+
+    # for RNNs, we want the last timestep to be the most recent data
+    Xtrain1 = torch.flip(Xtrain1, (2,))
+    Xtrain1 = Xtrain1.reshape(Xtrain1.shape[0], Xtrain1.shape[1] * seq_len)
 
     #  (n_samples, n_channels, seq_len)
     return Xtrain1.numpy()
@@ -434,3 +576,24 @@ def obtain_trial_idx(bin_start_timestamp_ms: List[float], trial_starts: List[flo
     bin_start_timestamp_ms = np.array(bin_start_timestamp_ms)
     trial_idx = np.searchsorted(trial_starts, bin_start_timestamp_ms)
     return trial_idx
+
+def seq2seq_output_format(data, future_len=1, past_len=0):
+    """
+    Convert data to seq2seq format for RNN decoders.
+    data is of shape (n_samples, n_outs)
+    the output is of shape (n_samples, n_outs*(past_len + future_len))
+    For example, if past = 2 and future = 3, first n_dofs cols correspond to t-2, the next n_dofs cols correspond to t-1,
+        the next n_dofs cols correspond to t (current timestep), 
+        the next n_dofs cols correspond to t+1, and the last num_outs correspond to t+2.
+    """
+    n_samples, n_outs = data.shape
+    seq_len = past_len + future_len
+
+    seq_data = np.zeros((n_samples, n_outs * seq_len))
+    for i in range(n_samples):
+        idxs = []
+        for j in range(i - past_len, i + future_len):
+            idxs.append(min(max(j, 0), n_samples - 1))
+        seq_data[i] = data[idxs].reshape(-1)
+
+    return seq_data
