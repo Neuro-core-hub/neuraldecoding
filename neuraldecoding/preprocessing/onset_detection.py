@@ -56,8 +56,8 @@ class MovementOnsetDetector:
 
     def _centered_mean_var(self, x: np.ndarray, win: int):
         """Zero‑phase running mean & std‑dev (σ) for CFAR (constant false alarm rate)."""
-        mu = uniform_filter1d(x, size=win, axis=0, mode="reflect", origin=0)
-        var = uniform_filter1d(x**2, size=win, axis=0, mode="reflect", origin=0) - mu**2
+        mu = uniform_filter1d(x, size=win, axis=0, mode="wrap", origin=0)
+        var = uniform_filter1d(x**2, size=win, axis=0, mode="wrap", origin=0) - mu**2
         return mu, np.sqrt(np.maximum(var, 1e-12))
 
     def _refine_onset(self, env: np.ndarray, coarse_idx: int) -> int:
@@ -160,7 +160,10 @@ class MovementOnsetDetector:
             )
 
             if onsets_list and onsets_list[0]:  # at least one detection
-                coarse = onsets_list[0][0]  # first onset, first (or only) channel
+                if onsets_list[0][0] < 150:
+                    coarse = onsets_list[0][-1]
+                else:
+                    coarse = onsets_list[0][0]  # first (or only) channel, first onset
                 if self.config['do_refine_onset']:
                     fine = self._refine_onset(env_trial, coarse)
                 else:
