@@ -246,15 +246,30 @@ class MovementOnsetDetector:
             directions_index = []
             for i in range(ndofs):
                 threshold_indices = np.where(abs_vel[trial_mask, i] > vel_threshold)[0]
+
+                first_onset = np.nan
                 if len(threshold_indices) > 0:
-                    # If threshold is crossed, get the first occurrence
-                    # Add the first index of the trial to the onset indices
-                    onset_index.append(trial_start_idx + threshold_indices[0])
-                    directions_index.append(np.sign(kinematics[trial_start_idx + threshold_indices[0], i]))
+                    if threshold_indices[0] == 0:
+                        # Already above threshold at trial start.
+                        # Find the first gap (return below threshold) in the
+                        # sequence of threshold-crossing indices, then take the
+                        # next index after that gap as the true onset.
+                        diffs = np.diff(threshold_indices)
+                        gap_locs = np.where(diffs > 1)[0]
+                        if len(gap_locs) > 0:
+                            first_onset = threshold_indices[gap_locs[0] + 1]
+                        # else: never drops below threshold again -> stays NaN
+                    else:
+                        # Not above threshold at trial start; first crossing is valid
+                        first_onset = threshold_indices[0]
+
+                if not np.isnan(first_onset):
+                    onset_index.append(trial_start_idx + first_onset)
+                    directions_index.append(np.sign(kinematics[trial_start_idx + first_onset, i]))
                 else:
-                    # If threshold is never crossed, append None
                     onset_index.append(np.nan)
                     directions_index.append(np.nan)
+
             onset_indices = np.vstack([onset_indices, onset_index])
             directions = np.vstack([directions, directions_index])
 
