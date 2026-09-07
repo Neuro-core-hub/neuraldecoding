@@ -1,9 +1,9 @@
 import torch
 import numpy as np
 import warnings
-
+import torch.nn.functional as F
 class RankLoss:
-    def __init__(self, transition_time = 5, lambda_flat_active = 0, lambda_flat_inactive = 1000, device='cuda'):
+    def __init__(self, transition_time = 0, lambda_flat_active = 0, lambda_flat_inactive = 0, device='cuda'):
         """
         
         :param self: RankLoss instance
@@ -167,7 +167,7 @@ class RankLoss:
         return rank_loss + self.lambda_flat_active * flat_loss_active + self.lambda_flat_inactive * flat_loss_inactive
 
 class RankMSEDOFLoss:
-    def __init__(self, dof_loss = [1,0], transition_time = 5, lambda_flat_active = 0, lambda_flat_inactive = 1000, device='cuda'):
+    def __init__(self, dof_loss = [1,0], transition_time = 0, lambda_flat_active = 0, lambda_flat_inactive = 0, device='cuda'):
         """
         
         :param self: RankLoss instance
@@ -199,5 +199,60 @@ class RankMSEDOFLoss:
             rank_loss_dof = self.rank_loss_class(predictions_batch[:, i], y[:, i], directions[:, i], onsets[:, i], print_components, fullhist=True)
             mse_loss_dof = self.mse_loss(y[:, i], predictions_batch[:, i])
             total_loss += lambda_rank * rank_loss_dof + (1 - lambda_rank) * mse_loss_dof
+
+        return total_loss
+
+class SoftplusIntervalLoss(torch.nn.Module):
+    """
+    Epsilon-insensitive loss with a smooth softplus transition (instead of a
+    hard hinge). No loss accumulates while |error| < epsilon; beyond that,
+    loss grows smoothly, approaching max(0, |error| - epsilon) as beta -> inf.
+    """
+    def __init__(self, epsilon=0.0, beta=1.0, reduction='mean'):
+        super().__init__()
+        self.epsilon = epsilon
+        self.beta = beta  # higher beta = sharper corner at the epsilon boundary
+        self.reduction = reduction
+
+    def forward(self, y, predictions):
+        error = torch.abs(y - predictions) - self.epsilon
+        # softplus(beta*x)/beta is a smooth approximation of relu(x)
+        loss = F.softplus(self.beta * error) / self.beta
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        return loss  # 'none'
+
+class RankSoftplusDOFLoss:
+    def __init__(self, dof_loss=[1, 0], transition_time=5, lambda_flat_active=0,
+                 lambda_flat_inactive=1000, epsilon=0.0, beta=1.0, device='cuda'):
+        """
+        :param epsilon: half-width of the no-loss interval around the target
+        :param beta: sharpness of the softplus transition at the epsilon boundary
+                     (large beta -> behaves like a hard epsilon-insensitive/hinge loss;
+                      small beta -> softer, more gradual onset of loss)
+        """
+        self.dof_loss = dof_loss
+        self.rank_loss_class = RankLoss(transition_time, lambda_flat_active, lambda_flat_inactive, device)
+        self.softplus_loss = SoftplusIntervalLoss(epsilon=epsilon, beta=beta)
+        self.device = torch.device(device)
+
+    def __call__(self, predictions_batch, y, directions, onsets, print_components=False, fullhist=False):
+        return self.ranksoftplusdofloss(predictions_batch, y, directions, onsets, print_components)
+
+    def ranksoftplusdofloss(self, predictions_batch, y, directions, onsets, print_components=False):
+        D = y.shape[1]
+        if D != len(self.dof_loss):
+            raise ValueError("Number of degrees of freedom in y must match the length of dof_loss")
+
+        total_loss = 0
+        for i, lambda_rank in enumerate(self.dof_loss):
+            rank_loss_dof = self.rank_loss_class(
+                predictions_batch[:, i], y[:, i], directions[:, i], onsets[:, i],
+                print_components, fullhist=True
+            )
+            softplus_loss_dof = self.softplus_loss(y[:, i], predictions_batch[:, i])
+            total_loss += lambda_rank * rank_loss_dof + (1 - lambda_rank) * softplus_loss_dof
 
         return total_loss
