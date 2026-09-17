@@ -80,6 +80,16 @@ class Decoder(ABC):
         dec = copy.deepcopy(self)
         dec.load_model()
         return dec
+
+    def set_position(self, pos) -> None:
+        """
+        Tell the model where the controlled effector actually is (positions-first vector,
+        one entry per DoF). Only models with an internal position state, e.g. KalmanFilter,
+        act on this; every other model ignores it.
+        """
+        setter = getattr(self.model, "set_position", None)
+        if setter is not None:
+            setter(pos)
     
     # def stabilize(self, data_0, data_k):
     #     ls_0 = self.stabilization.train(data_0)
@@ -215,6 +225,17 @@ class dofDecoder():
         for i, dec in enumerate(self.decoders):
             dec_path = paths[i] if paths is not None and i < len(paths) else None
             dec.load_model(fpath=dec_path, running_online=running_online)
+
+    def set_position(self, pos) -> None:
+        """
+        Split a positions-first vector across the per-DoF sub-decoders. ``predict`` treats
+        each sub-decoder as one DoF (column 0 = position, column 1 = velocity), so
+        sub-decoder ``i`` gets ``pos[i]``.
+        """
+        pos = np.asarray(pos, dtype=float).reshape(-1)
+        for i, dec in enumerate(self.decoders):
+            if i < pos.shape[0]:
+                dec.set_position(pos[i:i + 1])
 
     def predict(self, neural_data):
         pos_decodes = []
