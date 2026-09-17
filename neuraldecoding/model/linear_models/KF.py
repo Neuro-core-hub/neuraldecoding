@@ -21,6 +21,11 @@ class KalmanFilter(LinearModel):
         self.last_yhat = None
         self.zero_position_uncertainty = model_params.get("zero_position_uncertainty", True)
         self.is_refit = model_params.get("is_refit", False)
+        # Online position feedback (Vaskov 2018 eq. 7): set_position() writes the displayed
+        # position into the state. False reproduces the pre-2026-09-17 behaviour (state
+        # starts at start_y and free-runs) for A/B comparison; pair it with
+        # zero_position_uncertainty: false to get the old filter exactly.
+        self.position_feedback = model_params.get("position_feedback", True)
         self.running_online = False
 
     def __call__(self, data):
@@ -280,6 +285,8 @@ class KalmanFilter(LinearModel):
             pos (array-like) of length output_size // 2, in the same units as the training
                 position labels (positions are assumed to be the first half of the state).
         """
+        if not self.position_feedback:
+            return
         pos = np.asarray(pos, dtype=float).reshape(-1)
         n_pos = self.output_size // 2
         if pos.shape[0] != n_pos:
