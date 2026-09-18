@@ -185,9 +185,12 @@ class KalmanFilter(LinearModel):
                 self.Pt[:,:self.output_size // 2] = 0
             K = np.linalg.lstsq((self.C @ self.Pt @ self.C.T + self.Q).T,
                                 (self.Pt @ self.C.T).T, rcond=None)[0].T     # compute kalman gain, where B/A = (A'\B')'
-            all_yhat[t, :] = yt + K @ (x[t, :] - self.C @ yt)	        # update state estimate
+            yhat_t = yt + K @ (x[t, :] - self.C @ yt)                    # update state estimate
             self.Pt = (np.eye(self.A.shape[0], dtype=self.A.dtype) - K @ self.C) @ self.Pt
-            self.last_yhat = all_yhat[t, :].copy()
+            # Two hooks for subclasses (see ModifiedKalmanFilter). The base filter recurses on
+            # the raw state and returns it unchanged, so both are identities here.
+            self.last_yhat = self._bound_recursive_state(yhat_t)
+            all_yhat[t, :] = self._modify_output(yhat_t)
 
         if self.append_ones_y:
             # Remove the ones
@@ -267,6 +270,31 @@ class KalmanFilter(LinearModel):
     def reinitialize(self):
         self.Pt = self.W.copy()
         self.last_yhat = None
+
+    def _bound_recursive_state(self, yhat: np.ndarray) -> np.ndarray:
+        """
+        State fed back into the next predict step. Identity for the plain KF; subclasses may
+        clip it (e.g. ModifiedKalmanFilter bounds it by 1/gain, George et al. 2020).
+
+        Parameters:
+            yhat (ndarray) full state row after the update step, incl. the bias entry if any
+
+        Returns:
+            ndarray: the row to store as last_yhat (a copy, never a view of yhat)
+        """
+        return yhat.copy()
+
+    def _modify_output(self, yhat: np.ndarray) -> np.ndarray:
+        """
+        Row that is returned to the caller for this timestep. Identity for the plain KF.
+
+        Parameters:
+            yhat (ndarray) full state row after the update step, incl. the bias entry if any
+
+        Returns:
+            ndarray: the row written into the output array
+        """
+        return yhat
 
     def set_position(self, pos):
         """
