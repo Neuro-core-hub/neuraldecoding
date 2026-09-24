@@ -27,6 +27,21 @@ class KalmanFilter(LinearModel):
         # zero_position_uncertainty: false to get the old filter exactly.
         self.position_feedback = model_params.get("position_feedback", True)
         self.running_online = False
+        # Rest anchor. Least squares puts the intercept of C wherever it best serves the whole
+        # training set, which is mostly movement, so "at rest, not moving" need not predict the
+        # participant's relaxed EMG. The filter reads that gap as velocity and the joint creeps
+        # while he rests. anchor_rest() re-sets only the intercept column of C so that (rest
+        # position, zero velocity) predicts the measured relaxed EMG exactly; A, W, Q and every
+        # other column of C stay as trained.
+        #   rest_anchor    whether training should anchor, from the recording's rest period
+        #                  (LinearTrainer does it; the data come from RestPeriodBlock)
+        #   rest_position  the rest label of each position, in label units (a list, one per
+        #                  position in the positions-first order, or one number for all)
+        # Once anchored, the relaxed-EMG mean is saved with the model and re-applied after every
+        # (re)fit of C, so a ReFIT refit keeps its anchor.
+        self.rest_anchor = bool(model_params.get("rest_anchor", False))
+        self.rest_position = model_params.get("rest_position", None)
+        self.x_rest_mean = None
 
     def __call__(self, data):
         """
@@ -70,8 +85,9 @@ class KalmanFilter(LinearModel):
         Q_resid = x - y @ self.C.T
         self.Q = (Q_resid.T @ Q_resid) / num_samples
         
-        # If doing refit, skip all the other steps
+        # If doing refit, skip all the other steps (a loaded model's rest anchor is kept)
         if self.is_refit:
+            self._apply_rest_anchor()
             return
         
         # Build the state transition matrix A.
@@ -113,7 +129,7 @@ class KalmanFilter(LinearModel):
         self.W[pos_and_bias_idx, :] = 0
         self.W[:, pos_and_bias_idx] = 0
 
-        
+        self._apply_rest_anchor()
         self.reinitialize()
 
     def forward(self, input: np.ndarray) -> np.ndarray:
@@ -234,7 +250,10 @@ class KalmanFilter(LinearModel):
             'input_size': self.input_size,
             'output_size': self.output_size,
             'start_y': self.start_y if self.start_y is not None else np.array([0] * self.output_size),
-            "Model": "KF"
+            "Model": "KF",
+            # rest anchor (None when the model was not anchored); older files lack these keys
+            'rest_position': None if self.x_rest_mean is None else self._rest_vector().tolist(),
+            'x_rest_mean': self.x_rest_mean,
         }
 
         with open(fpath, "wb") as file:
@@ -261,12 +280,68 @@ class KalmanFilter(LinearModel):
         self.input_size = model_dict['input_size']
         self.output_size = model_dict['output_size']
         self.start_y = model_dict['start_y']
+        if model_dict.get('rest_position') is not None:
+            self.rest_position = model_dict['rest_position']
+        self.x_rest_mean = model_dict.get('x_rest_mean')
         self.running_online = running_online
         self.reinitialize()
 
     def reinitialize(self):
         self.Pt = self.W.copy()
         self.last_yhat = None
+
+    def _rest_vector(self):
+        """rest_position as one float per position (the first output_size // 2 outputs)."""
+        if self.rest_position is None:
+            raise ValueError("rest_position is not set: give model.params.rest_position, the rest label of each "
+                             "position (positions-first order), in the same units as the training labels")
+        try:
+            r = np.asarray(list(self.rest_position), dtype=float).reshape(-1)
+        except TypeError:                                   # a single number
+            r = np.asarray([self.rest_position], dtype=float)
+        n_pos = self.output_size // 2
+        if r.size == 1:
+            r = np.full(n_pos, r[0])
+        if r.size != n_pos:
+            raise ValueError(f"rest_position has {r.size} values but the model has {n_pos} positions")
+        return r
+
+    def anchor_rest(self, x_rest, rest_position=None):
+        """
+        Set the intercept of C so that (rest position, zero velocity) predicts the mean of x_rest.
+
+        Only the intercept column changes; A, W, Q and the other columns of C are untouched. The
+        mean is stored and re-applied after any later (re)fit of C, and saved with the model.
+
+        Parameters:
+            x_rest (ndarray) [n_bins, num_inputs]: observation features while the participant is
+                relaxed at the rest position (the same features the model is trained on)
+            rest_position (list or float, optional): overrides model.params.rest_position
+        """
+        if not self.append_ones_y:
+            raise ValueError("The rest anchor sets the intercept of C, so it needs append_ones_y=True")
+        if self.C is None:
+            raise ValueError("Train or load the model before anchoring it")
+        x_rest = np.asarray(x_rest, dtype=float)
+        if x_rest.ndim == 1:
+            x_rest = x_rest[None, :]
+        if x_rest.shape[0] == 0:
+            raise ValueError("No rest data to anchor on")
+        if x_rest.shape[1] != self.input_size:
+            raise ValueError(f"Rest data has {x_rest.shape[1]} features but the model takes {self.input_size}")
+        if rest_position is not None:
+            self.rest_position = rest_position
+        self._rest_vector()                                 # validate before changing anything
+        self.x_rest_mean = x_rest.mean(axis=0)
+        self._apply_rest_anchor()
+
+    def _apply_rest_anchor(self):
+        """Re-set the intercept from the stored relaxed-EMG mean; a no-op for a model that was never anchored."""
+        if self.x_rest_mean is None:
+            return
+        n_pos = self.output_size // 2
+        rest_state = np.concatenate([self._rest_vector(), np.zeros(self.output_size - n_pos)])
+        self.C[:, -1] = np.asarray(self.x_rest_mean) - self.C[:, :-1] @ rest_state
 
     def set_position(self, pos):
         """
