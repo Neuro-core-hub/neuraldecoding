@@ -417,13 +417,16 @@ class Dataset2DictBlock(DataFormattingBlock):
 	Converts a dictionary (from load_one_nwb) to neural and behaviour data in dictionary format.
 	Add 'trial_idx' to interpipe.
 	"""
-	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets', 'movement_directions': 'movement_directions'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets'):
+	def __init__(self, neural_nwb_loc, behavior_nwb_loc, skip_first_n_trials = 0, data_keys = ['neural', 'behavior'], interpipe_keys = {'trial_start_times': 'trial_start_times', 'trial_end_times': 'trial_end_times', 'targets': 'targets', 'movement_directions': 'movement_directions'}, nwb_trial_start_times_loc = 'trials.cue_time', nwb_trial_end_times_loc = 'trials.stop_time', nwb_targets_loc = 'trials.targets', nwb_rest_period_loc = None):
 		"""
 		Initializes the Dataset2DictBlock.
 		Args:
 			neural_nwb_loc (str): Location path for neural data in the NWB file.
 			behavior_nwb_loc (str): Location path for behavior data in the NWB file.
 			apply_trial_filtering (bool): Whether to apply trial filtering. Default is True.
+			nwb_rest_period_loc (str): Trial-table column that flags rest-period trials (the continuous task's
+				rest_period_at_start writes 'trials.rest_period'). None (default) skips it. A recording without the
+				column gets no flags, so RestPeriodBlock finds no rest period in it.
 		"""
 		self.neural_nwb_loc = neural_nwb_loc
 		self.behavior_nwb_loc = behavior_nwb_loc
@@ -433,6 +436,7 @@ class Dataset2DictBlock(DataFormattingBlock):
 		self.nwb_trial_start_times_loc = nwb_trial_start_times_loc
 		self.nwb_trial_end_times_loc = nwb_trial_end_times_loc
 		self.nwb_targets_loc = nwb_targets_loc
+		self.nwb_rest_period_loc = nwb_rest_period_loc
 		super().__init__()
 
 	def transform(self, data, interpipe):
@@ -462,6 +466,15 @@ class Dataset2DictBlock(DataFormattingBlock):
 		trial_end_times = trial_end_times[self.skip_first_n_trials:]
 		targets = np.array(targets[self.skip_first_n_trials:])
 		movement_directions = np.concatenate((np.zeros_like(targets[0:1]), np.sign(np.diff(targets, axis=0))), axis=0)
+		# Rest-period flags per trial (see RestPeriodBlock), sliced like the other trial arrays
+		rest_period = None
+		if self.nwb_rest_period_loc is not None:
+			try:
+				rest_period = np.asarray(resolve_path(data.dataset, self.nwb_rest_period_loc)[:], dtype=float)[self.skip_first_n_trials:] > 0.5
+			except ValueError:
+				warnings.warn(f"Dataset2DictBlock: no '{self.nwb_rest_period_loc}' column in this recording (made before "
+							  "the continuous task wrote it), so it has no rest period")
+		interpipe['trial_rest_period'] = rest_period
 
 		data_out = {self.data_keys[0]: neural, self.data_keys[1]: behaviour}
 		interpipe[self.interpipe_keys['trial_start_times']] = trial_start_times
@@ -1092,6 +1105,54 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		data[self.location_data[0]] = features
 		return data, interpipe
 	
+class RestPeriodBlock(DataProcessingBlock):
+	"""
+	Collects the neural features of the recording's rest period for the Kalman filter's rest anchor.
+
+	The rest period is every trial flagged in the trial table's rest_period column (Dataset2DictBlock's
+	nwb_rest_period_loc), which the continuous task writes when target_control.rest_period_at_start is true:
+	one opening trial with every joint held at its rest position while the participant relaxes. The first
+	settle_ms of each such trial are dropped so that he has settled.
+
+	The training data are NOT changed: the rest bins stay in them either way, so with model.params.rest_anchor
+	off they are simply extra training data at rest. The collected bins go to interpipe[output_key] and to the
+	preprocessor's saved data, where LinearTrainer picks them up to anchor the model when rest_anchor is on.
+	A recording without a rest period passes through with nothing collected.
+
+	Place it after FeatureExtractionBlock (it needs bin_trial_start_idx / bin_trial_end_idx) and before the split.
+	"""
+	def __init__(self, location_neural: str = 'neural', location_ts: str = 'neural_ts', settle_ms: float = 1000.0,
+				 rest_flag_key: str = 'trial_rest_period', output_key: str = 'rest_neural'):
+		super().__init__()
+		self.location_neural = location_neural
+		self.location_ts = location_ts
+		self.settle_ms = float(settle_ms)
+		self.rest_flag_key = rest_flag_key
+		self.output_key = output_key
+
+	def transform(self, data, interpipe):
+		flags = interpipe.get(self.rest_flag_key)
+		if flags is None or not np.any(flags):
+			return data, interpipe
+		for key in ('bin_trial_start_idx', 'bin_trial_end_idx', self.location_ts):
+			if key not in interpipe:
+				raise ValueError(f"RestPeriodBlock needs '{key}' in interpipe: place it after FeatureExtractionBlock")
+		bin_ms = float(np.median(np.diff(interpipe[self.location_ts])))
+		skip = int(np.ceil(self.settle_ms / bin_ms))
+		idx = []
+		for k in np.flatnonzero(flags):
+			a, b = int(interpipe['bin_trial_start_idx'][k]) + skip, int(interpipe['bin_trial_end_idx'][k])
+			if b > a:
+				idx.extend(range(a, b))
+		if not idx:
+			warnings.warn(f"RestPeriodBlock: the rest period is shorter than settle_ms ({self.settle_ms:.0f} ms); nothing collected")
+			return data, interpipe
+		interpipe[self.output_key] = np.asarray(data[self.location_neural])[np.asarray(idx)]
+		interpipe['save_keys_ram'].append(self.output_key)
+		print(f"RestPeriodBlock: {len(idx)} rest bins ({len(idx) * bin_ms / 1000:.1f} s) from {int(np.sum(flags))} rest trial(s)")
+		return data, interpipe
+
+
 class TrialToBinsBlock(DataProcessingBlock):
 	"""
 	A block to assign one or more trial-level variables to one or more bin-level variables based on the trial indices in interpipe['bin_trial_idx'].

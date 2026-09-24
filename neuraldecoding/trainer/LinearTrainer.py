@@ -48,12 +48,36 @@ class LinearTrainer(Trainer):
                 # Load the model first
                 self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
         self.model.train_step((self.train_X, self.train_Y))
+        self.anchor_rest()
         # Validate model
         self.validate_model(plot_results)
         print("Model trained, metrics:")
         self.save_print_log()
         return self.model, self.logger
     
+    def anchor_rest(self):
+        """
+        The rest anchor (KalmanFilter.anchor_rest), when the model asks for it (model.params.rest_anchor).
+
+        The relaxed bins are the recording's rest period, collected by RestPeriodBlock into the
+        preprocessor's saved data. With rest_anchor off nothing happens here, and the rest period is
+        simply part of the training data. A refit of an already-anchored model re-applies its own
+        anchor inside train_step, so a refit recording without a rest period is fine.
+        """
+        if not getattr(self.model, "rest_anchor", False):
+            return
+        x_rest = getattr(self.preprocessor, "saved_data", {}).get("rest_neural")
+        if x_rest is None or len(x_rest) == 0:
+            if getattr(self.model, "x_rest_mean", None) is not None:
+                print("rest_anchor: this recording has no rest period; keeping the anchor the loaded model carries")
+                return
+            raise ValueError(
+                "model.params.rest_anchor is true but the training recording has no rest period. Record it with "
+                "target_control.rest_period_at_start: true (and keep the rest_period block and nwb_rest_period_loc in "
+                "the decoder config), or set rest_anchor: false.")
+        self.model.anchor_rest(x_rest)
+        print(f"rest_anchor: intercept set from {len(x_rest)} relaxed bins at rest position {self.model._rest_vector().tolist()}")
+
     def validate_model(self, plot_results = False):
         train_prediction = self.model(self.train_X)
         valid_prediction = self.model(self.valid_X)
