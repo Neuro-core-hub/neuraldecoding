@@ -41,6 +41,21 @@ def get_timeseries_from_trial(nwb_file: NWBFile, trial_index: int, timeseries_pa
     stop_idx = np.searchsorted(timeseries.timestamps[:], stop_time)
     return timeseries.data[start_idx:stop_idx]
 
+def trial_throughput_from_positions(initial_value, target, target_radius, duration) -> float:
+    """One trial's throughput, sum_k log2(1 + max(D_k - S, 0) / 2S) / duration (same formula as bitrate()).
+
+    initial_value / target: per-dimension positions (array-like, same length); target_radius S; duration in s (the
+    trial time without the hold). Pure numpy so live nodes can use it without an NWB file.
+    """
+    distances = np.abs(np.asarray(initial_value, float) - np.asarray(target, float))   # D_k
+    log_terms = []
+    for d_k in distances:
+        dk_minus_s = d_k - target_radius if d_k - target_radius > 0 else 0
+        argument = 1 + dk_minus_s / (2 * target_radius)
+        # If argument <= 0, use a small positive value to avoid log(0) or log(negative)
+        log_terms.append(np.log2(argument) if argument > 0 else np.log2(1e-10))
+    return np.sum(log_terms) / duration
+
 def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "cue_time", trial_stop_label: str = "stop_time", target_label: str = "targets", target_radius_label: str = "target_radius", exclude_failed_trials: bool = True, exclude_intarget_trials: bool = True, pos_indices: list|np.ndarray|None = None) -> float:
     """
     Calculate the throughput/bitrate using the formula:
@@ -101,25 +116,7 @@ def bitrate(nwb_file: NWBFile, timeseries_path: str, trial_start_label: str = "c
                 trial_throughputs.append(np.nan)
                 continue
         
-        # Calculate Dₖ for each dimension k (distance between initial value and target)
-        distances = np.abs(initial_value - target)  # Dₖ
-        
-        # Calculate the sum: Σₖ log₂(1 + (Dₖ-S)/2S)
-        # Handle potential division by zero or negative arguments to log
-        log_terms = []
-        for d_k in distances:
-            dk_minus_s = d_k - target_radius if d_k - target_radius > 0 else 0
-            argument = 1 + dk_minus_s / (2 * target_radius)
-            if argument > 0:
-                log_terms.append(np.log2(argument))
-            else:
-                # If argument <= 0, use a small positive value to avoid log(0) or log(negative)
-                log_terms.append(np.log2(1e-10))
-        
-        sum_log_terms = np.sum(log_terms)
-        
-        # Calculate throughput for this trial: Σₖ log₂(1 + (Dₖ-S)/2S) / t_acq
-        trial_throughput = sum_log_terms / trial_duration
+        trial_throughput = trial_throughput_from_positions(initial_value, target, target_radius, trial_duration)
         trial_throughputs.append(trial_throughput)
     
     # Return average throughput across all trials
