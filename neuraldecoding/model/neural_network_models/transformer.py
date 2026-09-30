@@ -223,6 +223,8 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
+            "neural_scaler": getattr(self, 'neural_scaler', None),
+            "behavior_scaler": getattr(self, 'behavior_scaler', None),
             "model_type": "Transformer"
         }
         folder = os.path.dirname(filepath)
@@ -242,6 +244,9 @@ class TransformerModel(nn.Module, NeuralNetworkModel):
         self.load_state_dict(checkpoint["model_state_dict"])
 
         self.model_params = checkpoint["model_params"]
+
+        self.neural_scaler = checkpoint["neural_scaler"]
+        self.behavior_scaler = checkpoint["behavior_scaler"]
     
 class TransformerGRUModel(nn.Module, NeuralNetworkModel):
 
@@ -293,7 +298,9 @@ class TransformerGRUModel(nn.Module, NeuralNetworkModel):
         checkpoint_dict = {
             "model_state_dict": self.state_dict(),
             "model_params": self.model_params,
-            "model_type": "TransformerGRU"
+            "model_type": "TransformerGRU",
+            "neural_scaler": getattr(self, 'neural_scaler', None),
+            "behavior_scaler": getattr(self, 'behavior_scaler', None),
         }
         folder = os.path.dirname(filepath)
         if folder and not os.path.exists(folder):
@@ -301,7 +308,7 @@ class TransformerGRUModel(nn.Module, NeuralNetworkModel):
         torch.save(checkpoint_dict, filepath)
     
     def load_model(self, filepath):
-        checkpoint = torch.load(filepath)
+        checkpoint = torch.load(filepath, weights_only=False)
 
         if checkpoint["model_type"] != "TransformerGRU":
             raise Exception("Tried to load model that isn't a TransformerGRU Instance")
@@ -312,6 +319,14 @@ class TransformerGRUModel(nn.Module, NeuralNetworkModel):
         self.load_state_dict(checkpoint["model_state_dict"])
 
         self.model_params = checkpoint["model_params"]
+        if "neural_scaler" in checkpoint:
+            self.neural_scaler = checkpoint["neural_scaler"]
+        else:
+            self.neural_scaler = None
+        if "behavior_scaler" in checkpoint:
+            self.behavior_scaler = checkpoint["behavior_scaler"]
+        else:
+            self.behavior_scaler = None
 
 # class ConformerModel(nn.Module, NeuralNetworkModel):
 #     def __init__(self, params):

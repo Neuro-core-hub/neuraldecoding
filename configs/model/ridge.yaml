@@ -1,0 +1,5 @@
+type: RidgeRegression      # registered in neuraldecoding decoder MODEL_REGISTRY (Decoder.py)
+fpath: null                # train_model sets/saves this (a pickled sklearn Ridge)
+save: true
+params:
+  alpha: 10.0              # L2 shrinkage; alpha ~= 10 was the small measured win (HANDOFF §3.2)

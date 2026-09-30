@@ -56,8 +56,8 @@ class MovementOnsetDetector:
 
     def _centered_mean_var(self, x: np.ndarray, win: int):
         """Zero‑phase running mean & std‑dev (σ) for CFAR (constant false alarm rate)."""
-        mu = uniform_filter1d(x, size=win, axis=0, mode="reflect", origin=0)
-        var = uniform_filter1d(x**2, size=win, axis=0, mode="reflect", origin=0) - mu**2
+        mu = uniform_filter1d(x, size=win, axis=0, mode="wrap", origin=0)
+        var = uniform_filter1d(x**2, size=win, axis=0, mode="wrap", origin=0) - mu**2
         return mu, np.sqrt(np.maximum(var, 1e-12))
 
     def _refine_onset(self, env: np.ndarray, coarse_idx: int) -> int:
@@ -160,7 +160,10 @@ class MovementOnsetDetector:
             )
 
             if onsets_list and onsets_list[0]:  # at least one detection
-                coarse = onsets_list[0][0]  # first onset, first (or only) channel
+                if onsets_list[0][0] < 150:
+                    coarse = onsets_list[0][-1]
+                else:
+                    coarse = onsets_list[0][0]  # first (or only) channel, first onset
                 if self.config['do_refine_onset']:
                     fine = self._refine_onset(env_trial, coarse)
                 else:
@@ -209,6 +212,48 @@ class MovementOnsetDetector:
                     onset_times[trial_idx] = times[onset_sample_idx]
             
         return onset_times
+    
+    def detect_movement_onsets_kinematics(
+        self,
+        kinematics: np.ndarray,
+        trial_nums: np.ndarray,
+        vel_threshold: float = 0.01,
+    ) -> np.ndarray:
+        """
+        Detect the onset of a movement based directly on the kinematics.
 
+        Args:
+            kinematics: np.ndarray - Kinematics data with shape (n_samples, n_features)
+            trial_nums: np.ndarray - Trial numbers corresponding to each sample in kinematics
+            times: np.ndarray - Timestamps corresponding to each sample in kinematics
+            vel_threshold: float - Velocity threshold to consider as movement onset (default: 0.01)
 
+        Returns:
+            np.ndarray - Array of indices in kinematics where movement onsets were detected
+        """
+        ndofs = kinematics.shape[1]
+        abs_vel = np.abs(kinematics)
+        onset_indices = np.full((0, ndofs), np.nan)
 
+        unique_trial_nums = np.unique(trial_nums)
+        unique_trial_nums = unique_trial_nums[~np.isnan(unique_trial_nums)]
+
+        for trial_num in unique_trial_nums:
+            # Find starting index of trial
+            trial_start_idx = np.where(trial_nums == trial_num)[0][0]
+            # Find the index of the first velocity value that exceeds the threshold in the current trial
+            trial_mask = trial_nums == trial_num
+            # Find indices where velocity exceeds threshold
+            onset_index = []
+            for i in range(ndofs):
+                threshold_indices = np.where(abs_vel[trial_mask, i] > vel_threshold)[0]
+                if len(threshold_indices) > 0:
+                    # If threshold is crossed, get the first occurrence
+                    # Add the first index of the trial to the onset indices
+                    onset_index.append(trial_start_idx + threshold_indices[0])
+                else:
+                    # If threshold is never crossed, append None
+                    onset_index.append(np.nan)
+            onset_indices = np.vstack([onset_indices, onset_index])
+
+        return np.array(onset_indices)
