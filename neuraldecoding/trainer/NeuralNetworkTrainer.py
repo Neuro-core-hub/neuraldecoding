@@ -572,7 +572,7 @@ class LSTMRankTrainer(LSTMTrainer):
             scalers = []
             for i, selection in enumerate(self.dof_selections):
                 if selection == 1: # rank scaler
-                    scalers.append(BehaviorScalerRank(PercentileScaler(np.percentile(train_predictions[:, i], percentiles[0], axis=0), np.percentile(train_predictions[:, i], percentiles[1], axis=0))))
+                    scalers.append(BehaviorScalerRank(PercentileScaler.from_predictions(train_predictions[:, i], percentiles)))
                 elif selection == 0: # standard scaler
                     prompts_dof = prompts[:, i]
                     scalers.append(sklearn.preprocessing.StandardScaler().fit(prompts_dof.reshape(-1, 1)))
@@ -590,9 +590,7 @@ class LSTMRankTrainer(LSTMTrainer):
             idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
             train_predictions = train_predictions[:, idx]
 
-            p0 = np.percentile(train_predictions, percentiles[0], axis=0)
-            p1 = np.percentile(train_predictions, percentiles[1], axis=0)
-            behavior_scaler_internal = PercentileScaler(p0, p1)
+            behavior_scaler_internal = PercentileScaler.from_predictions(train_predictions, percentiles)
 
             # We need the inverse_transform method to go from percentile-scaled to 0-1, and not the transform method
             # Creating this dummy class to swap the methods
@@ -611,18 +609,58 @@ class MixedDOFScaler:
         return np.column_stack([scaler.inverse_transform(data[:, i]) for i, scaler in enumerate(self.scalers)])
     
 class PercentileScaler:
-    """Maps the 10th percentile -> 0 and the 90th percentile -> 1, per column."""
+    """Maps the min percentile -> 0 and the max percentile -> 1, per column (10th/90th by default)."""
+    # Percentiles of the training outputs kept by from_predictions, so the bounds can be
+    # re-picked later without the training data (GUI rank scaler window).
+    QUANTILE_GRID = np.arange(1001) / 10.0
+
     def __init__(self, p0, p1, eps=1e-8):
         self.p0 = np.asarray(p0)
         self.range = np.asarray(p1) - self.p0
         self.range = np.where(self.range < eps, eps, self.range)  # avoid divide-by-zero on flat DOFs
+        self.eps = eps
+
+    @classmethod
+    def from_predictions(cls, predictions, percentiles, eps=1e-8):
+        """Fit on training outputs (n_samples[, n_dofs]) and keep their quantile table."""
+        lo, hi = float(percentiles[0]), float(percentiles[1])
+        scaler = cls(np.percentile(predictions, lo, axis=0), np.percentile(predictions, hi, axis=0), eps)
+        scaler.quantiles = np.percentile(predictions, cls.QUANTILE_GRID, axis=0)
+        scaler.percentiles = (lo, hi)
+        scaler.train_percentiles = (lo, hi)
+        return scaler
+
+    @property
+    def adjustable(self):
+        # Models trained before the quantile table was kept only have p0/range
+        return getattr(self, 'quantiles', None) is not None
+
+    def bounds(self, lo, hi):
+        """Training-output values at percentiles lo and hi, i.e. what would map to 0 and 1."""
+        if not self.adjustable:
+            raise ValueError("model was trained before the trainer kept its training-output quantiles; retrain it to change percentiles")
+        if not 0 <= lo < hi <= 100:
+            raise ValueError(f"need 0 <= min < max <= 100, got {lo:g} and {hi:g}")
+        q = self.quantiles
+        if q.ndim == 1:
+            return np.asarray(np.interp(lo, self.QUANTILE_GRID, q)), np.asarray(np.interp(hi, self.QUANTILE_GRID, q))
+        p0 = np.array([np.interp(lo, self.QUANTILE_GRID, q[:, j]) for j in range(q.shape[1])])
+        p1 = np.array([np.interp(hi, self.QUANTILE_GRID, q[:, j]) for j in range(q.shape[1])])
+        return p0, p1
+
+    def set_percentiles(self, lo, hi):
+        p0, p1 = self.bounds(lo, hi)
+        eps = getattr(self, 'eps', 1e-8)
+        self.p0 = p0
+        self.range = np.where(p1 - p0 < eps, eps, p1 - p0)
+        self.percentiles = (float(lo), float(hi))
 
     def transform(self, data):
         return (data - self.p0) / self.range
 
     def inverse_transform(self, data):
         return data * self.range + self.p0
-    
+
 class BehaviorScalerRank:
     def __init__(self, scaler):
         self.scaler = scaler
@@ -630,6 +668,16 @@ class BehaviorScalerRank:
         return self.scaler.inverse_transform(data)
     def inverse_transform(self, data):
         return self.scaler.transform(data)
+
+def rank_percentile_scalers(behavior_scaler):
+    """The PercentileScalers inside a rank model's behavior_scaler, in DoF order ([] if none)."""
+    if isinstance(behavior_scaler, MixedDOFScaler):
+        wrapped = [s for s in behavior_scaler.scalers if isinstance(s, BehaviorScalerRank)]
+    elif isinstance(behavior_scaler, BehaviorScalerRank):
+        wrapped = [behavior_scaler]
+    else:
+        return []
+    return [s.scaler for s in wrapped if isinstance(s.scaler, PercentileScaler)]
 
 class IterationNNTrainer(NNTrainer):
     '''
