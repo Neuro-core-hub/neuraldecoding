@@ -189,16 +189,22 @@ class RNNDecoder(Decoder):
         return prediction
 
 class dofDecoder():
-    def __init__(self, cfglist: list, model_fpath_list: list) -> None:
+    def __init__(self, cfglist: list, model_fpath_list: list, input_columns: list = None) -> None:
         # cfglist: list of DictConfig, one per DoF
         # create a decoder per config
         # choose decoder type based on model type
+        # input_columns: optional, per DoF, the feature columns that DoF was trained on
+        # (None = all), for DoFs that read different channels; see
+        # neuraldecoding.preprocessing.merge_online_neural_selection
+        self.input_columns = list(input_columns) if input_columns is not None else [None] * len(cfglist)
+        if len(self.input_columns) != len(cfglist):
+            raise ValueError(f"input_columns has {len(self.input_columns)} entries for {len(cfglist)} DoFs")
         self.decoders = []
         self.input_shape = []
         self.output_shape = []
         for cfg in cfglist:
             mtype = cfg.model.type
-            if mtype in ["LSTM", "LSTMTrialInput", "LSTMTrialInput_Rank", "LSTMFullHistory_Rank"]:
+            if mtype in ["LSTM", "LSTMTrialInput", "LSTMTrialInput_Rank", "LSTMFullHistory_Rank", "LSTMFullHistory_Trialized"]:
                 dec = RNNDecoder(cfg)
             elif mtype in ["TCN", "TCNTrialInput"]:
                 dec = NeuralNetworkDecoder(cfg)
@@ -241,8 +247,8 @@ class dofDecoder():
     def predict(self, neural_data):
         pos_decodes = []
         vel_decodes = []
-        for decoder in self.decoders:
-            output_tensor = decoder.predict(neural_data)
+        for decoder, cols in zip(self.decoders, self.input_columns):
+            output_tensor = decoder.predict(neural_data if cols is None else neural_data[:, cols])
             # Sub-decoders may return numpy (e.g. LinearDecoder) or torch tensors;
             # normalize to a 2-D torch tensor so stacking/concatenation is safe.
             if not isinstance(output_tensor, torch.Tensor):
