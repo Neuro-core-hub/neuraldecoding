@@ -21,11 +21,6 @@ class KalmanFilter(LinearModel):
         self.last_yhat = None
         self.zero_position_uncertainty = model_params.get("zero_position_uncertainty", True)
         self.is_refit = model_params.get("is_refit", False)
-        # Online position feedback (Vaskov 2018 eq. 7): set_position() writes the displayed
-        # position into the state. False reproduces the pre-2026-09-17 behaviour (state
-        # starts at start_y and free-runs) for A/B comparison; pair it with
-        # zero_position_uncertainty: false to get the old filter exactly.
-        self.position_feedback = model_params.get("position_feedback", True)
         self.running_online = False
 
     def __call__(self, data):
@@ -295,37 +290,6 @@ class KalmanFilter(LinearModel):
             ndarray: the row written into the output array
         """
         return yhat
-
-    def set_position(self, pos):
-        """
-        Overwrite the position half of the internal state with an externally known position.
-
-        Online, the joint the user sees is integrated (and clipped / reset) by the
-        controller, not by this filter, so the filter's own position estimate drifts away
-        from the displayed one and C then reads that gap as velocity. Vaskov et al. 2018
-        (eq. 7) and Gilja et al. 2012 close this by setting the state's position to the
-        actual displayed position before every update. Call once after loading and once per
-        bin after the controller has integrated the velocity. Combine with
-        zero_position_uncertainty=True and running_online=True for the full online
-        intervention of those papers.
-
-        Parameters:
-            pos (array-like) of length output_size // 2, in the same units as the training
-                position labels (positions are assumed to be the first half of the state).
-        """
-        if not self.position_feedback:
-            return
-        pos = np.asarray(pos, dtype=float).reshape(-1)
-        n_pos = self.output_size // 2
-        if pos.shape[0] != n_pos:
-            raise ValueError(f"set_position expected {n_pos} position(s), got {pos.shape[0]}")
-        if self.last_yhat is None:
-            start = np.asarray(self.start_y, dtype=float).reshape(-1)
-            if self.append_ones_y:
-                self.last_yhat = np.concatenate((start, np.ones(1)))
-            else:
-                self.last_yhat = start.copy()
-        self.last_yhat[:n_pos] = pos
 
 if __name__ == "__main__":
     print("=" * 60)
