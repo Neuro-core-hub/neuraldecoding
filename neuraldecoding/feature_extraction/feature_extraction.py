@@ -87,7 +87,7 @@ class FeatureExtractor:
     
     def _validate_config(self):
         """Validate the configuration parameters."""
-        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length']
+        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length', 'zero_crossings']
         
         # Flatten nested feature types for validation
         def flatten_feature_types(ft):
@@ -690,6 +690,31 @@ class FeatureExtractor:
         """
         if data.shape[0] == 0:
             return np.array([])
+
+        if feature_type == 'zero_crossings':
+            # Zero crossings: how often the signal changes sign within the window.
+            # A frequency-domain feature, so it carries information MAV cannot --
+            # MAV is pure amplitude. Requires the signal to be zero-mean, which
+            # holds for band-passed EMG but NOT for an already-rectified envelope:
+            # rectified data never crosses zero and this returns 0 everywhere.
+            #
+            # `threshold` (in raw signal units) rejects sign flips caused by noise
+            # riding near zero, which otherwise dominate the count at low
+            # activation. 0 disables it.
+            # Remove the per-window DC offset first. Measured on this rig, the raw
+            # selected channels sit at means of -15.8, 4.4, 44.6, 7.1 against stds
+            # of 11.8, 7.5, 56.6, 13.9 -- offsets comparable to the signal itself,
+            # which would bias the count towards zero on any channel that rarely
+            # reaches the other side of zero. Set remove_mean: false to count about
+            # true zero instead.
+            d = data
+            if bool(feature_params.get('remove_mean', True)):
+                d = d - np.mean(d, axis=0, keepdims=True)
+            thr = float(feature_params.get('threshold', 0.0))
+            crossed = (d[:-1] * d[1:]) < 0
+            if thr > 0:
+                crossed = crossed & (np.abs(np.diff(d, axis=0)) >= thr)
+            return crossed.sum(axis=0).astype(float)
 
         if feature_type == 'mav':
             # Mean Absolute Value
