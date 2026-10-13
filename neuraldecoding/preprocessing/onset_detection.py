@@ -234,6 +234,7 @@ class MovementOnsetDetector:
         ndofs = kinematics.shape[1]
         abs_vel = np.abs(kinematics)
         onset_indices = np.full((0, ndofs), np.nan)
+        directions = np.full((0, ndofs), np.nan)
 
         unique_trial_nums = np.unique(trial_nums)
         unique_trial_nums = unique_trial_nums[~np.isnan(unique_trial_nums)]
@@ -245,15 +246,34 @@ class MovementOnsetDetector:
             trial_mask = trial_nums == trial_num
             # Find indices where velocity exceeds threshold
             onset_index = []
+            directions_index = []
             for i in range(ndofs):
                 threshold_indices = np.where(abs_vel[trial_mask, i] > vel_threshold)[0]
-                if len(threshold_indices) > 0:
-                    # If threshold is crossed, get the first occurrence
-                    # Add the first index of the trial to the onset indices
-                    onset_index.append(trial_start_idx + threshold_indices[0])
-                else:
-                    # If threshold is never crossed, append None
-                    onset_index.append(np.nan)
-            onset_indices = np.vstack([onset_indices, onset_index])
 
-        return np.array(onset_indices)
+                first_onset = np.nan
+                if len(threshold_indices) > 0:
+                    if threshold_indices[0] == 0:
+                        # Already above threshold at trial start.
+                        # Find the first gap (return below threshold) in the
+                        # sequence of threshold-crossing indices, then take the
+                        # next index after that gap as the true onset.
+                        diffs = np.diff(threshold_indices)
+                        gap_locs = np.where(diffs > 1)[0]
+                        if len(gap_locs) > 0:
+                            first_onset = threshold_indices[gap_locs[0] + 1]
+                        # else: never drops below threshold again -> stays NaN
+                    else:
+                        # Not above threshold at trial start; first crossing is valid
+                        first_onset = threshold_indices[0]
+
+                if not np.isnan(first_onset):
+                    onset_index.append(trial_start_idx + first_onset)
+                    directions_index.append(np.sign(kinematics[trial_start_idx + first_onset, i]))
+                else:
+                    onset_index.append(np.nan)
+                    directions_index.append(np.nan)
+
+            onset_indices = np.vstack([onset_indices, onset_index])
+            directions = np.vstack([directions, directions_index])
+
+        return np.array(onset_indices), np.array(directions)

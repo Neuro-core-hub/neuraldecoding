@@ -1092,6 +1092,53 @@ class FeatureExtractionBlock(DataProcessingBlock):
 		data[self.location_data[0]] = features
 		return data, interpipe
 	
+class SlidingFeatureExtractionBlock(FeatureExtractionBlock):
+	"""
+	Online sliding-window variant of FeatureExtractionBlock.
+
+	Offline `transform` is inherited unchanged (disjoint bins). Online, instead of
+	averaging only the samples that arrived since the last node tick, this block keeps
+	a raw-sample ring buffer of the trailing `window_ms` and, every tick, emits one
+	feature vector (e.g. MAV) computed over that whole window. The emit rate stays the
+	node tick (bin_size_ms); the averaging window is `window_ms` — the two are
+	decoupled (Posh Sec. II-D: 500 Hz stream, 200 ms window). This is required for
+	online<->offline parity when the model was fit at a 200 ms window.
+
+	`FeatureExtractionBlock` (disjoint bins, used by the KF/LDA configs) is left
+	untouched; use this block only where a sliding window is wanted.
+
+	Args (in addition to FeatureExtractionBlock):
+		window_ms: length of the trailing averaging window, in ms.
+		sampling_rate_hz: sample rate of the incoming neural stream, used to size the
+			ring buffer: window_samples = round(window_ms / 1000 * sampling_rate_hz).
+	"""
+	def __init__(self, location_data: list[str], location_ts: list[str], feature_extractor_config: dict, window_ms: float, sampling_rate_hz: float):
+		super().__init__(location_data, location_ts, feature_extractor_config)
+		self.window_ms = window_ms
+		self.sampling_rate_hz = sampling_rate_hz
+		self.window_samples = max(1, int(round(window_ms / 1000.0 * sampling_rate_hz)))
+		self._buffer = None  # trailing raw samples, shape (n <= window_samples, channels)
+
+	def reset_online_state(self):
+		"""Clear the trailing-sample buffer (e.g. between runs)."""
+		self._buffer = None
+
+	def transform_online(self, data, interpipe):
+		new_samples = np.asarray(data[self.location_data[0]])
+		if new_samples.ndim == 1:
+			new_samples = new_samples[None, :]
+		# push newest samples, keep only the trailing window (ring buffer)
+		if self._buffer is None:
+			self._buffer = new_samples
+		else:
+			self._buffer = np.concatenate([self._buffer, new_samples], axis=0)
+		if self._buffer.shape[0] > self.window_samples:
+			self._buffer = self._buffer[-self.window_samples:]
+		features = self.feature_extractor.compute_bin_features(data=self._buffer)["features"]
+		data[self.location_data[0]] = features
+		return data, interpipe
+
+
 class TrialToBinsBlock(DataProcessingBlock):
 	"""
 	A block to assign one or more trial-level variables to one or more bin-level variables based on the trial indices in interpipe['bin_trial_idx'].
@@ -1494,13 +1541,14 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 	"""
 	A block for detecting movement onset in the EMG data by thresholding kinematics. 
 	"""
-	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', mask_key: str = None, plot: bool = False, avg_across_dims: bool = False):
+	def __init__(self, location_behavior: str, vel_threshold: float, onset_key: str = 'onset_indices', directions_key: str = 'movement_directions', mask_key: str = None, plot: bool = False, avg_across_dims: bool = False):
 		super().__init__()
 		self.location_behavior = location_behavior
 		self.vel_threshold = vel_threshold
 		self.movement_onset_detection = MovementOnsetDetector({})
 		
 		self.onset_key = onset_key
+		self.directions_key = directions_key
 		self.mask_key = mask_key
 
 		self.plot = plot
@@ -1522,13 +1570,14 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			trial_idx = interpipe['bin_trial_idx']
 
 		# Detect movement onsets
-		onsets = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
+		onsets, directions = self.movement_onset_detection.detect_movement_onsets_kinematics(behavior, trial_idx, self.vel_threshold)
 
 		# Add onsets to data dictionary
 		if self.avg_across_dims:
 			onsets = np.nanmean(onsets, axis=1, keepdims=True)  # Average across dimensions if specified
 			Donsets = 1
 		interpipe[self.onset_key] = onsets
+		interpipe[self.directions_key] = directions
 
 		if self.plot:
 			fig, ax = plt.subplots(1, 1, figsize=(12, 6))
@@ -1932,6 +1981,75 @@ class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 		
 		plt.tight_layout()
 		plt.show(block=True)
+
+class VelocityToPostureBlock(DataProcessingBlock):
+	"""
+	A block that converts velocity prompts into sustained postures
+	"""
+	def __init__(self, location_behavior: str, location_out: str, location_onsets: str, binary: bool = False):
+		super().__init__()
+		self.location_behavior = location_behavior
+		self.location_out = location_out
+		self.location_onsets = location_onsets
+		self.binary = binary
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by converting velocity prompts into sustained postures.
+		"""
+		# Get behavior data and timestamps
+		kinematics = data[self.location_behavior]
+		movement_onsets = interpipe[self.location_onsets]
+
+		trial_idx = interpipe['bin_trial_idx']
+		unique_trials = np.unique(trial_idx)
+
+		D = kinematics.shape[1] // 2  # Assuming behavior has position and velocity for D dimensions
+
+		if movement_onsets.ndim > 1:
+			movement_onsets = np.nanmean(movement_onsets, axis=1)  # Average across dimensions if needed
+
+		kinematics_new = np.zeros_like(kinematics)
+
+		kinematics_new[:, :D] = kinematics[:, :D]  # Copy position data
+		for i in range(D):
+			kinematics_dof = kinematics[:, D + i]
+			for trial in unique_trials:
+
+				if np.isnan(trial):
+					continue
+
+				trial_mask = trial_idx == trial
+				onset = movement_onsets[int(trial)]
+
+				kinematics_trial = kinematics_dof[trial_mask]
+
+				# Find max height and direction in kinematics_trial
+				abs_kinematics_trial = np.abs(kinematics_trial)
+				max_idx = np.argmax(abs_kinematics_trial)
+				max_height = abs_kinematics_trial[max_idx]
+				direction = np.sign(kinematics_trial[max_idx]) if max_height > 0.001 else 0
+
+				if np.isnan(onset):
+					continue  # Skip trials without detected onset
+
+				# Find the index of the onset in the trial
+				onset_idx = int(onset - np.where(trial_mask)[0][0])
+				print(onset_idx)
+
+				# Set all subsequent time points in this trial to the posture value at onset
+				if self.binary:
+					posture_value = direction
+				else:
+					posture_value = direction * max_height
+
+				kinematics_trial[onset_idx:] = posture_value
+
+				kinematics_new[trial_mask, D + i] = kinematics_trial
+
+		data[self.location_out] = kinematics_new
+
+		return data, interpipe
 
 class ReFITTransformationBlock(DataProcessingBlock):
 
@@ -2419,8 +2537,12 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 				neural_data = standard_scaler.fit_transform(neural_data)
 
 			# Predict behavior using MiniModel
-			neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
-			predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
+			if neural_data.ndim == 2:
+				neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).T.unsqueeze(0)  # Add batch dimension
+				predicted_behavior = self.model(neural_data, return_all_tsteps=True).squeeze().cpu().detach().numpy()
+			elif neural_data.ndim == 3:
+				neural_data = torch.tensor(neural_data, dtype=torch.float32, device=self.model.device).permute(0, 2, 1)  # (batch, time, features)
+				predicted_behavior = self.model(neural_data, return_all_tsteps=True).permute(0, 2, 1).cpu().detach().numpy()
 			# Inverse transform predicted behavior
 			if self.scale_behavior:
 				predicted_behavior = self.model.behavior_scaler.inverse_transform(predicted_behavior)
@@ -2428,6 +2550,33 @@ class LSTMTemplateReplacementBlock(DataProcessingBlock):
 			# Update the behavior data in the data dictionary
 			data[loc_beh] = predicted_behavior
 		
+		return data, interpipe
+
+class ConcatYtoXBlock(DataProcessingBlock):
+	"""
+	A block for adding Y data to X data in the data dictionary.
+	"""
+	def __init__(self, location_X: str, location_Y: str, location_out: str, idx_Y: list = None):
+		super().__init__()
+		self.location_X = location_X
+		self.location_Y = location_Y
+		self.location_out = location_out
+		self.idx_Y = idx_Y
+
+	def transform(self, data, interpipe):
+		"""
+		Transform the data by adding Y data to X data.
+		"""
+		X_data = data[self.location_X]
+		Y_data = data[self.location_Y]
+
+		if self.idx_Y is not None:
+			Y_data = Y_data[:, self.idx_Y]
+
+		# Concatenate along the last dimension
+		concatenated_data = np.concatenate((X_data, Y_data), axis=-1)
+		data[self.location_out] = concatenated_data
+
 		return data, interpipe
 
 class LSTMDenoiseReplacementBlock(DataProcessingBlock):

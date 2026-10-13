@@ -12,9 +12,11 @@ from neuraldecoding.utils import loss_functions
 from neuraldecoding.trainer.Trainer import Trainer
 from neuraldecoding.model import neural_network_models
 from neuraldecoding.utils.special_datasets import BehaviorDatasetCustom
+import matplotlib.pyplot as plt
 import neuraldecoding
 import warnings
 import copy
+import sklearn.preprocessing
 
 class NNTrainer(Trainer):
     def __init__(self, preprocessor, config, dataset = None):
@@ -348,6 +350,8 @@ class LSTMTrainer(NNTrainer):
 class LSTMRankTrainer(LSTMTrainer):
     def __init__(self, preprocessor, config, dataset = None):
         super().__init__(preprocessor, config, dataset)
+        self.fullhist = config.training.get('fullhist', False)
+        self.dof_selections = config.training.get('dof_selections', None) # for mixed MSE, Rank scaling
     
     def create_dataloaders(self):
         """Creates PyTorch DataLoaders for training and validation data."""
@@ -396,15 +400,7 @@ class LSTMRankTrainer(LSTMTrainer):
                 
                 self.model.train()
                 self.optimizer.zero_grad()
-                if self.trialized_loss:
-                    if iteration == 0:
-                        n_bins = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
-                        train_ends_mask = self.preprocessor.saved_data['bin_trial_end_idx'] < n_bins
-                        starts = self.preprocessor.saved_data['bin_trial_start_idx'][train_ends_mask]
-                        ends = self.preprocessor.saved_data['bin_trial_end_idx'][train_ends_mask]
-                    loss, yhat = self.model.train_step(x.to(self.device), starts, ends, directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
-                else:
-                    loss, yhat = self.model.train_step(x.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
+                loss, yhat = self.model.train_step(x.to(self.device), y.to(self.device), directions, onsets, self.optimizer, self.loss_func, clear_cache=self.clear_cache)
 
                 running_loss += loss.item()
                 train_all_predictions.append(yhat.detach().cpu().numpy())
@@ -500,25 +496,14 @@ class LSTMRankTrainer(LSTMTrainer):
                 y = trial['kin']
                 directions = trial['directions']
                 onsets = trial['onsets']
-                if self.trialized_loss:
+                if self.fullhist:
                     yhat = self.model.forward(x.to(self.device), return_all_tsteps=True)
 
                     val_bin_start = self.preprocessor.saved_data['neural_train_denorm_data'].shape[0]
-                    start_mask = self.preprocessor.saved_data['bin_trial_start_idx'] >= val_bin_start
-                    starts = self.preprocessor.saved_data['bin_trial_start_idx'][start_mask] - val_bin_start
-                    ends = self.preprocessor.saved_data['bin_trial_end_idx'][start_mask] - val_bin_start
+                    onsets = torch.where(onsets != 0, onsets - val_bin_start, onsets)
 
-                    cum_loss = torch.tensor(0.0, device=x.device)
-                    for i, start, end in zip(range(len(starts)), starts, ends):
-                        subset_yhat = yhat[start:end, :]
-                        subset_directions = directions[start, :] # TrialToBinsBlock will have directions at start idx
-                        subset_onsets = onsets[start, :] # TrialToBinsBlock will have onsets at start idx
-                        loss = self.loss_func(subset_yhat, subset_directions, subset_onsets)
-                        if loss is None:
-                            # This can happen if all onsets are outside the range of the trial for this subset, so this trial doesn't contribute to the loss
-                            continue
-                        cum_loss += loss
-                    
+                    cum_loss = self.loss_func(yhat, y, directions, onsets, fullhist=True)
+
                     val_all_predictions = yhat.cpu().numpy()
                     val_all_targets = y.cpu().numpy()
                 else:
@@ -552,26 +537,129 @@ class LSTMRankTrainer(LSTMTrainer):
                 val_all_predictions = np.concatenate(val_all_predictions, axis=0)
                 val_all_targets = np.concatenate(val_all_targets, axis=0)
 
+            self._update_val_plot(val_all_targets[:, 0], val_all_predictions[:, 0])
+
         return val_loss, val_all_predictions, val_all_targets
+
+    def _update_val_plot(self, targets, predictions):
+        if not hasattr(self, '_val_fig') or not plt.fignum_exists(self._val_fig.number):
+            plt.ion()
+            self._val_fig, self._val_ax = plt.subplots(figsize=(10, 5))
+            self._val_target_line, = self._val_ax.plot([], [], label='Target')
+            self._val_pred_line, = self._val_ax.plot([], [], label='Prediction')
+            self._val_ax.legend()
+            self._val_fig.show()
+
+        x = np.arange(len(targets))
+        self._val_target_line.set_data(x, targets)
+        self._val_pred_line.set_data(x, predictions)
+        self._val_ax.relim()
+        self._val_ax.autoscale_view()
+        self._val_fig.canvas.draw_idle()
+        self._val_fig.canvas.flush_events()
     
-    def compute_behavior_scaler(self):
-        # After training, compute behavior scaler via MinMax on output of model with input x_full_train
-        self.model.eval()
-        with torch.no_grad():
-            x_full_train = self.data_dict['neural_train'].to(self.device)
-            train_predictions = self.model.forward(x_full_train, return_all_tsteps=True).detach().cpu().numpy()
+    def compute_behavior_scaler(self, percentiles = [10, 90]):
+        if self.dof_selections is not None:
+            # Mixed DOF scaler approach
+            self.model.eval()
+            with torch.no_grad():
+                x_full_train = self.data_dict['neural_train'].to(self.device)
+                train_predictions = self.model.forward(x_full_train, return_all_tsteps=True).detach().cpu().numpy()
+                scaler_trim = int(0.25 * np.shape(train_predictions)[0])
+                train_predictions = train_predictions[scaler_trim:] # don't use the first points of the network to compute the scaler, RNN isn't warmed up yet
+            prompts = self.preprocessor.saved_data['behavior_train_denorm_data']
+    
+            scalers = []
+            for i, selection in enumerate(self.dof_selections):
+                if selection == 1: # rank scaler
+                    scalers.append(BehaviorScalerRank(PercentileScaler.from_predictions(train_predictions[:, i], percentiles)))
+                elif selection == 0: # standard scaler
+                    prompts_dof = prompts[:, i]
+                    scalers.append(sklearn.preprocessing.StandardScaler().fit(prompts_dof.reshape(-1, 1)))
 
-        from sklearn.preprocessing import MinMaxScaler
-        idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
-        train_predictions = train_predictions[:, idx]
-        behavior_scaler_internal = MinMaxScaler()
-        behavior_scaler_internal.fit(train_predictions)
+            behavior_scaler = MixedDOFScaler(scalers)
 
-        # We need the inverse_transform method to go from min-max to 0-1, and not the transform method
-        # Creating this dummy class to swap the methods
-        behavior_scaler = BehaviorScalerRank(behavior_scaler_internal)
-        
+        else:
+            # Traditional approach, scale to 10th-90th percentile
+            # After training, compute behavior scaler via 10th-90th percentile scaling on output of model with input x_full_train
+            self.model.eval()
+            with torch.no_grad():
+                x_full_train = self.data_dict['neural_train'].to(self.device)
+                train_predictions = self.model.forward(x_full_train, return_all_tsteps=True).detach().cpu().numpy()
+
+            idx = np.arange(self.model.past * self.model.n_dofs, (self.model.past + 1) * self.model.n_dofs)
+            train_predictions = train_predictions[:, idx]
+
+            behavior_scaler_internal = PercentileScaler.from_predictions(train_predictions, percentiles)
+
+            # We need the inverse_transform method to go from percentile-scaled to 0-1, and not the transform method
+            # Creating this dummy class to swap the methods
+            behavior_scaler = BehaviorScalerRank(behavior_scaler_internal)
+
         self.model.behavior_scaler = behavior_scaler
+
+class MixedDOFScaler:
+    def __init__(self, scalers):
+        self.scalers = scalers
+
+    def transform(self, data):
+        return np.column_stack([scaler.transform(data[:, i]) for i, scaler in enumerate(self.scalers)])
+
+    def inverse_transform(self, data):
+        return np.column_stack([scaler.inverse_transform(data[:, i]) for i, scaler in enumerate(self.scalers)])
+    
+class PercentileScaler:
+    """Maps the min percentile -> 0 and the max percentile -> 1, per column (10th/90th by default)."""
+    # Percentiles of the training outputs kept by from_predictions, so the bounds can be
+    # re-picked later without the training data (GUI rank scaler window).
+    QUANTILE_GRID = np.arange(1001) / 10.0
+
+    def __init__(self, p0, p1, eps=1e-8):
+        self.p0 = np.asarray(p0)
+        self.range = np.asarray(p1) - self.p0
+        self.range = np.where(self.range < eps, eps, self.range)  # avoid divide-by-zero on flat DOFs
+        self.eps = eps
+
+    @classmethod
+    def from_predictions(cls, predictions, percentiles, eps=1e-8):
+        """Fit on training outputs (n_samples[, n_dofs]) and keep their quantile table."""
+        lo, hi = float(percentiles[0]), float(percentiles[1])
+        scaler = cls(np.percentile(predictions, lo, axis=0), np.percentile(predictions, hi, axis=0), eps)
+        scaler.quantiles = np.percentile(predictions, cls.QUANTILE_GRID, axis=0)
+        scaler.percentiles = (lo, hi)
+        scaler.train_percentiles = (lo, hi)
+        return scaler
+
+    @property
+    def adjustable(self):
+        # Models trained before the quantile table was kept only have p0/range
+        return getattr(self, 'quantiles', None) is not None
+
+    def bounds(self, lo, hi):
+        """Training-output values at percentiles lo and hi, i.e. what would map to 0 and 1."""
+        if not self.adjustable:
+            raise ValueError("model was trained before the trainer kept its training-output quantiles; retrain it to change percentiles")
+        if not 0 <= lo < hi <= 100:
+            raise ValueError(f"need 0 <= min < max <= 100, got {lo:g} and {hi:g}")
+        q = self.quantiles
+        if q.ndim == 1:
+            return np.asarray(np.interp(lo, self.QUANTILE_GRID, q)), np.asarray(np.interp(hi, self.QUANTILE_GRID, q))
+        p0 = np.array([np.interp(lo, self.QUANTILE_GRID, q[:, j]) for j in range(q.shape[1])])
+        p1 = np.array([np.interp(hi, self.QUANTILE_GRID, q[:, j]) for j in range(q.shape[1])])
+        return p0, p1
+
+    def set_percentiles(self, lo, hi):
+        p0, p1 = self.bounds(lo, hi)
+        eps = getattr(self, 'eps', 1e-8)
+        self.p0 = p0
+        self.range = np.where(p1 - p0 < eps, eps, p1 - p0)
+        self.percentiles = (float(lo), float(hi))
+
+    def transform(self, data):
+        return (data - self.p0) / self.range
+
+    def inverse_transform(self, data):
+        return data * self.range + self.p0
 
 class BehaviorScalerRank:
     def __init__(self, scaler):
@@ -580,7 +668,17 @@ class BehaviorScalerRank:
         return self.scaler.inverse_transform(data)
     def inverse_transform(self, data):
         return self.scaler.transform(data)
-    
+
+def rank_percentile_scalers(behavior_scaler):
+    """The PercentileScalers inside a rank model's behavior_scaler, in DoF order ([] if none)."""
+    if isinstance(behavior_scaler, MixedDOFScaler):
+        wrapped = [s for s in behavior_scaler.scalers if isinstance(s, BehaviorScalerRank)]
+    elif isinstance(behavior_scaler, BehaviorScalerRank):
+        wrapped = [behavior_scaler]
+    else:
+        return []
+    return [s.scaler for s in wrapped if isinstance(s.scaler, PercentileScaler)]
+
 class IterationNNTrainer(NNTrainer):
     '''
     The trainer used in LINK dataset multiday training. Archived here for reference.
@@ -642,12 +740,11 @@ class TCFNNTrainer(NNTrainer):
 
     def train_model(self, train_loader=None, valid_loader=None):
         if self.cfg.training.get("is_refit", False):
-            if self.cfg.model.params.get("prev_model_path", None) is None:
+            if self.cfg.training.get("prev_model_path", None) is None:
                 raise ValueError("model.params.prev_model_path is not set in config. Necessary for refit training.")
             else:
                 # Load the model first
-                self.model.load_model(fpath=self.cfg.model.params.prev_model_path)
-
+                self.model.load_model(fpath=self.cfg.training.get("prev_model_path"))
         self.model, self.logger = super().train_model(train_loader, valid_loader)
 
         if self.model.willsey_scaling:

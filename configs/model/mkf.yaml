@@ -1,0 +1,14 @@
+# Modified Kalman filter: George et al. 2020 J Neurosci Methods 330:108462 sec. 2.8
+# (Page 2018 / George 2018 defaults; Thomson 2024 JNE). Gain -> threshold -> rescale on the
+# output, recursion on the raw state bounded by output_range / gain. See
+# neuraldecoding/model/linear_models/ModifiedKF.py for the full parameter docs.
+type: ModifiedKalmanFilter
+fpath: null
+save: true
+params:
+  zero_position_uncertainty: false
+  threshold: 0.2          # scalar or one per modified DOF, normalized units (1 = full scale)
+  gain: 1.0               # scalar or one per modified DOF; applied before the threshold
+  modify_states: velocity # velocity | position | all | none (none == plain KalmanFilter)
+  output_range: null      # raw value that maps to 1.0; null = learned at training from |label|
+  range_percentile: 99    # percentile of |label| used when output_range is null

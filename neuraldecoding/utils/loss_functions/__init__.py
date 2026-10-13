@@ -1,2 +1,2 @@
 from neuraldecoding.utils.loss_functions.dilate_loss import DILATELoss
-from neuraldecoding.utils.loss_functions.rank_loss import RankLoss
+from neuraldecoding.utils.loss_functions.rank_loss import RankLoss, RankMSEDOFLoss

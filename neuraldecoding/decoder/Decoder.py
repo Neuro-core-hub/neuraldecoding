@@ -6,8 +6,8 @@ import numpy as np
 import torch
 
 from omegaconf import OmegaConf, DictConfig
-from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA, AdalineKF
-from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_Rank, TCN, TCNTrialInput, LSTMFullHistory_Rank
+from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA, AdalineKF, ModifiedKalmanFilter
+from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_Rank, TCN, TCNTrialInput, LSTMFullHistory_Rank, LSTMFullHistory_Trialized
 from neuraldecoding.model.Model import DummyModel
 import neuraldecoding.stabilization.latent_space_alignment
 from neuraldecoding.stabilization.latent_space_alignment import LatentSpaceAlignment
@@ -21,11 +21,13 @@ MODEL_REGISTRY = {
     "LDA":LDA,
     "LSTM": LSTM,
     "LSTMTrialInput": LSTMTrialInput,
+    "LSTMFullHistory_Trialized": LSTMFullHistory_Trialized,
     "LSTMTrialInput_Rank": LSTMTrialInput_Rank,
     "LSTMFullHistory_Rank": LSTMFullHistory_Rank,
     "TCN": TCN,
     "TCNTrialInput": TCNTrialInput,
     "AdalineKF": AdalineKF, 
+    "ModifiedKalmanFilter": ModifiedKalmanFilter,
     "dummy": DummyModel
     }
 
@@ -79,6 +81,16 @@ class Decoder(ABC):
         dec = copy.deepcopy(self)
         dec.load_model()
         return dec
+
+    def set_position(self, pos) -> None:
+        """
+        Tell the model where the controlled effector actually is (positions-first vector,
+        one entry per DoF). Only models with an internal position state, e.g. KalmanFilter,
+        act on this; every other model ignores it.
+        """
+        setter = getattr(self.model, "set_position", None)
+        if setter is not None:
+            setter(pos)
     
     # def stabilize(self, data_0, data_k):
     #     ls_0 = self.stabilization.train(data_0)
@@ -177,16 +189,22 @@ class RNNDecoder(Decoder):
         return prediction
 
 class dofDecoder():
-    def __init__(self, cfglist: list, model_fpath_list: list) -> None:
+    def __init__(self, cfglist: list, model_fpath_list: list, input_columns: list = None) -> None:
         # cfglist: list of DictConfig, one per DoF
         # create a decoder per config
         # choose decoder type based on model type
+        # input_columns: optional, per DoF, the feature columns that DoF was trained on
+        # (None = all), for DoFs that read different channels; see
+        # neuraldecoding.preprocessing.merge_online_neural_selection
+        self.input_columns = list(input_columns) if input_columns is not None else [None] * len(cfglist)
+        if len(self.input_columns) != len(cfglist):
+            raise ValueError(f"input_columns has {len(self.input_columns)} entries for {len(cfglist)} DoFs")
         self.decoders = []
         self.input_shape = []
         self.output_shape = []
         for cfg in cfglist:
             mtype = cfg.model.type
-            if mtype in ["LSTM", "LSTMTrialInput", "LSTMTrialInput_Rank", "LSTMFullHistory_Rank"]:
+            if mtype in ["LSTM", "LSTMTrialInput", "LSTMTrialInput_Rank", "LSTMFullHistory_Rank", "LSTMFullHistory_Trialized"]:
                 dec = RNNDecoder(cfg)
             elif mtype in ["TCN", "TCNTrialInput"]:
                 dec = NeuralNetworkDecoder(cfg)
@@ -215,11 +233,22 @@ class dofDecoder():
             dec_path = paths[i] if paths is not None and i < len(paths) else None
             dec.load_model(fpath=dec_path, running_online=running_online)
 
+    def set_position(self, pos) -> None:
+        """
+        Split a positions-first vector across the per-DoF sub-decoders. ``predict`` treats
+        each sub-decoder as one DoF (column 0 = position, column 1 = velocity), so
+        sub-decoder ``i`` gets ``pos[i]``.
+        """
+        pos = np.asarray(pos, dtype=float).reshape(-1)
+        for i, dec in enumerate(self.decoders):
+            if i < pos.shape[0]:
+                dec.set_position(pos[i:i + 1])
+
     def predict(self, neural_data):
         pos_decodes = []
         vel_decodes = []
-        for decoder in self.decoders:
-            output_tensor = decoder.predict(neural_data)
+        for decoder, cols in zip(self.decoders, self.input_columns):
+            output_tensor = decoder.predict(neural_data if cols is None else neural_data[:, cols])
             # Sub-decoders may return numpy (e.g. LinearDecoder) or torch tensors;
             # normalize to a 2-D torch tensor so stacking/concatenation is safe.
             if not isinstance(output_tensor, torch.Tensor):

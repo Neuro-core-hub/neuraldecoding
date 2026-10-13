@@ -2,4 +2,5 @@ from .Regression import LinearRegression
 from .Regression import RidgeRegression
 from .KF import KalmanFilter
 from .AdalineKF import AdalineKF
+from .ModifiedKF import ModifiedKalmanFilter
 from .LDA import LDA
