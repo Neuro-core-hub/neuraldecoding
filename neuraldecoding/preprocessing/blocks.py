@@ -248,7 +248,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, split_trials = False, location = ['neural', 'behavior'], interpipe_location = ['bin_trial_start_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, split_trials = False, location = ['neural', 'behavior'], interpipe_location = ['bin_trial_start_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None, whole_trials = False):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -262,6 +262,10 @@ class DataSplitBlock(DataFormattingBlock):
 			masks_suffix (list): List of suffixes to add to the interpipe dictionary keys for the masks. Default is ['_train', '_val', '_test'].
 			dataset_ratio (int): Ratio of dataset sizes in composite dataset. Should only be used if using multiple datasets so data is balanced. Currently only configured for direct split.
 			val_run (int): Use an entire run for validation. Should only be used if using multiple datasets. Indexed at 1.
+			whole_trials (bool): Assign whole trials to train/test (shuffled when shuffle=True), so
+				neighbouring bins never straddle the split. Unlike split_trials, which cuts the
+				session chronologically, this keeps every class in the test set when the task
+				cues classes in blocks. Takes precedence over split_trials.
 			
 		"""
 		super().__init__()
@@ -274,6 +278,7 @@ class DataSplitBlock(DataFormattingBlock):
 		self.shuffle = shuffle
 		self.masks_suffix = masks_suffix
 		self.val_run = val_run
+		self.whole_trials = whole_trials
 
 	def transform(self, data, interpipe):
 		"""
@@ -296,14 +301,17 @@ class DataSplitBlock(DataFormattingBlock):
 		"""
 		
 		trial_idxs = interpipe.get(self.interpipe_location[0], None)
-		if not self.split_trials:
+		if not (self.split_trials or self.whole_trials):
 			trial_idxs = None
 
 		if trial_idxs is None:
 			import warnings
 			warnings.warn(f"DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock). Falling back to direct split.")
 
-		if self.split_trials:
+		if self.whole_trials and trial_idxs is not None and isinstance(self.split_ratio, float):
+			split_data, masks = self._split_whole_trials_stratified(
+				data[self.location[0]], data[self.location[1]], trial_idxs)
+		elif self.split_trials and not self.whole_trials:
 			split_data, masks, train_trial_indices = neuraldecoding.utils.data_split_trial_splice(data[self.location[0]], 
 															data[self.location[1]], 
 															trial_idx=trial_idxs, 
@@ -319,6 +327,7 @@ class DataSplitBlock(DataFormattingBlock):
 			interpipe['save_keys_ram'].append('train_bin_trial_start_idx')
 			interpipe['save_keys_ram'].append('train_bin_trial_end_idx')
 		else:
+			# The trial-aware path also returns (train_trials, test_trials).
 			split_data, masks = neuraldecoding.utils.data_split_trial(data[self.location[0]], 
 															data[self.location[1]], 
 															trial_idx=trial_idxs, 
@@ -327,7 +336,7 @@ class DataSplitBlock(DataFormattingBlock):
 															shuffle=self.shuffle,
 															return_masks=True,
 															dataset_ratio=interpipe['dataset_ratio'] if 'dataset_ratio' in interpipe else 1,
-															val_run=self.val_run)
+															val_run=self.val_run)[:2]
 		assert len(split_data) == len(self.data_keys) // 2, "DataSplitBlock: split_data length mismatch. Did you include keys for validation set?"
 		for i, (x, y) in enumerate(split_data):
 			data[self.data_keys[i]] = x
@@ -337,6 +346,48 @@ class DataSplitBlock(DataFormattingBlock):
 			interpipe[f"mask{self.masks_suffix[i]}"] = mask
 
 		return data, interpipe
+
+	def _split_whole_trials_stratified(self, x, y, trial_starts):
+		"""Whole trials to train/test, stratified by each trial's class.
+
+		Every class puts round((1 - split_ratio) * n) of its n trials in the
+		test set -- at least one when it has two or more, never all of them --
+		so no class can end up only in test (e.g. 3 reps of a grip that all
+		land in test, leaving the model never trained on it). A trial's class
+		is its most common label. Shuffled with split_seed when shuffle=True.
+		"""
+		n = len(x)
+		starts = np.sort(np.clip(np.asarray(trial_starts, dtype=int), 0, max(0, n - 1)))
+		bounds = np.append(starts, n)
+		y_np = y.detach().cpu().numpy() if torch.is_tensor(y) else np.asarray(y)
+		y_np = y_np.reshape(n, -1)[:, 0] if n else y_np
+		rng = np.random.default_rng(self.split_seed)
+		test_trials = []
+		trial_class = {}
+		for t in range(len(starts)):
+			seg = y_np[bounds[t]:bounds[t + 1]]
+			if len(seg):
+				vals, counts = np.unique(seg, return_counts=True)
+				trial_class.setdefault(vals[np.argmax(counts)], []).append(t)
+		for c, trials in trial_class.items():
+			trials = list(trials)
+			if self.shuffle:
+				rng.shuffle(trials)
+			n_test = int(round((1 - self.split_ratio) * len(trials)))
+			if len(trials) >= 2:
+				n_test = min(max(n_test, 1), len(trials) - 1)
+			test_trials += trials[len(trials) - n_test:] if n_test else []
+		test_mask = np.zeros(n, dtype=bool)
+		for t in test_trials:
+			test_mask[bounds[t]:bounds[t + 1]] = True
+		train_mask = ~test_mask
+		if torch.is_tensor(x):
+			train_mask_t = torch.as_tensor(train_mask, device=x.device)
+			test_mask_t = torch.as_tensor(test_mask, device=x.device)
+		else:
+			train_mask_t, test_mask_t = train_mask, test_mask
+		split = ((x[train_mask_t], y[train_mask_t]), (x[test_mask_t], y[test_mask_t]))
+		return split, (train_mask_t, test_mask_t)
 
 class Dict2TupleBlock(DataFormattingBlock):
 	"""
@@ -581,6 +632,164 @@ class RoundToIntegerBlock(DataFormattingBlock):
 		return data_out, interpipe
 
 # Wrappers that Modify Data
+class ActivePeriodLabelBlock(DataProcessingBlock):
+	"""
+	Re-labels binned classification data from the EMG itself instead of the cue,
+	following the legacy RPNI trainer (RPNI_TrainOnline_Freepace.m), and DROPS
+	every bin that is neither clean rest nor detected activity, so transitions
+	never teach the classifier.
+
+	Per trial (trial = cue_time .. stop_time, one cued class each):
+	  - rest trials keep bins from `rest_skip_ms` after the cue to the end;
+	    the start is dropped because the previous grip is still relaxing.
+	  - grip trials find the movement onset: the first run of `onset_min_bins`
+	    bins whose amplitude exceeds the rest threshold. Bins from onset to
+	    onset + `active_window_ms` (or the trial end) are kept as the grip;
+	    bins before onset (reaction time) are dropped. With
+	    `drop_weak_active`, active bins below `active_k` are dropped too, so
+	    weak contractions fall on the rest side of the classifier boundary.
+	    Trials with no onset are dropped entirely.
+	  - bins outside any trial are dropped.
+
+	Amplitude = mean over channels of MAV / that channel's rest mean (1.0 at
+	rest). Rest statistics come from the kept rest bins. The threshold is
+	rest_mean + k * rest_sd of that amplitude.
+
+	Place it after feature extraction (and RoundToIntegerBlock), before
+	DataSplitBlock. It recomputes bin_trial_start_idx / bin_trial_end_idx for
+	the kept bins, so DataSplitBlock(split_trials=True) still splits on trial
+	boundaries.
+	"""
+	def __init__(self, location_neural='neural', location_behavior='behavior',
+				 location_ts=('neural_ts', 'behavior_ts'), rest_name='rest',
+				 amp_n_features=None, rest_skip_ms=1000, onset_k=3.0, onset_min_bins=2,
+				 active_window_ms=None, drop_weak_active=True, active_k=None,
+				 bin_size_ms=50, verbose=True):
+		"""
+		Args:
+			rest_name (str): pattern name of the rest class (looked up in behavior_units).
+			amp_n_features (int): leading feature columns that are the current-bin MAV
+				(= channel count when history features are appended). None = all columns.
+			rest_skip_ms (float): drop this much of each rest trial after the cue.
+			onset_k (float): onset threshold in rest SDs above the rest mean.
+			onset_min_bins (int): consecutive bins above threshold that make an onset.
+			active_window_ms (float): keep at most this long after onset. None = to trial end.
+			drop_weak_active (bool): drop active bins below active_k.
+			active_k (float): weak-bin threshold in rest SDs. None = onset_k.
+			bin_size_ms (float): bin width, to turn the ms windows into bins.
+		"""
+		super().__init__()
+		self.location_neural = location_neural
+		self.location_behavior = location_behavior
+		self.location_ts = list(location_ts)
+		self.rest_name = rest_name
+		self.amp_n_features = amp_n_features
+		self.rest_skip_ms = float(rest_skip_ms)
+		self.onset_k = float(onset_k)
+		self.onset_min_bins = int(onset_min_bins)
+		self.active_window_ms = None if active_window_ms is None else float(active_window_ms)
+		self.drop_weak_active = bool(drop_weak_active)
+		self.active_k = self.onset_k if active_k is None else float(active_k)
+		self.bin_size_ms = float(bin_size_ms)
+		self.verbose = verbose
+
+	def transform(self, data, interpipe):
+		X = np.asarray(data[self.location_neural])
+		y_raw = np.asarray(data[self.location_behavior])
+		y = y_raw.reshape(len(y_raw), -1)[:, 0]
+		units = interpipe['behavior_units']
+		units = list(eval(units)) if isinstance(units, str) else list(units)
+		if self.rest_name not in units:
+			raise ValueError(f"ActivePeriodLabelBlock: rest_name '{self.rest_name}' not in classes {units}")
+		rest_class = units.index(self.rest_name)
+
+		ts = np.asarray(interpipe[self.location_ts[0]], dtype=float)
+		trial_idx = np.asarray(interpipe['bin_trial_idx'], dtype=float)
+		cue_ms = np.asarray(interpipe['trial_start_times'], dtype=float)
+		n_trials = len(cue_ms)
+		n_amp = X.shape[1] if self.amp_n_features is None else int(self.amp_n_features)
+		mav = X[:, :n_amp]
+
+		# Each trial's cued class = the most common label in its bins (the label
+		# is the cue for the whole hold, so this is the cue).
+		trial_class = np.full(n_trials, -1)
+		for t in range(n_trials):
+			m = trial_idx == t
+			if m.any():
+				vals, counts = np.unique(y[m], return_counts=True)
+				trial_class[t] = int(vals[np.argmax(counts)])
+
+		# 1) Clean rest bins -> rest statistics.
+		keep = np.zeros(len(y), dtype=bool)
+		since_cue = np.full(len(y), np.nan)
+		valid = ~np.isnan(trial_idx)
+		since_cue[valid] = ts[valid] - cue_ms[trial_idx[valid].astype(int)]
+		rest_trial_bin = valid & (trial_class[np.where(valid, trial_idx, 0).astype(int)] == rest_class)
+		rest_bins = rest_trial_bin & (since_cue >= self.rest_skip_ms)
+		if rest_bins.sum() < 10:
+			raise ValueError(f"ActivePeriodLabelBlock: only {rest_bins.sum()} clean rest bins; "
+							 f"lower rest_skip_ms ({self.rest_skip_ms}) or record more rest")
+		keep |= rest_bins
+		ch_rest_mean = mav[rest_bins].mean(axis=0)
+		ch_rest_mean[ch_rest_mean <= 0] = 1e-12
+		amp = (mav / ch_rest_mean).mean(axis=1)
+		amp_mu, amp_sd = amp[rest_bins].mean(), amp[rest_bins].std()
+		onset_thr = amp_mu + self.onset_k * amp_sd
+		active_thr = amp_mu + self.active_k * amp_sd
+
+		# 2) Active period of each grip trial.
+		latencies, no_onset, dropped_weak = [], [], 0
+		win_bins = None if self.active_window_ms is None else int(round(self.active_window_ms / self.bin_size_ms))
+		for t in range(n_trials):
+			if trial_class[t] in (-1, rest_class):
+				continue
+			idx = np.where(trial_idx == t)[0]
+			above = amp[idx] > onset_thr
+			run = np.convolve(above.astype(int), np.ones(self.onset_min_bins, dtype=int), mode='valid')
+			hits = np.where(run == self.onset_min_bins)[0]
+			if len(hits) == 0:
+				no_onset.append(t)
+				continue
+			start = hits[0]
+			stop = len(idx) if win_bins is None else min(len(idx), start + win_bins)
+			act = idx[start:stop]
+			if self.drop_weak_active:
+				strong = amp[act] > active_thr
+				dropped_weak += int((~strong).sum())
+				act = act[strong]
+			keep[act] = True
+			y[act] = trial_class[t]
+			latencies.append(ts[idx[start]] - cue_ms[t])
+
+		if self.verbose:
+			print("--------------------------------")
+			print("ActivePeriodLabelBlock")
+			print(f"  rest amplitude {amp_mu:.2f} +/- {amp_sd:.2f} (x rest mean); "
+				  f"onset threshold {onset_thr:.2f}, active threshold {active_thr:.2f}")
+			if latencies:
+				print(f"  onset latency after cue: median {np.median(latencies):.0f} ms, "
+					  f"range {np.min(latencies):.0f}-{np.max(latencies):.0f} ms")
+			if no_onset:
+				print(f"  WARNING: no onset in {len(no_onset)} grip trial(s) {no_onset}; dropped")
+			if self.drop_weak_active:
+				print(f"  dropped {dropped_weak} weak active bins")
+			print(f"  kept {keep.sum()} of {len(keep)} bins")
+			for c, name in enumerate(units):
+				print(f"    {name}: {int((keep & (y == c)).sum())}")
+			print("--------------------------------")
+
+		# 3) Drop everything else and keep the per-bin interpipe arrays aligned.
+		data[self.location_neural] = data[self.location_neural][keep]
+		y_out = y.reshape(-1, 1) if y_raw.ndim == 2 else y
+		data[self.location_behavior] = y_out.astype(y_raw.dtype)[keep]
+		for loc in self.location_ts:
+			interpipe[loc] = np.asarray(interpipe[loc])[keep]
+		interpipe['bin_trial_idx'] = trial_idx[keep]
+		kept_ts = ts[keep]
+		interpipe['bin_trial_start_idx'] = np.searchsorted(kept_ts, cue_ms)
+		interpipe['bin_trial_end_idx'] = np.searchsorted(kept_ts, np.asarray(interpipe['trial_end_times'], dtype=float))
+		return data, interpipe
+
 class StabilizationBlock(DataProcessingBlock):
 	"""
 	A block for stabilizing the latent space of neural data.
