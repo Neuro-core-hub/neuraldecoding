@@ -124,7 +124,7 @@ class Dataset:
                     # Modify the units
                     new_patterns_unit = eval(old_patterns.unit) + eval(nwbdata.acquisition["patterns"].unit)
                     new_patterns_unit = str(new_patterns_unit)
-                    new_patterns_timestamps = np.concatenate([old_patterns.timestamps[:], nwbdata.acquisition["patterns"].timestamps[:]])
+                    new_patterns_timestamps = np.concatenate([old_patterns.timestamps[:], nwbdata.acquisition["patterns"].timestamps[:] - timestamp_offset])
                     self.dataset.add_acquisition(TimeSeries(name="patterns", data=new_patterns, timestamps=new_patterns_timestamps, unit=new_patterns_unit, description=old_patterns.description))
                 if self.cfg.dataset_parameters.neural_add_mode == "simple":
                     # Pop original timeseries

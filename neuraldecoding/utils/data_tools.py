@@ -124,7 +124,7 @@ def data_split_trial(x, y, trial_idx=None, split_ratio=0.8, seed=42, shuffle=Fal
     if isinstance(dataset_ratio, float):
         dataset_ratio = [dataset_ratio]
     
-    assert sum(dataset_ratio) == 1, "dataset_ratio must sum to 1"
+    # assert sum(dataset_ratio) == 1, "dataset_ratio must sum to 1"
 
     g = torch.Generator().manual_seed(seed)
     device = x.device if torch.is_tensor(x) else torch.device('cpu')

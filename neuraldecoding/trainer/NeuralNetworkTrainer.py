@@ -537,24 +537,45 @@ class LSTMRankTrainer(LSTMTrainer):
                 val_all_predictions = np.concatenate(val_all_predictions, axis=0)
                 val_all_targets = np.concatenate(val_all_targets, axis=0)
 
-            self._update_val_plot(val_all_targets[:, 0], val_all_predictions[:, 0])
+            self._update_val_plot(val_all_targets[:], val_all_predictions[:])
 
         return val_loss, val_all_predictions, val_all_targets
 
     def _update_val_plot(self, targets, predictions):
-        if not hasattr(self, '_val_fig') or not plt.fignum_exists(self._val_fig.number):
+        targets = np.asarray(targets)
+        predictions = np.asarray(predictions)
+        if targets.ndim == 1:
+            targets = targets[:, None]
+        if predictions.ndim == 1:
+            predictions = predictions[:, None]
+        n_dofs = targets.shape[1]
+
+        if (not hasattr(self, '_val_fig') or not plt.fignum_exists(self._val_fig.number)
+                or len(self._val_axes) != n_dofs):
+            if hasattr(self, '_val_fig') and plt.fignum_exists(self._val_fig.number):
+                plt.close(self._val_fig)
             plt.ion()
-            self._val_fig, self._val_ax = plt.subplots(figsize=(10, 5))
-            self._val_target_line, = self._val_ax.plot([], [], label='Target')
-            self._val_pred_line, = self._val_ax.plot([], [], label='Prediction')
-            self._val_ax.legend()
+            self._val_fig, axes = plt.subplots(n_dofs, 1, figsize=(10, 2.5 * n_dofs),
+                                               sharex=True, squeeze=False)
+            self._val_axes = axes[:, 0]
+            self._val_target_lines = []
+            self._val_pred_lines = []
+            for d, ax in enumerate(self._val_axes):
+                target_line, = ax.plot([], [], label='Target')
+                pred_line, = ax.plot([], [], label='Prediction')
+                ax.set_ylabel(f'DoF {d}')
+                self._val_target_lines.append(target_line)
+                self._val_pred_lines.append(pred_line)
+            self._val_axes[0].legend(loc='upper right')
             self._val_fig.show()
 
         x = np.arange(len(targets))
-        self._val_target_line.set_data(x, targets)
-        self._val_pred_line.set_data(x, predictions)
-        self._val_ax.relim()
-        self._val_ax.autoscale_view()
+        for d, ax in enumerate(self._val_axes):
+            self._val_target_lines[d].set_data(x, targets[:, d])
+            if d < predictions.shape[1]:
+                self._val_pred_lines[d].set_data(np.arange(len(predictions)), predictions[:, d])
+            ax.relim()
+            ax.autoscale_view()
         self._val_fig.canvas.draw_idle()
         self._val_fig.canvas.flush_events()
     

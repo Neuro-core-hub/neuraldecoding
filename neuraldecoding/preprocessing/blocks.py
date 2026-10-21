@@ -1763,8 +1763,63 @@ class MovementOnsetDetectionKinematicsBlock(DataProcessingBlock):
 			ax.legend()
 			plt.tight_layout()
 			plt.show(block=True)
-				
+
 		return data, interpipe
+
+class OnsetTrialStartBlock(DataProcessingBlock):
+	"""
+	Movement onset = trial start, a loose stand-in for MovementOnsetDetectionKinematicsBlock
+	when the label can't be thresholded (e.g. a DoF driven by the autohand). Writes the same
+	interpipe keys in the same format, so TrialToBinsBlock and the rank loss use it unchanged.
+
+	Onset of trial t is its first bin (bin_trial_idx == t). Direction is the sign of the move
+	the trial asks for, target - position at that bin. A DoF whose target is within min_change
+	of where it starts did not move: onset and direction are NaN, which the rank loss skips,
+	as it does when kinematic thresholding finds no crossing.
+	"""
+	def __init__(self, target_indices: list, location_behavior: str = 'behavior', position_indices: list = None, min_change: float = 0.02, targets_key: str = 'targets', onset_key: str = 'onset_indices', directions_key: str = 'movement_directions'):
+		"""
+		Args:
+			target_indices (list): columns of interpipe[targets_key] for the decoded DoFs. NWB targets are
+				in alphabetical DoF order, e.g. [index, mrs, wrist_rotation] -> wrist is [2].
+			location_behavior (str): binned behavior in the data dictionary (after FeatureExtractionBlock).
+			position_indices (list): columns of the behavior holding the same DoFs' positions.
+				Default: the first len(target_indices) columns.
+			min_change (float): |target - start position| at or below this means the DoF did not move.
+		"""
+		super().__init__()
+		self.target_indices = list(target_indices)
+		self.location_behavior = location_behavior
+		self.position_indices = list(position_indices) if position_indices is not None else list(range(len(self.target_indices)))
+		if len(self.position_indices) != len(self.target_indices):
+			raise ValueError("position_indices and target_indices must have the same length")
+		self.min_change = min_change
+		self.targets_key = targets_key
+		self.onset_key = onset_key
+		self.directions_key = directions_key
+
+	def transform(self, data, interpipe):
+		targets = np.asarray(interpipe[self.targets_key], dtype=float)
+		targets = targets.reshape(len(targets), -1)[:, self.target_indices]
+		positions = np.asarray(data[self.location_behavior])[:, self.position_indices]
+		bin_trial_idx = interpipe['bin_trial_idx']
+
+		onsets = np.full(targets.shape, np.nan)
+		directions = np.full(targets.shape, np.nan)
+		for t in range(len(targets)):
+			trial_bins = np.where(bin_trial_idx == t)[0]
+			if len(trial_bins) == 0:
+				continue
+			first = trial_bins[0]
+			change = targets[t] - positions[first]
+			moved = np.abs(change) > self.min_change
+			onsets[t, moved] = first
+			directions[t, moved] = np.sign(change[moved])
+
+		interpipe[self.onset_key] = onsets
+		interpipe[self.directions_key] = directions
+		return data, interpipe
+
 class TemplateBehaviorReplacementBlock(DataProcessingBlock):
 	"""
 	A block for replacing the behavior data with a template behavior.
