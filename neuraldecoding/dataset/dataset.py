@@ -126,6 +126,25 @@ class Dataset:
                     new_patterns_unit = str(new_patterns_unit)
                     new_patterns_timestamps = np.concatenate([old_patterns.timestamps[:], nwbdata.acquisition["patterns"].timestamps[:]])
                     self.dataset.add_acquisition(TimeSeries(name="patterns", data=new_patterns, timestamps=new_patterns_timestamps, unit=new_patterns_unit, description=old_patterns.description))
+                elif self.cfg.dataset_parameters.patterns_add_mode == "merge_by_name":
+                    # Same pattern name in different files -> same column (new_patterns gives each file its own columns)
+                    old_patterns = self.dataset.acquisition.pop("patterns")
+                    old_data = old_patterns.data[:]
+                    if old_data.ndim == 1:
+                        old_data = old_data.reshape(-1, 1)
+                    additional_data = nwbdata.acquisition["patterns"].data[:]
+                    if additional_data.ndim == 1:
+                        additional_data = additional_data.reshape(-1, 1)
+                    old_names = eval(old_patterns.unit)
+                    additional_names = eval(nwbdata.acquisition["patterns"].unit)
+                    merged_names = old_names + [name for name in additional_names if name not in old_names]
+                    merged_data = np.zeros((old_data.shape[0] + additional_data.shape[0], len(merged_names)))
+                    merged_data[:old_data.shape[0], :old_data.shape[1]] = old_data
+                    for col, name in enumerate(additional_names):
+                        merged_data[old_data.shape[0]:, merged_names.index(name)] = additional_data[:, col]
+                    # Shift onto the stitched clock, same as neural and trials
+                    merged_timestamps = np.concatenate([old_patterns.timestamps[:], nwbdata.acquisition["patterns"].timestamps[:] - timestamp_offset])
+                    self.dataset.add_acquisition(TimeSeries(name="patterns", data=merged_data, timestamps=merged_timestamps, unit=str(merged_names), description=old_patterns.description))
                 if self.cfg.dataset_parameters.neural_add_mode == "simple":
                     # Pop original timeseries
                     # Add new neural
