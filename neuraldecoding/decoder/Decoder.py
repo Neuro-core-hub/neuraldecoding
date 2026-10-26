@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from omegaconf import OmegaConf, DictConfig
-from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA, AdalineKF, ModifiedKalmanFilter
+from neuraldecoding.model.linear_models import KalmanFilter, LinearRegression, RidgeRegression, LDA, AdalineKF, ModifiedKalmanFilter, PoshKnee
 from neuraldecoding.model.neural_network_models import LSTM, LSTMTrialInput, LSTMTrialInput_Rank, TCN, TCNTrialInput, LSTMFullHistory_Rank, LSTMFullHistory_Trialized
 from neuraldecoding.model.Model import DummyModel
 import neuraldecoding.stabilization.latent_space_alignment
@@ -18,6 +18,7 @@ MODEL_REGISTRY = {
     "KalmanFilter": KalmanFilter,
     "LinearRegression": LinearRegression,
     "RidgeRegression": RidgeRegression,
+    "PoshKnee": PoshKnee,
     "LDA":LDA,
     "LSTM": LSTM,
     "LSTMTrialInput": LSTMTrialInput,
