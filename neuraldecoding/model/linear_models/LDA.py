@@ -32,7 +32,9 @@ class LDA(LinearModel):
         Args:
             params (dict): Parameters for the LDA model
                 (sklearn.LinearDiscriminantAnalysis), plus the optional
-                proportional-control keys below.
+                proportional-control keys below. priors may also be "equal":
+                1/n for each of the n classes in the training labels, set at
+                fit time (null = each class's share of the training samples).
 
         Proportional-control params:
             proportional (bool): enable speed estimation. Default False.
@@ -54,6 +56,9 @@ class LDA(LinearModel):
         """
         super().__init__(params)
         params = dict(params)
+        self.equal_priors = params.get("priors") == "equal"
+        if self.equal_priors:
+            params["priors"] = None   # set to 1/n in train_step, once the classes are known
         self.proportional = bool(params.pop("proportional", False))
         self.rest_class = params.pop("rest_class", None)
         self.amp_n_features = params.pop("amp_n_features", None)
@@ -207,6 +212,9 @@ class LDA(LinearModel):
             input_data (tuple): A tuple containing the input features (X, (Nsamp, Nfeat)) and target labels (y, (Nsamp)).
         """
         X, y = input_data
+        if self.equal_priors:
+            n = len(np.unique(y))
+            self.model.set_params(priors=np.full(n, 1.0 / n))
         self.model.fit(X, y)
         self.Nfeats = X.shape[1]
         if self.proportional:
