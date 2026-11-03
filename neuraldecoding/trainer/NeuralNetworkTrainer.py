@@ -656,17 +656,55 @@ class PercentileScaler:
         # Models trained before the quantile table was kept only have p0/range
         return getattr(self, 'quantiles', None) is not None
 
+    @property
+    def n_columns(self):
+        """Output columns this scaler covers (a 1-D scaler counts as one)."""
+        q = getattr(self, 'quantiles', None)
+        if q is not None:
+            return 1 if q.ndim == 1 else q.shape[1]
+        return int(np.asarray(self.p0).size)
+
+    def column_percentiles(self, j=0):
+        """(min, max) percentile currently set for column j."""
+        lo, hi = self.percentiles
+        pick = lambda v: float(np.atleast_1d(v)[j] if np.ndim(v) else v)
+        return pick(lo), pick(hi)
+
+    @classmethod
+    def _value_at(cls, q, p):
+        """Training-output value at percentile p of one column's quantile table q.
+
+        Outside 0-100 it extends linearly: every percentile past 100 adds 1% of the
+        0-100 output span to the max (and likewise below 0 from the min).
+        """
+        if p > 100:
+            return q[-1] + (p - 100) / 100.0 * (q[-1] - q[0])
+        if p < 0:
+            return q[0] + p / 100.0 * (q[-1] - q[0])
+        return np.interp(p, cls.QUANTILE_GRID, q)
+
     def bounds(self, lo, hi):
-        """Training-output values at percentiles lo and hi, i.e. what would map to 0 and 1."""
+        """Training-output values at percentiles lo and hi, i.e. what would map to 0 and 1.
+
+        lo/hi are numbers (all columns) or one per column; any value is allowed as
+        long as min < max (outside 0-100 extrapolates, see _value_at).
+        """
         if not self.adjustable:
             raise ValueError("model was trained before the trainer kept its training-output quantiles; retrain it to change percentiles")
-        if not 0 <= lo < hi <= 100:
-            raise ValueError(f"need 0 <= min < max <= 100, got {lo:g} and {hi:g}")
+        n = self.n_columns
+        lo_c = np.broadcast_to(np.asarray(lo, dtype=float), (n,))
+        hi_c = np.broadcast_to(np.asarray(hi, dtype=float), (n,))
+        if not np.all(np.isfinite(lo_c) & np.isfinite(hi_c)):
+            raise ValueError("percentiles must be finite numbers")
+        bad = np.flatnonzero(lo_c >= hi_c)
+        if bad.size:
+            j = bad[0]
+            raise ValueError(f"need min < max, got {lo_c[j]:g} and {hi_c[j]:g}")
         q = self.quantiles
         if q.ndim == 1:
-            return np.asarray(np.interp(lo, self.QUANTILE_GRID, q)), np.asarray(np.interp(hi, self.QUANTILE_GRID, q))
-        p0 = np.array([np.interp(lo, self.QUANTILE_GRID, q[:, j]) for j in range(q.shape[1])])
-        p1 = np.array([np.interp(hi, self.QUANTILE_GRID, q[:, j]) for j in range(q.shape[1])])
+            return np.asarray(self._value_at(q, lo_c[0])), np.asarray(self._value_at(q, hi_c[0]))
+        p0 = np.array([self._value_at(q[:, j], lo_c[j]) for j in range(n)])
+        p1 = np.array([self._value_at(q[:, j], hi_c[j]) for j in range(n)])
         return p0, p1
 
     def set_percentiles(self, lo, hi):
@@ -674,7 +712,13 @@ class PercentileScaler:
         eps = getattr(self, 'eps', 1e-8)
         self.p0 = p0
         self.range = np.where(p1 - p0 < eps, eps, p1 - p0)
-        self.percentiles = (float(lo), float(hi))
+        n = self.n_columns
+        lo_c = np.broadcast_to(np.asarray(lo, dtype=float), (n,))
+        hi_c = np.broadcast_to(np.asarray(hi, dtype=float), (n,))
+        if np.all(lo_c == lo_c[0]) and np.all(hi_c == hi_c[0]):
+            self.percentiles = (float(lo_c[0]), float(hi_c[0]))
+        else:
+            self.percentiles = ([float(v) for v in lo_c], [float(v) for v in hi_c])
 
     def transform(self, data):
         return (data - self.p0) / self.range
@@ -699,6 +743,58 @@ def rank_percentile_scalers(behavior_scaler):
     else:
         return []
     return [s.scaler for s in wrapped if isinstance(s.scaler, PercentileScaler)]
+
+def rank_percentile_columns(behavior_scaler):
+    """Every rank-scaled model output column as (output_column, PercentileScaler, column_in_scaler).
+
+    This order is what set_rank_percentiles' per-column lo/hi lists follow. Columns
+    a MixedDOFScaler scales some other way (e.g. velocity DoFs) are left out.
+    """
+    if isinstance(behavior_scaler, MixedDOFScaler):
+        return [(i, s.scaler, 0) for i, s in enumerate(behavior_scaler.scalers)
+                if isinstance(s, BehaviorScalerRank) and isinstance(s.scaler, PercentileScaler)]
+    if isinstance(behavior_scaler, BehaviorScalerRank) and isinstance(behavior_scaler.scaler, PercentileScaler):
+        sc = behavior_scaler.scaler
+        return [(j, sc, j) for j in range(sc.n_columns)]
+    return []
+
+def _per_scaler_percentiles(columns, lo, hi):
+    """Split lo/hi (numbers, or one per rank column) into {id(scaler): (scaler, lo, hi)}."""
+    n = len(columns)
+    lo_c = np.broadcast_to(np.asarray(lo, dtype=float), (n,))
+    hi_c = np.broadcast_to(np.asarray(hi, dtype=float), (n,))
+    out = {}
+    for k, (_, sc, j) in enumerate(columns):
+        out.setdefault(id(sc), (sc, [], []))
+        out[id(sc)][1].append(lo_c[k])
+        out[id(sc)][2].append(hi_c[k])
+    return out
+
+def rank_percentile_bounds(behavior_scaler, lo, hi):
+    """Raw outputs (p0, p1) per rank column that percentiles lo/hi would map to 0 and 1."""
+    columns = rank_percentile_columns(behavior_scaler)
+    per = _per_scaler_percentiles(columns, lo, hi)
+    bounds = {k: sc.bounds(l, h) for k, (sc, l, h) in per.items()}
+    p0 = np.array([np.atleast_1d(bounds[id(sc)][0])[j] for _, sc, j in columns])
+    p1 = np.array([np.atleast_1d(bounds[id(sc)][1])[j] for _, sc, j in columns])
+    return p0, p1
+
+def set_rank_percentiles(behavior_scaler, lo, hi):
+    """Re-pick the percentile bounds of every rank column; lo/hi are numbers or one per column.
+
+    All columns are validated before any is changed, so a bad value leaves the model as it was.
+    """
+    columns = rank_percentile_columns(behavior_scaler)
+    if not columns:
+        raise ValueError("no rank percentile scaler")
+    for name, v in (("min", lo), ("max", hi)):
+        if np.ndim(v) and np.size(v) != len(columns):
+            raise ValueError(f"{name} percentiles: got {np.size(v)} values for {len(columns)} rank outputs")
+    per = _per_scaler_percentiles(columns, lo, hi)
+    for sc, l, h in per.values():
+        sc.bounds(l, h)
+    for sc, l, h in per.values():
+        sc.set_percentiles(l, h)
 
 class IterationNNTrainer(NNTrainer):
     '''
