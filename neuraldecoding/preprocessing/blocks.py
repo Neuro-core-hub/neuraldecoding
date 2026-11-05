@@ -248,7 +248,7 @@ class DataSplitBlock(DataFormattingBlock):
 	Assumes the data dictionary contains 'neural' and 'behavior' keys, and the interpipe dictionary contains 'trial_idx'.
 	It uses `neuraldecoding.utils.data_split_trial` to perform the split.
 	"""
-	def __init__(self, split_ratio: 0.8, split_seed: 42, split_trials = False, location = ['neural', 'behavior'], interpipe_location = ['bin_trial_start_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None, whole_trials = False):
+	def __init__(self, split_ratio: 0.8, split_seed: 42, split_trials = False, location = ['neural', 'behavior'], interpipe_location = ['bin_trial_start_idx'], data_keys = ['neural_train', 'neural_test', 'behavior_train', 'behavior_test'], shuffle = False, masks_suffix = ['_train', '_val', '_test'], val_run = None, whole_trials = False, balance_classes=False):
 		"""
 		Initializes the DataSplitBlock.
 		Args:
@@ -266,7 +266,10 @@ class DataSplitBlock(DataFormattingBlock):
 				neighbouring bins never straddle the split. Unlike split_trials, which cuts the
 				session chronologically, this keeps every class in the test set when the task
 				cues classes in blocks. Takes precedence over split_trials.
-			
+			balance_classes (bool): With whole_trials, keep the same number of train trials for
+				every class (the smallest class's count); the extra trials are dropped from both
+				sets, so the test set is unchanged. Balances trials, not bins. Default False.
+
 		"""
 		super().__init__()
 		self.location = location
@@ -279,6 +282,7 @@ class DataSplitBlock(DataFormattingBlock):
 		self.masks_suffix = masks_suffix
 		self.val_run = val_run
 		self.whole_trials = whole_trials
+		self.balance_classes = balance_classes
 
 	def transform(self, data, interpipe):
 		"""
@@ -308,7 +312,12 @@ class DataSplitBlock(DataFormattingBlock):
 			import warnings
 			warnings.warn(f"DataSplitBlock requires {self.interpipe_location[0]} in interpipe from other wrappers (Dict2DataBlock). Falling back to direct split.")
 
-		if self.whole_trials and trial_idxs is not None and isinstance(self.split_ratio, float):
+		whole_trial_split = self.whole_trials and trial_idxs is not None and isinstance(self.split_ratio, float)
+		if self.balance_classes and not whole_trial_split:
+			import warnings
+			warnings.warn("DataSplitBlock: balance_classes only applies with whole_trials and a float split_ratio. Ignoring it.")
+
+		if whole_trial_split:
 			split_data, masks = self._split_whole_trials_stratified(
 				data[self.location[0]], data[self.location[1]], trial_idxs)
 		elif self.split_trials and not self.whole_trials:
@@ -363,6 +372,7 @@ class DataSplitBlock(DataFormattingBlock):
 		y_np = y_np.reshape(n, -1)[:, 0] if n else y_np
 		rng = np.random.default_rng(self.split_seed)
 		test_trials = []
+		train_by_class = {}
 		trial_class = {}
 		for t in range(len(starts)):
 			seg = y_np[bounds[t]:bounds[t + 1]]
@@ -377,10 +387,20 @@ class DataSplitBlock(DataFormattingBlock):
 			if len(trials) >= 2:
 				n_test = min(max(n_test, 1), len(trials) - 1)
 			test_trials += trials[len(trials) - n_test:] if n_test else []
+			train_by_class[c] = trials[:len(trials) - n_test]
+		# balance_classes: every class keeps as many train trials as the smallest
+		# class; the extras are dropped from both sets.
+		dropped = []
+		if self.balance_classes and train_by_class:
+			n_keep = min(len(t) for t in train_by_class.values())
+			for trials in train_by_class.values():
+				dropped += trials[n_keep:]
 		test_mask = np.zeros(n, dtype=bool)
 		for t in test_trials:
 			test_mask[bounds[t]:bounds[t + 1]] = True
 		train_mask = ~test_mask
+		for t in dropped:
+			train_mask[bounds[t]:bounds[t + 1]] = False
 		if torch.is_tensor(x):
 			train_mask_t = torch.as_tensor(train_mask, device=x.device)
 			test_mask_t = torch.as_tensor(test_mask, device=x.device)
