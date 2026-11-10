@@ -87,7 +87,8 @@ class FeatureExtractor:
     
     def _validate_config(self):
         """Validate the configuration parameters."""
-        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length']
+        valid_features = ['mav', 'power', 'mean', 'var', 'mean_and_vel', 'history', 'vel', 'line_length', 'zero_crossings',
+                          'log_mav', 'log_line_length']
         
         # Flatten nested feature types for validation
         def flatten_feature_types(ft):
@@ -592,7 +593,7 @@ class FeatureExtractor:
         # Calculate expected base feature size
         base_feature_size = 0
         for ft in base_feature_types:
-            if ft in ['mav', 'power', 'mean', 'var']:
+            if ft in ['mav', 'power', 'mean', 'var', 'zero_crossings', 'log_mav', 'log_line_length']:
                 # These produce one feature per channel
                 dimensions = self._get_dimensions_for_array(array_index)
                 base_feature_size += dimensions
@@ -621,7 +622,7 @@ class FeatureExtractor:
         # Calculate base feature size 
         base_feature_size = 0
         for ft in base_feature_types:
-            if ft in ['mav', 'power', 'mean', 'var']:
+            if ft in ['mav', 'power', 'mean', 'var', 'zero_crossings', 'log_mav', 'log_line_length']:
                 dimensions = self._get_dimensions_for_array(array_index)
                 base_feature_size += dimensions
             elif ft == 'mean_and_vel':
@@ -713,6 +714,31 @@ class FeatureExtractor:
             if data.shape[0] <= 1:
                 return np.zeros(data.shape[1])
             return np.sum(np.abs(np.diff(data, axis=0)), axis=0)
+        elif feature_type == "zero_crossings":
+            # Hudgins et al. 1993; Zhou et al. 2007 Eq. 2: count k with x_k * x_{k+1} < 0 and |x_k - x_{k+1}| >= zc_threshold.
+            # zc_threshold is in raw signal units, scalar or one per channel; without it noise crossings dominate at rest.
+            # Sign bits instead of the product so a crossing through a sample that is exactly 0 counts once, not never.
+            if data.shape[0] <= 1:
+                return np.zeros(data.shape[1])
+            d = np.asarray(data, dtype=float)
+            if feature_params.get('zc_remove_mean', True):
+                d = d - d.mean(axis=0, keepdims=True)
+            thr = np.asarray(feature_params.get('zc_threshold', 0.0), dtype=float)
+            s = np.signbit(d)
+            crossed = (s[:-1] != s[1:]) & (np.abs(np.diff(d, axis=0)) >= thr)
+            return crossed.sum(axis=0).astype(float)
+        elif feature_type == "log_mav":
+            # log(1 + MAV), MAV = mean |x| over the bin. The +1 keeps a silent channel finite. The log makes the
+            # LDA's linear boundary act on amplitude ratios rather than differences (rpni_lowerlimb_analyses: log MAV +
+            # log line length beat MAV + line length + zero crossings on visits 18, 19 and 21, ICORR FINDINGS.md).
+            return np.log1p(np.mean(np.abs(np.asarray(data, dtype=float)), axis=0))
+        elif feature_type == "log_line_length":
+            # log(1 + mean |x_k+1 - x_k|): line length per sample step (line_length / (n - 1)), then log1p. Per step
+            # rather than summed so its scale matches log_mav's; with log_mav, log_line_length - log_mav is roughly
+            # the log of the signal's frequency, which a linear decoder can form itself.
+            if data.shape[0] <= 1:
+                return np.zeros(data.shape[1])
+            return np.log1p(np.mean(np.abs(np.diff(np.asarray(data, dtype=float), axis=0)), axis=0))
         else:
             raise ValueError(f"Unsupported feature type: {feature_type}")
     
