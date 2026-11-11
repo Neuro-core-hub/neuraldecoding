@@ -70,7 +70,16 @@ class Dataset:
         Combines them into a new NWB file using the first file as the template and adding on top
         """
         self.io = NWBHDF5IO(self.cfg.dataset_parameters.nwb_files[0], mode="r")
-        self.dataset = self.copy_nwb_contents(self.io.read())
+        first = self.io.read()
+        self.dataset = self.copy_nwb_contents(first)
+        self._check_exclude_keys()
+        excl = self._excluded_label_rows(first, self.cfg.dataset_parameters.nwb_files[0])
+        if excl is not None:
+            p = self.dataset.acquisition.pop("patterns")
+            data = np.array(p.data[:], copy=True)
+            data[excl] = 0
+            self.dataset.add_acquisition(TimeSeries(name="patterns", data=data, timestamps=p.timestamps[:],
+                                                    unit=p.unit, description=p.description))
         dataset_sizes = [len(self.dataset.acquisition["neural"].timestamps[:])]
         for idx, nwb_file in enumerate(self.cfg.dataset_parameters.nwb_files[1:]):
             idx = idx + 1  # since we skipped the first file
@@ -80,6 +89,7 @@ class Dataset:
             # Read the NWB file
             with NWBHDF5IO(nwb_file, mode="r") as io:
                 nwbdata = io.read()
+                excl = self._excluded_label_rows(nwbdata, nwb_file)
                 # Assume there is neural data instantly at the start of each run
                 timestamp_offset = nwbdata.acquisition["neural"].timestamps[0] - self.dataset.acquisition["neural"].timestamps[-1]
                 
@@ -117,6 +127,9 @@ class Dataset:
                     additional_patterns = nwbdata.acquisition["patterns"].data[:]
                     if additional_patterns.ndim == 1:
                         additional_patterns = additional_patterns.reshape(-1, 1)
+                    if excl is not None:
+                        additional_patterns = np.array(additional_patterns, copy=True)
+                        additional_patterns[excl] = 0
                     additional_patterns = np.hstack([np.zeros((additional_patterns.shape[0], new_patterns.shape[1])), additional_patterns])
                     new_patterns = np.hstack([new_patterns, np.zeros((new_patterns.shape[0], nwbdata.acquisition["patterns"].data.shape[1]))])
                     # Vstack new and additional patterns
@@ -135,6 +148,9 @@ class Dataset:
                     additional_data = nwbdata.acquisition["patterns"].data[:]
                     if additional_data.ndim == 1:
                         additional_data = additional_data.reshape(-1, 1)
+                    if excl is not None:
+                        additional_data = np.array(additional_data, copy=True)
+                        additional_data[excl] = 0
                     old_names = eval(old_patterns.unit)
                     additional_names = eval(nwbdata.acquisition["patterns"].unit)
                     merged_names = old_names + [name for name in additional_names if name not in old_names]
@@ -179,6 +195,41 @@ class Dataset:
         self.dataset_ratio = dataset_sizes / np.sum(dataset_sizes)
         print(f"Dataset ratio overridden: {self.dataset_ratio}")
         
+    def _exclude_map(self):
+        """dataset_parameters.exclude_trials: {run name (file name without .nwb): [trial numbers]}."""
+        excl = self.cfg.dataset_parameters.get("exclude_trials", None) or {}
+        return {str(k): [int(n) for n in (v or [])] for k, v in dict(excl).items()}
+
+    def _check_exclude_keys(self):
+        """Stop on an exclude_trials run that is not in nwb_files (a typo would silently exclude nothing)."""
+        runs = {os.path.splitext(os.path.basename(f))[0] for f in self.cfg.dataset_parameters.nwb_files}
+        unknown = sorted(set(self._exclude_map()) - runs)
+        if unknown:
+            raise ValueError(f"exclude_trials names runs that are not in nwb_files: {unknown} (nwb_files: {sorted(runs)})")
+
+    def _excluded_label_rows(self, nwbdata, nwb_file):
+        """Rows of this file's patterns stream inside its excluded trials (start to stop), or None.
+        Trials are numbered 1.. in start-time order, as tools/lower_limb/LL01/review_runs.py shows them.
+        Only the in-memory labels are cleared: training drops unlabelled bins; the file is not changed."""
+        run = os.path.splitext(os.path.basename(nwb_file))[0]
+        nums = self._exclude_map().get(run, [])
+        if not nums:
+            return None
+        if nwbdata.trials is None or "patterns" not in nwbdata.acquisition:
+            raise ValueError(f"exclude_trials: {run} has no trial table or no patterns stream")
+        trials = nwbdata.trials.to_dataframe().sort_values("start_time").reset_index(drop=True)
+        bad = [n for n in nums if not 1 <= n <= len(trials)]
+        if bad:
+            raise ValueError(f"exclude_trials: {run} has trials 1..{len(trials)}, not {bad}")
+        ts = np.asarray(nwbdata.acquisition["patterns"].timestamps[:])
+        mask = np.zeros(len(ts), dtype=bool)
+        for n in nums:
+            tr = trials.iloc[n - 1]
+            mask |= (ts >= tr["start_time"]) & (ts <= tr["stop_time"])
+        print(f"exclude_trials: {run}: trials {sorted(nums)} left out of training "
+              f"({int(mask.sum())} pattern samples inside them unlabelled; the NWB file is not changed)")
+        return mask
+
     def _load_data_nwb(self):
         """
         Load data from NWB file
