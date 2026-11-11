@@ -1,12 +1,14 @@
-dataset_type: zstruct
+dataset_type: nwb
 autoload: True
+# save_path: /mnt/z/Data/Humans/RPNI/C-P2/2026-11-06/Run-021/Run-021.nwb
 save_path: null
 dataset_parameters:
   overwrite: False
   experiment_type: human_emg
-  server_dir: Z:\Data\Humans\RPNI
+  server_dir: /mnt/z/Data/Humans/RPNI
   alt_filepath: null
-  subject: "C-P2"
+  subject: "Test"
   subject_id: "Wingnut"
-  date: 2025-06-02
-  run: 4
+  nwb_file: "/mnt/z/Data/Humans/RPNI/Test/2026-11-10/Run-003/Run-003.nwb"
+  date: 2026-11-10
+  run: 3

@@ -2876,3 +2876,46 @@ class LSTMDenoiseReplacementBlock(DataProcessingBlock):
 			data[loc_neu] = predicted_behavior
 		
 		return data, interpipe
+
+class ResampleInterpolateBlock(DataProcessingBlock):
+        """
+        Resample a stream onto a uniform time grid, linearly interpolating over NaN
+        samples and missing rows (e.g. MediaPipe tracking dropouts with on_missing: nan,
+        or dropped camera frames). Leading/trailing gaps hold the nearest valid value.
+        Offline only: needs samples after the gap, so it has no online counterpart.
+        """
+        def __init__(self, location: str, location_ts: str, fs_hz: float = 100):
+                """
+                Args:
+                        location (str): data key of the stream to resample (e.g. 'behavior').
+                        location_ts (str): interpipe key of its timestamps, in ms (e.g. 'behavior_ts').
+                        fs_hz (float): output sampling rate.
+                """
+                super().__init__()
+                self.location = location
+                self.location_ts = location_ts
+                self.fs_hz = fs_hz
+
+        def transform(self, data, interpipe):
+                x = np.asarray(data[self.location], dtype=float)
+                x = x.reshape(len(x), -1)
+                t = np.asarray(interpipe[self.location_ts], dtype=float)  # ms
+                if len(t) != len(x):
+                        raise ValueError(f"'{self.location}' has {len(x)} rows but '{self.location_ts}' has {len(t)}")
+
+                t_new = np.arange(t[0], t[-1], 1000.0 / self.fs_hz)
+                out = np.empty((len(t_new), x.shape[1]))
+                for j in range(x.shape[1]):
+                        ok = ~np.isnan(x[:, j])
+                        if not ok.any():
+                                raise ValueError(f"Column {j} of '{self.location}' is all NaN")
+                        out[:, j] = np.interp(t_new, t[ok], x[ok, j])
+
+                nan_frac = np.isnan(x).any(axis=1).mean()
+                max_gap_ms = np.diff(t[~np.isnan(x).any(axis=1)]).max() if (~np.isnan(x).any(axis=1)).sum() > 1 else np.nan
+                print(f"[ResampleInterpolateBlock] {self.location}: {nan_frac:.1%} of rows NaN, "
+                          f"longest gap {max_gap_ms:.0f} ms, {len(t)} -> {len(t_new)} samples @ {self.fs_hz} Hz")
+
+                data[self.location] = out
+                interpipe[self.location_ts] = t_new
+                return data, interpipe

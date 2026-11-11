@@ -623,11 +623,20 @@ class MixedDOFScaler:
     def __init__(self, scalers):
         self.scalers = scalers
 
+    # Each DoF's scaler gets its column as (n, 1): sklearn scalers (dof_selections 0)
+    # reject 1-D input, and the rank PercentileScaler works on either shape.
+    def _per_column(self, data, method):
+        data = np.asarray(data)
+        if data.ndim == 1:
+            data = data.reshape(1, -1)  # one sample
+        return np.column_stack([np.ravel(getattr(scaler, method)(data[:, i:i + 1]))
+                                for i, scaler in enumerate(self.scalers)])
+
     def transform(self, data):
-        return np.column_stack([scaler.transform(data[:, i]) for i, scaler in enumerate(self.scalers)])
+        return self._per_column(data, 'transform')
 
     def inverse_transform(self, data):
-        return np.column_stack([scaler.inverse_transform(data[:, i]) for i, scaler in enumerate(self.scalers)])
+        return self._per_column(data, 'inverse_transform')
     
 class PercentileScaler:
     """Maps the min percentile -> 0 and the max percentile -> 1, per column (10th/90th by default)."""
