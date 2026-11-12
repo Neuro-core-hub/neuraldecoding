@@ -111,6 +111,14 @@ class Dataset:
                     if 'trial_count' in trials_df.columns:
                         trials_df['trial_count'] = trials_df['trial_count'] + trial_count_offset
                     
+                    # merge_by_name: the trial targets are one-hot over each run's own patterns (a Posh
+                    # calibration run: 3, a cued run: 9). Put them in the first run's target_names order,
+                    # so every trial has the same length (patterns themselves are merged by name below).
+                    if (self.cfg.dataset_parameters.patterns_add_mode == "merge_by_name"
+                            and 'targets' in trials_df.columns and 'target_names' in trials_df.columns
+                            and self.dataset.trials is not None and 'target_names' in self.dataset.trials.colnames):
+                        trials_df = self._targets_by_name(trials_df, list(self.dataset.trials['target_names'][0]), nwb_file)
+
                     # Add adjusted trials to the dataset
                     for _, trial in trials_df.iterrows():
                         self.dataset.add_trial(**trial.to_dict())
@@ -195,6 +203,32 @@ class Dataset:
         self.dataset_ratio = dataset_sizes / np.sum(dataset_sizes)
         print(f"Dataset ratio overridden: {self.dataset_ratio}")
         
+    @staticmethod
+    def _targets_by_name(trials_df, names, nwb_file):
+        """Trial targets / target_names of an appended run re-ordered to `names` (the first run's).
+        A name the first run doesn't have is dropped from the targets only (its labels stay in patterns)."""
+        def text(v):
+            return v.decode() if isinstance(v, bytes) else str(v)
+        names = [text(n) for n in names]
+        missing = set()
+        new_targets = []
+        for tg, tn in zip(trials_df['targets'], trials_df['target_names']):
+            tg, tn = np.asarray(tg, dtype=float).ravel(), [text(n) for n in tn]
+            out = np.zeros(len(names))
+            for v, n in zip(tg, tn):
+                if n in names:
+                    out[names.index(n)] = v
+                else:
+                    missing.add(n)
+            new_targets.append(out)
+        if missing:
+            print(f"{nwb_file}: trial targets {sorted(missing)} are not in the first run's target_names; "
+                  f"dropped from the trial targets (their pattern labels are kept)")
+        trials_df = trials_df.copy()
+        trials_df['targets'] = new_targets
+        trials_df['target_names'] = [list(names)] * len(trials_df)
+        return trials_df
+
     def _exclude_map(self):
         """dataset_parameters.exclude_trials: {run name (file name without .nwb): [trial numbers]}."""
         excl = self.cfg.dataset_parameters.get("exclude_trials", None) or {}
