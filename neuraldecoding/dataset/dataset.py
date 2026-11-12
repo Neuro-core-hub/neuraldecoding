@@ -199,10 +199,29 @@ class Dataset:
                     new_continuous_timestamps = np.concatenate([old_continuous.timestamps[:], nwbdata.acquisition["continuous"].timestamps[:] - timestamp_offset])
                     self.dataset.add_acquisition(TimeSeries(name="continuous", data=new_continuous, timestamps=new_continuous_timestamps, description=old_continuous.description, unit=old_continuous.unit))
 
+        if self.cfg.dataset_parameters.patterns_add_mode == "merge_by_name":
+            self._sort_pattern_columns()
         dataset_sizes = np.array(dataset_sizes)
         self.dataset_ratio = dataset_sizes / np.sum(dataset_sizes)
         print(f"Dataset ratio overridden: {self.dataset_ratio}")
         
+    def _sort_pattern_columns(self):
+        """merge_by_name: pattern columns in alphabetical order, so the class numbers never depend on
+        which runs come first. A run with all patterns is already sorted (rdb2nwb writes them sorted);
+        runs with one pattern each (e.g. 5 reps of one movement per run) would otherwise number the
+        classes in run order, and the decoder graphs' class_names expect the alphabetical order."""
+        p = self.dataset.acquisition["patterns"]
+        names = list(eval(p.unit))
+        order = sorted(range(len(names)), key=lambda i: names[i])
+        if order == list(range(len(names))):
+            return
+        self.dataset.acquisition.pop("patterns")
+        data = np.asarray(p.data[:])
+        data = data.reshape(-1, 1) if data.ndim == 1 else data
+        self.dataset.add_acquisition(TimeSeries(name="patterns", data=data[:, order], timestamps=p.timestamps[:],
+                                                unit=str([names[i] for i in order]), description=p.description))
+        print(f"Pattern columns sorted by name (were in run order): {[names[i] for i in order]}")
+
     @staticmethod
     def _targets_by_name(trials_df, names, nwb_file):
         """Trial targets / target_names of an appended run re-ordered to `names` (the first run's).
@@ -221,9 +240,9 @@ class Dataset:
                 else:
                     missing.add(n)
             new_targets.append(out)
-        if missing:
-            print(f"{nwb_file}: trial targets {sorted(missing)} are not in the first run's target_names; "
-                  f"dropped from the trial targets (their pattern labels are kept)")
+        if missing:   # harmless: training labels come from the patterns stream, not the trial targets
+            print(f"{os.path.basename(str(nwb_file))}: trial targets {sorted(missing)} not in the first run's "
+                  f"(training labels unaffected)")
         trials_df = trials_df.copy()
         trials_df['targets'] = new_targets
         trials_df['target_names'] = [list(names)] * len(trials_df)
